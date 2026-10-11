@@ -4,29 +4,48 @@ import SwiftUI
 /// Watches raw trackpad touches for Den's three-finger vertical swipe. The
 /// overview follows the fingers continuously (`onOverviewDrag` with progress
 /// in levels: +1 = one level deeper) and settles on release
-/// (`onOverviewEnd`). Works anywhere in the window.
+/// (`onOverviewEnd`). Works anywhere in the window except the title bar,
+/// where a three-finger drag moves the window as in every other app.
 final class DenWindow: NSWindow {
     var onOverviewDrag: ((CGFloat) -> Void)?
     var onOverviewEnd: ((CGFloat) -> Void)?
     /// Fingers currently on the trackpad, from touch events.
     private(set) var touchCount = 0
-    private var startY: CGFloat?
-    private var progress: CGFloat = 0
-    /// A mouse drag synthesized from three fingers ("three finger drag") is
-    /// being dropped until its mouse up.
+    private var swipe = Swipe.idle
+    /// A mouse drag synthesized from three fingers ("three finger drag") over
+    /// the terminal is being dropped until its mouse up.
     private var swallowingDrag = false
+
+    private enum Swipe {
+        case idle
+        case tracking(startY: CGFloat, progress: CGFloat)
+        /// The fingers are moving the window; ignored until they lift.
+        case movingWindow
+    }
 
     /// Swiping this fraction of the trackpad's height moves one level.
     private static let levelDistance: CGFloat = 0.28
+
+    override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
+        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+        // However the move starts (our drag or the window server's), a moving
+        // window must not also be opening the overview.
+        NotificationCenter.default.addObserver(forName: NSWindow.willMoveNotification, object: self, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cancelSwipeForWindowMove() }
+        }
+    }
 
     override func sendEvent(_ event: NSEvent) {
         switch event.type {
         case .gesture, .beginGesture, .endGesture:
             track(event)
-        case .leftMouseDown:
-            // "Three finger drag" turns the swipe into a mouse drag, which
-            // would move the window from the title bar. Swallow all of it.
-            if touchCount >= 3 || startY != nil {
+        case .leftMouseDown where touchCount >= 3:
+            // "Three finger drag" turns the swipe into a mouse drag. Over the
+            // title bar it should move the window like anywhere else in
+            // macOS; over the terminal it is the overview swipe, so drop it.
+            if isTitleBar(event.locationInWindow) {
+                cancelSwipeForWindowMove()
+            } else {
                 swallowingDrag = true
                 return
             }
@@ -46,22 +65,38 @@ final class DenWindow: NSWindow {
     private func track(_ event: NSEvent) {
         let touches = event.touches(matching: .touching, in: nil)
         touchCount = touches.count
-        // The window server can drag a window by its title bar without the
-        // app seeing the mouse events, so lock the window itself.
-        isMovable = touches.count < 3 && startY == nil
-        if touches.count == 3 {
-            // Normalized y grows upward; swiping down goes deeper.
-            let y = touches.map(\.normalizedPosition.y).reduce(0, +) / 3
-            if startY == nil { startY = y }
-            progress = ((startY ?? y) - y) / Self.levelDistance
+        // Normalized y grows upward; swiping down goes deeper.
+        let y = touches.map(\.normalizedPosition.y).reduce(0, +) / CGFloat(max(touches.count, 1))
+        switch swipe {
+        case .movingWindow:
+            if touches.isEmpty { swipe = .idle }
+        case .idle:
+            if touches.count == 3 { swipe = .tracking(startY: y, progress: 0) }
+        case .tracking(let startY, _) where touches.count == 3:
+            let progress = (startY - y) / Self.levelDistance
+            swipe = .tracking(startY: startY, progress: progress)
             onOverviewDrag?(progress)
-            return
+        case .tracking(_, let progress):
+            swipe = .idle
+            onOverviewEnd?(progress)
         }
-        guard startY != nil else { return }
-        startY = nil
-        isMovable = true
-        onOverviewEnd?(progress)
-        progress = 0
+    }
+
+    private func cancelSwipeForWindowMove() {
+        if case .tracking = swipe { onOverviewEnd?(0) }
+        if touchCount > 0 { swipe = .movingWindow }
+    }
+
+    /// The tab bar or sidebar header: anything in the top band that isn't a
+    /// live terminal (peek thumbnails count as terminal).
+    private func isTitleBar(_ point: NSPoint) -> Bool {
+        guard let content = contentView, point.y >= content.bounds.height - TitleBar.height else { return false }
+        var view = content.hitTest(point)
+        while let current = view {
+            if current is TerminalView { return false }
+            view = current.superview
+        }
+        return true
     }
 }
 

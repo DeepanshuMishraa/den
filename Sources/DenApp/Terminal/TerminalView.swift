@@ -50,6 +50,9 @@ final class TerminalView: MTKView {
         isPaused = true
         enableSetNeedsDisplay = true
         autoResizeDrawable = true
+        // Mid-resize, keep the last frame pinned at its origin instead of
+        // stretching it; the redraw at the new size follows immediately.
+        layerContentsPlacement = .topLeft
         layer?.isOpaque = false
         clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         renderState = try? VTRenderState()
@@ -162,6 +165,9 @@ final class TerminalView: MTKView {
         super.setFrameSize(newSize)
         let w = NSScroller.scrollerWidth(for: .small, scrollerStyle: .overlay)
         scroller.frame = NSRect(x: newSize.width - w - 2, y: 2, width: w, height: max(newSize.height - 4, 0))
+        // Drawing is on demand, so a new size needs an explicit redraw or the
+        // pane shows the old frame until the server's reflow arrives.
+        needsDisplay = true
         reportSize()
     }
 
