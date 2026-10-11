@@ -171,8 +171,8 @@ public actor DenServer {
         switch message {
         case .hello(let version, let client):
             conn.name = client
-            guard version == protocolVersion else {
-                send(.error("dend speaks protocol \(protocolVersion) but \(client) sent \(version). Restart dend or update the client."), to: conn)
+            guard (minimumProtocolVersion ... protocolVersion).contains(version) else {
+                send(.error("dend speaks protocol \(minimumProtocolVersion)–\(protocolVersion) but \(client) sent \(version). Restart dend or update the client."), to: conn)
                 return
             }
             log("client \(client)#\(conn.id) connected")
@@ -261,6 +261,13 @@ public actor DenServer {
                 session.tabs[i].root = session.tabs[i].root.settingRatio(at: path[...], to: min(max(ratio, 0.1), 0.9))
                 broadcastLayout(session)
             }
+
+        case .movePane(let pane, let target, let placement):
+            guard let sid = paneSession[pane], let session = session(sid),
+                  let i = session.tabs.firstIndex(where: { $0.root.contains(pane) }),
+                  let moved = session.tabs[i].root.moving(pane, to: target, placement: placement) else { return }
+            session.tabs[i].root = moved
+            broadcastLayout(session)
 
         case .closePane(let id):
             log("client \(conn.name)#\(conn.id) closed \(id)")

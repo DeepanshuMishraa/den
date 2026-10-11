@@ -1,3 +1,6 @@
 [submodule "vendor/ghostty"]
 	path = vendor/ghostty
 	url = https://github.com/ghostty-org/ghostty.git
+[submodule "vendor/fsearch"]
+	path = vendor/fsearch
+	url = https://github.com/noahdunnagan/fsearch.git

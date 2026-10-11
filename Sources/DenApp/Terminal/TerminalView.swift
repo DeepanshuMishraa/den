@@ -365,16 +365,32 @@ final class TerminalView: MTKView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // ⌘-drag picks the pane up to move it.
+        if mode == .interactive, event.modifierFlags.contains(.command), let model, model.beginPaneDrag(paneID, at: windowPoint(event)) {
+            draggingPane = true
+            NSCursor.closedHand.set()
+            return
+        }
         if wantsSelection(event) { return select(event, .press) }
         mouseReport(event, .press, .left)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if draggingPane {
+            draggingPane = false
+            model?.endPaneDrag()
+            updateCursor(event.modifierFlags)
+            return
+        }
         if selecting { return select(event, .release) }
         mouseReport(event, .release, .left)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if draggingPane {
+            NSCursor.closedHand.set()
+            return model?.updatePaneDrag(at: windowPoint(event)) ?? ()
+        }
         if selecting { return select(event, .drag) }
         mouseReport(event, .motion, .left)
     }
@@ -383,7 +399,32 @@ final class TerminalView: MTKView {
     override func rightMouseUp(with event: NSEvent) { mouseReport(event, .release, .right) }
     override func otherMouseDown(with event: NSEvent) { mouseReport(event, .press, .middle) }
     override func otherMouseUp(with event: NSEvent) { mouseReport(event, .release, .middle) }
-    override func mouseMoved(with event: NSEvent) { mouseReport(event, .motion, nil) }
+    override func mouseMoved(with event: NSEvent) {
+        updateCursor(event.modifierFlags)
+        mouseReport(event, .motion, nil)
+    }
+
+    /// Holding ⌘ over a pane shows it can be grabbed.
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        guard let window, bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+        updateCursor(event.modifierFlags)
+    }
+
+    private var draggingPane = false
+
+    private func updateCursor(_ flags: NSEvent.ModifierFlags) {
+        guard mode == .interactive, !draggingPane else { return }
+        let movable = (model?.activeLayout?.root.panes.count ?? 0) > 1
+        (flags.contains(.command) && movable ? NSCursor.openHand : NSCursor.iBeam).set()
+    }
+
+    /// The event's position in window coordinates with the origin top-left,
+    /// matching SwiftUI's global space.
+    private func windowPoint(_ event: NSEvent) -> CGPoint {
+        let height = window?.contentView?.bounds.height ?? 0
+        return CGPoint(x: event.locationInWindow.x, y: height - event.locationInWindow.y)
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -393,7 +434,7 @@ final class TerminalView: MTKView {
     }
 
     override func cursorUpdate(with event: NSEvent) {
-        NSCursor.iBeam.set()
+        updateCursor(NSEvent.modifierFlags)
     }
 
     /// Selection wins unless the program tracks the mouse; shift forces it.

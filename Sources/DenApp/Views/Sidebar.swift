@@ -33,14 +33,21 @@ struct Sidebar: View {
                     .padding(.top, 6)
                     .padding(.bottom, 4)
 
-                    if model.activityMode {
-                        ActivityList()
-                    } else {
-                        ForEach(model.orderedSessions, id: \.id) { session in
-                            SessionHeader(session: session)
-                            ForEach(model.tabs(in: session.id), id: \.id) { tab in
-                                SidebarRow(tab: tab, selected: session.id == model.currentSession && tab.id == model.activeTab)
+                    // Like Rex, the list blurs across when the mode flips.
+                    Group {
+                        if model.activityMode {
+                            ActivityList()
+                                .transition(.blurReplace)
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(model.orderedSessions, id: \.id) { session in
+                                    SessionHeader(session: session)
+                                    ForEach(model.tabs(in: session.id), id: \.id) { tab in
+                                        SidebarRow(tab: tab, selected: session.id == model.currentSession && tab.id == model.activeTab)
+                                    }
+                                }
                             }
+                            .transition(.blurReplace)
                         }
                     }
                 }
@@ -100,14 +107,13 @@ private struct ActivityList: View {
             // TimelineView centers loose content; keep rows in a leading stack.
             VStack(alignment: .leading, spacing: 2) {
             let now = context.date
-            let groups = model.orderedSessions.compactMap { session -> (SessionSummary, [(TabLayout, TabActivity)])? in
-                let rows = model.tabs(in: session.id).compactMap { tab -> (TabLayout, TabActivity)? in
-                    if let activity = model.activity(of: tab, now: now) { return (tab, activity) }
-                    guard session.id == model.currentSession, tab.id == model.activeTab else { return nil }
-                    return (tab, TabActivity(state: .idle, detail: "No agent running", since: now))
-                }
+            let agents = model.orderedSessions.compactMap { session -> (SessionSummary, [(TabLayout, TabActivity)])? in
+                let rows = model.tabs(in: session.id).compactMap { tab in model.activity(of: tab, now: now).map { (tab, $0) } }
                 return rows.isEmpty ? nil : (session, rows)
             }
+            // Like Rex, other tabs drop out, the one on screen included;
+            // only with no agent anywhere does it stay, so the list isn't bare.
+            let groups = agents.isEmpty ? currentTabOnly(now: now) : agents
             ForEach(groups, id: \.0.id) { session, rows in
                 SessionHeader(session: session)
                 ForEach(rows, id: \.0.id) { tab, activity in
@@ -118,6 +124,11 @@ private struct ActivityList: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func currentTabOnly(now: Date) -> [(SessionSummary, [(TabLayout, TabActivity)])] {
+        guard let session = model.currentSummary, let tab = model.activeLayout else { return [] }
+        return [(session, [(tab, TabActivity(state: .idle, detail: "No agent running", since: now))])]
     }
 }
 
@@ -189,7 +200,7 @@ struct SidebarRow: View {
         let status = selected ? nil : model.status(of: tab)
         let theme = model.theme
         HStack(spacing: 9) {
-            DeckIcon(deck: model.deck(for: tab), height: 16, badge: !selected && model.hasActivity(tab), fan: .up)
+            DeckIcon(deck: model.deck(for: tab), height: 14, badge: !selected && model.hasActivity(tab), fan: .up)
             SidebarTitle(title: model.tabTitle(tab), theme: theme)
             Spacer(minLength: 2)
             if hovering {
@@ -203,11 +214,11 @@ struct SidebarRow: View {
             }
         }
         .padding(.horizontal, 9)
-        .frame(height: 32)
+        .frame(height: 28)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -227,12 +238,12 @@ struct ActivityRow: View {
 
     var body: some View {
         let theme = model.theme
-        HStack(spacing: 10) {
-            DeckIcon(deck: model.deck(for: tab), height: 16, badge: !selected && (model.hasActivity(tab) || model.status(of: tab)?.wantsAttention == true), fan: .up)
+        HStack(spacing: 9) {
+            DeckIcon(deck: model.deck(for: tab), height: 14, badge: !selected && (model.hasActivity(tab) || model.status(of: tab)?.wantsAttention == true), fan: .up)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(model.tabTitle(tab))
-                        .font(.system(size: 13.5, weight: .medium))
+                        .font(.system(size: 13))
                         .foregroundStyle(selected ? theme.chromeText : theme.chromeText.opacity(0.88))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -241,24 +252,24 @@ struct ActivityRow: View {
                 }
                 HStack(spacing: 6) {
                     Text(activity.detail)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(theme.tertiaryText)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(TabActivity.age(since: activity.since, now: now))
-                        .font(.system(size: 11.5).monospacedDigit())
+                        .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(theme.tertiaryText)
                 }
             }
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 12)
-        .frame(height: 48)
+        .padding(.leading, 9)
+        .padding(.trailing, 10)
+        .frame(height: 40)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -312,7 +323,7 @@ struct SidebarTitle: View {
                 Text(title).foregroundStyle(theme.chromeText)
             }
         }
-        .font(.system(size: 13.5))
+        .font(.system(size: 13))
         .lineLimit(1)
         .truncationMode(.tail)
     }

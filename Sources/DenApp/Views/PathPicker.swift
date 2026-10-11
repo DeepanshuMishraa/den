@@ -194,13 +194,18 @@ struct PathPickerOverlay: View {
             shown = model.recentPaths.prefix(8).map { PathEntry(path: $0, isDirectory: false, isRecent: true) }
         }
         entries = shown
-        guard !query.fragment.isEmpty else { return }
+        // A typed folder lists just that folder, like a shell completing a
+        // path; fsearch is for bare names.
+        guard query.directory == nil, !query.fragment.isEmpty else {
+            if entries.isEmpty, !query.fragment.isEmpty { note = "Nothing here matches “\(query.fragment)”." }
+            return
+        }
 
         // Deeper and whole-disk matches from fsearch, after a beat so fast
         // typing doesn't queue a search per keystroke.
         try? await Task.sleep(for: .milliseconds(60))
         guard !Task.isCancelled else { return }
-        switch await PathSearch.shared.search(query.fragment, in: query.directory, limit: 80) {
+        switch await PathSearch.shared.search(query.fragment, limit: 120) {
         case .success(let hits):
             guard !Task.isCancelled else { return }
             let known = Set(entries.map(\.path))
@@ -211,7 +216,7 @@ struct PathPickerOverlay: View {
         case .failure(.notInstalled):
             if entries.isEmpty {
                 note = query.directory == nil
-                    ? "Whole-disk search needs fsearch in ~/.local/bin. Type a folder path to browse."
+                    ? "Whole-disk search needs fsearch, which this build of Den doesn't include. Type a folder path to browse."
                     : "Nothing here matches “\(query.fragment)”."
             }
         case .failure(.indexing):

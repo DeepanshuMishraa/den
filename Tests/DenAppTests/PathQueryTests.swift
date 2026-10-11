@@ -75,4 +75,21 @@ import Testing
         let hits = [entry("/Users/me/a/b/src", dir: true), entry("/Users/me/src", dir: true)]
         #expect(PathEntry.ranked(hits, matching: "src", under: "/Users/me").map(\.path) == ["/Users/me/src", "/Users/me/a/b/src"])
     }
+
+    /// Caches, app data and dependency trees never make the list.
+    @Test func hiddenLibraryAndDependencyFoldersAreNoise() {
+        let hits = [
+            entry("/Users/me/.cargo/registry/src/desktop", dir: true),
+            entry("/Users/me/Library/Application Support/Figma/Desktop", dir: true),
+            entry("/Users/me/code/app/node_modules/desktop", dir: true),
+            entry("/Users/me/code/app/desktop", dir: true),
+        ]
+        #expect(PathEntry.ranked(hits, matching: "desk", under: "/Users/me").map(\.path) == ["/Users/me/code/app/desktop"])
+    }
+
+    /// Asking for a dotfile by name still finds it.
+    @Test func dotQueryKeepsHiddenMatches() {
+        let hits = [entry("/Users/me/.config", dir: true)]
+        #expect(PathEntry.ranked(hits, matching: ".con", under: "/Users/me").map(\.path) == ["/Users/me/.config"])
+    }
 }

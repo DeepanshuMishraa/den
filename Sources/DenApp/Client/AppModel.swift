@@ -37,6 +37,8 @@ enum AppearanceMode: String, CaseIterable {
 @MainActor @Observable
 final class AppModel {
     private(set) var connectionState = ConnectionState.connecting
+    /// The protocol version the connected dend speaks (from its welcome).
+    private(set) var dendProtocol: UInt16 = 0
     private(set) var sessions: [SessionSummary] = []
     private(set) var layouts: [SessionID: SessionLayout] = [:]
     private(set) var currentSession: SessionID?
@@ -243,7 +245,9 @@ final class AppModel {
             )
             connection = conn
             await conn.start()
-            send(.hello(version: protocolVersion, client: "Den.app"))
+            // The oldest version we speak, so an older running dend still
+            // accepts us; its welcome says what it can do.
+            send(.hello(version: minimumProtocolVersion, client: "Den.app"))
             send(.subscribe)
         } catch {
             connectionState = .disconnected(error.description)
@@ -270,7 +274,8 @@ final class AppModel {
 
     private func handle(_ message: ServerMessage) {
         switch message {
-        case .welcome(_, let host):
+        case .welcome(let version, let host):
+            dendProtocol = version
             connectionState = .connected(host: host)
 
         case .sessions(let list):
@@ -521,6 +526,61 @@ final class AppModel {
     }
 
     func close(_ pane: PaneID) { send(.closePane(pane)) }
+
+    /// Moves `pane` beside `target` (or swaps them) within their tab. Needs
+    /// a dend that speaks protocol 4; an older one would drop the connection.
+    func movePane(_ pane: PaneID, to target: PaneID, placement: PanePlacement) {
+        guard dendProtocol >= 4 else {
+            lastError = "The running dend is older than this Den and can't move panes. Your panes are unchanged. Quit dend (its shells end) and reopen Den to use the new one."
+            return
+        }
+        send(.movePane(pane, to: target, placement: placement))
+    }
+
+    // MARK: ⌘-drag panes
+
+    struct PaneDragState: Equatable {
+        let source: PaneID
+        /// Pointer, in window (SwiftUI global) coordinates.
+        var point: CGPoint
+        var target: PaneID?
+        var placement: PanePlacement?
+    }
+    private(set) var paneDrag: PaneDragState?
+    /// Each visible pane's frame in window coordinates, for drop hit-testing.
+    @ObservationIgnored var paneFrames: [PaneID: CGRect] = [:]
+
+    /// Only when the tab has somewhere to move the pane to.
+    func beginPaneDrag(_ pane: PaneID, at point: CGPoint) -> Bool {
+        guard let tab = activeLayout, tab.root.contains(pane), tab.root.panes.count > 1 else { return false }
+        paneDrag = PaneDragState(source: pane, point: point)
+        return true
+    }
+
+    func updatePaneDrag(at point: CGPoint) {
+        guard var drag = paneDrag, let tab = activeLayout else { return }
+        drag.point = point
+        let target = tab.root.panes.first { $0 != drag.source && paneFrames[$0]?.contains(point) == true }
+        drag.target = target
+        drag.placement = target.flatMap { id in
+            paneFrames[id].map { frame in PaneDrag.placement(at: CGPoint(x: point.x - frame.minX, y: point.y - frame.minY), in: frame.size) }
+        }
+        if drag != paneDrag { paneDrag = drag }
+    }
+
+    /// Drops where the pointer is; outside any other pane it's a no-op.
+    func endPaneDrag() {
+        guard let drag = paneDrag else { return }
+        paneDrag = nil
+        if let target = drag.target, let placement = drag.placement { movePane(drag.source, to: target, placement: placement) }
+    }
+
+    /// Swaps the focused pane with its neighbor in `direction`; focus
+    /// travels with the pane.
+    func moveFocusedPane(_ direction: PaneDirection) {
+        guard let tab = activeLayout, let pane = focused, let neighbor = tab.root.neighbor(of: pane, toward: direction) else { return }
+        movePane(pane, to: neighbor, placement: .swap)
+    }
 
     func closeFocusedPane() { focused.map(close) }
 

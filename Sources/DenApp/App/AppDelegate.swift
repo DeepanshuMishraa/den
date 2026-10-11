@@ -190,6 +190,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item("Zoom Pane", "\r", [.command, .shift]) { model.toggleZoom() },
             item("Next Pane", "]") { model.cyclePane(1) },
             item("Previous Pane", "[") { model.cyclePane(-1) },
+            .separator(),
+            item("Move Pane Left", String(UnicodeScalar(NSLeftArrowFunctionKey).map(Character.init) ?? "←"), [.command, .option], animate { model.moveFocusedPane(.left) }),
+            item("Move Pane Right", String(UnicodeScalar(NSRightArrowFunctionKey).map(Character.init) ?? "→"), [.command, .option], animate { model.moveFocusedPane(.right) }),
+            item("Move Pane Up", String(UnicodeScalar(NSUpArrowFunctionKey).map(Character.init) ?? "↑"), [.command, .option], animate { model.moveFocusedPane(.up) }),
+            item("Move Pane Down", String(UnicodeScalar(NSDownArrowFunctionKey).map(Character.init) ?? "↓"), [.command, .option], animate { model.moveFocusedPane(.down) }),
         ]))
 
         main.addItem(menu("Session", [

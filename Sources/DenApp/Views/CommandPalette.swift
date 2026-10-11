@@ -120,9 +120,10 @@ struct CommandPalette: View {
             guard route == .goToDirectory else { return }
             folderHits = []
             let parsed = PathQuery.parse(query)
-            guard !parsed.fragment.isEmpty else { return }
+            // A typed folder lists its own children; fsearch is for bare names.
+            guard parsed.directory == nil, !parsed.fragment.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(60))
-            guard !Task.isCancelled, case .success(let hits) = await PathSearch.shared.search(parsed.fragment, in: parsed.directory, foldersOnly: true, limit: 80),
+            guard !Task.isCancelled, case .success(let hits) = await PathSearch.shared.search(parsed.fragment, foldersOnly: true, limit: 120),
                   !Task.isCancelled else { return }
             folderHits = Array(PathEntry.ranked(hits, matching: parsed.fragment, under: parsed.directory ?? NSHomeDirectory()).prefix(30))
         }

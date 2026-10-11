@@ -1,6 +1,7 @@
 import Foundation
 
-/// Whole-disk path search through fsearch (github.com/noahdunnagan/fsearch):
+/// Whole-disk path search through fsearch (github.com/noahdunnagan/fsearch,
+/// MIT, bundled in Den.app from vendor/fsearch):
 /// one long-lived `fsearch stdio` process, which starts fsearch's daemon on
 /// first use, answering JSON lines matched up by request id.
 @MainActor
@@ -21,9 +22,11 @@ final class PathSearch {
     private var nextID = 1
     private var pending: [Int: CheckedContinuation<Result<[PathEntry], Failure>, Never>] = [:]
 
-    static let candidates = [
-        NSHomeDirectory() + "/.local/bin/fsearch", "/opt/homebrew/bin/fsearch", "/usr/local/bin/fsearch",
-    ]
+    /// The copy bundled next to Den's executable first, then a user install.
+    static let candidates: [String] = {
+        let bundled = Bundle.main.executableURL.map { $0.deletingLastPathComponent().appendingPathComponent("fsearch").path(percentEncoded: false) }
+        return [bundled, NSHomeDirectory() + "/.local/bin/fsearch", "/opt/homebrew/bin/fsearch", "/usr/local/bin/fsearch"].compactMap { $0 }
+    }()
 
     var isInstalled: Bool { Self.binary != nil }
 

@@ -44,7 +44,7 @@ git submodule update --init
 scripts/build-libghostty-vt.sh   # fetches Zig 0.16 into .tools/, builds the xcframework
 swift test
 swift build && .build/debug/Den  # dev run (dend is started from next to the binary)
-scripts/bundle.sh                # dist/Den.app
+scripts/bundle.sh                # dist/Den.app (builds vendor/fsearch with cargo if present)
 ```
 
 dend logs to `~/Library/Application Support/Den/dend.log` and listens on

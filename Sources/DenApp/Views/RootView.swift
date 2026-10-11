@@ -3,6 +3,9 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    /// The window's coordinate space, origin top-left: pane frames for ⌘-drag
+    /// hit-testing and the drag card are both in it.
+    static let space = "den.window"
 
     var body: some View {
         let theme = model.theme
@@ -27,7 +30,9 @@ struct RootView: View {
             }
 
             overlays
+            PaneDragGhost()
         }
+        .coordinateSpace(.named(Self.space))
         .ignoresSafeArea()
         .preferredColorScheme(theme.isDark ? .dark : .light)
         .animation(.den, value: model.overview)

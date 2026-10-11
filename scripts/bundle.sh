@@ -15,6 +15,14 @@ app="$root/dist/Den.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/Den" "$bin/dend" "$app/Contents/MacOS/"
+# fsearch (vendor/fsearch, Rust) powers whole-disk path search. Without
+# cargo the app still builds; the path picker then only browses folders.
+if command -v cargo >/dev/null 2>&1 && [[ -f "$root/vendor/fsearch/Cargo.toml" ]]; then
+  cargo build --release --quiet --manifest-path "$root/vendor/fsearch/Cargo.toml" --target-dir "$root/.build/fsearch"
+  cp "$root/.build/fsearch/release/fsearch" "$app/Contents/MacOS/"
+else
+  echo "warning: cargo or vendor/fsearch missing; Den.app ships without fsearch (run git submodule update --init)" >&2
+fi
 # SwiftPM resources (bundled fonts); Bundle.module finds them in Resources.
 cp -R "$bin/Den_DenApp.bundle" "$app/Contents/Resources/"
 
@@ -37,5 +45,6 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+[[ -f "$app/Contents/MacOS/fsearch" ]] && codesign --force --sign - "$app/Contents/MacOS/fsearch" >/dev/null
 codesign --force --sign - "$app/Contents/MacOS/dend" "$app" >/dev/null
 echo "Built $app"

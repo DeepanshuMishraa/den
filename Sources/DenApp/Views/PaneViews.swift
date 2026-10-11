@@ -28,7 +28,8 @@ struct PaneCard: View {
     let tab: TabID
     @Environment(AppModel.self) private var model
     @State private var hovering = false
-    @State private var width: CGFloat = 1000
+    @State private var size = CGSize(width: 1000, height: 600)
+    private var width: CGFloat { size.width }
 
     var body: some View {
         let theme = model.theme
@@ -105,7 +106,26 @@ struct PaneCard: View {
         }
         .shadow(color: .black.opacity(islands ? (theme.isDark ? 0.28 : 0.07) : 0), radius: 8, y: 3)
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .overlay {
+            // ⌘-drag: the lifted pane dims; every other one shows where it can go.
+            if let drag = model.paneDrag {
+                if drag.source == pane {
+                    RoundedRectangle(cornerRadius: islands ? radius : 0, style: .continuous)
+                        .fill(Color.black.opacity(0.4))
+                        .allowsHitTesting(false)
+                } else {
+                    PaneDropRegions(active: drag.target == pane ? drag.placement : nil, theme: theme, radius: max(radius - 3, 4))
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: model.paneDrag?.source)
+        // No cleanup on disappear: after a move the rebuilt card records its
+        // frame before the old one goes away, and removing it then would
+        // leave the pane undroppable. Drops only consider the tab's panes.
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(RootView.space)) } action: { frame in
+            size = frame.size
+            model.paneFrames[pane] = frame
+        }
         .onHover { hovering = $0 }
         .animation(.denFast, value: focused)
     }

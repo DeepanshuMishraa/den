@@ -69,10 +69,20 @@ struct PathEntry: Equatable, Identifiable {
         hits.compactMap { hit -> (PathEntry, Int, Int)? in
             guard let match = Fuzzy.rank(fragment, in: hit.name) else { return nil }
             let relative = base.map { hit.path.hasPrefix($0 + "/") ? String(hit.path.dropFirst($0.count + 1)) : hit.path } ?? hit.path
+            guard !isNoise(relative, wantsHidden: fragment.hasPrefix(".")) else { return nil }
             return (hit, match.score, relative.split(separator: "/").count)
         }
         .sorted { a, b in a.1 != b.1 ? a.1 > b.1 : a.2 != b.2 ? a.2 < b.2 : a.0.path < b.0.path }
         .map(\.0)
+    }
+
+    /// Folders nobody means when typing a name: hidden ones (caches,
+    /// toolchains) unless the query starts with a dot, ~/Library app data,
+    /// and dependency trees.
+    static func isNoise(_ relativePath: String, wantsHidden: Bool) -> Bool {
+        relativePath.split(separator: "/").dropLast().contains { part in
+            (!wantsHidden && part.hasPrefix(".")) || part == "Library" || part == "node_modules"
+        } || (!wantsHidden && (relativePath as NSString).lastPathComponent.hasPrefix("."))
     }
 
     /// A folder's children, hidden ones only when asked for, ranked by the
