@@ -19,7 +19,7 @@ let package = Package(
         .executableTarget(
             name: "DenApp",
             dependencies: ["DenVT", "DenProtocol"],
-            resources: [.copy("Resources/Fonts")],
+            resources: [.copy("Resources/Fonts"), .copy("Resources/ProgramIcons")],
             swiftSettings: [.define("DEBUG", .when(configuration: .debug))],
             linkerSettings: [.linkedFramework("Metal"), .linkedFramework("MetalKit")]
         ),

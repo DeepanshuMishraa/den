@@ -1,4 +1,52 @@
+import AppKit
 import SwiftUI
+
+/// A brand mark loaded from `Resources/ProgramIcons/<asset>.svg`.
+/// `template` marks render in the given tint; full-color marks keep their
+/// brand colors. Images are cached per asset.
+struct BrandIcon: View {
+    let asset: String
+    let template: Bool
+    let size: CGFloat
+    var tint: Color = .white
+
+    private static var cache: [String: NSImage] = [:]
+
+    var body: some View {
+        Group {
+            if let image = Self.image(named: asset, template: template) {
+                if template {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(tint)
+                } else {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    static func image(named asset: String, template: Bool) -> NSImage? {
+        if let hit = cache[asset] { return hit }
+        guard let url = Bundle.module.url(
+            forResource: asset, withExtension: "svg", subdirectory: "ProgramIcons"
+        ) else {
+            NSLog("Den: missing program icon %@", asset)
+            return nil
+        }
+        guard let raw = NSImage(contentsOf: url) else {
+            NSLog("Den: could not rasterize program icon %@", asset)
+            return nil
+        }
+        raw.isTemplate = template
+        cache[asset] = raw
+        return raw
+    }
+}
 
 /// A program's mark, drawn at a given size.
 struct ProgramGlyph: View {
@@ -26,130 +74,55 @@ struct ProgramGlyph: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .foregroundStyle(tint)
-        case .starburst:
-            Starburst(rays: 12)
-                .fill(tint)
-                .frame(width: size, height: size)
-        case .knot:
-            Knot()
-                .stroke(tint, lineWidth: size * 0.13)
-                .frame(width: size * 0.95, height: size * 0.95)
-        case .sparkle:
-            Sparkle()
-                .fill(tint)
-                .frame(width: size * 0.95, height: size * 0.95)
-        case .bun:
-            BunFace(ink: tint)
-                .frame(width: size * 1.05, height: size * 0.9)
+        case .brand(let asset, let template):
+            BrandIcon(asset: asset, template: template, size: size, tint: tint)
         }
     }
 }
 
-/// Gemini's mark: a four-point star with concave sides.
-struct Sparkle: Shape {
-    func path(in rect: CGRect) -> Path {
-        let c = CGPoint(x: rect.midX, y: rect.midY)
-        let rx = rect.width / 2, ry = rect.height / 2
-        let tips = [CGPoint(x: c.x, y: c.y - ry), CGPoint(x: c.x + rx, y: c.y), CGPoint(x: c.x, y: c.y + ry), CGPoint(x: c.x - rx, y: c.y)]
-        var p = Path()
-        p.move(to: tips[0])
-        for i in 1 ... 4 {
-            // Each side bows in toward the center.
-            p.addQuadCurve(to: tips[i % 4], control: c)
-        }
-        p.closeSubpath()
-        return p
-    }
-}
-
-/// Bun's bun: a soft dome with two eyes and a smile.
-struct BunFace: View {
-    let ink: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            ZStack {
-                Ellipse()
-                    .fill(Color(.sRGB, red: 0.98, green: 0.88, blue: 0.70))
-                    .overlay(Ellipse().strokeBorder(ink, lineWidth: max(w * 0.08, 0.8)))
-                    .frame(width: w, height: h * 0.86)
-                    .offset(y: h * 0.07)
-                HStack(spacing: w * 0.22) {
-                    Circle().fill(ink).frame(width: w * 0.14)
-                    Circle().fill(ink).frame(width: w * 0.14)
-                }
-                .offset(y: h * 0.04)
-                Capsule().fill(Color(.sRGB, red: 0.95, green: 0.42, blue: 0.42))
-                    .frame(width: w * 0.2, height: h * 0.1)
-                    .offset(y: h * 0.24)
-            }
-            .frame(width: w, height: h)
-        }
-    }
-}
-
-/// Claude's sparkle: tapered rays around a center.
-struct Starburst: Shape {
-    let rays: Int
-
-    func path(in rect: CGRect) -> Path {
-        let c = CGPoint(x: rect.midX, y: rect.midY)
-        let outer = min(rect.width, rect.height) / 2
-        var p = Path()
-        // Chunky rounded rays, alternating long and short, so the mark
-        // still reads at favicon size.
-        let thickness = outer * 0.24
-        for i in 0 ..< rays {
-            let angle = Double(i) / Double(rays) * 2 * .pi
-            let length = outer * (i % 2 == 0 ? 1 : 0.74)
-            let ray = Path(roundedRect: CGRect(x: -thickness / 2, y: -length, width: thickness, height: length), cornerRadius: thickness / 2)
-            p.addPath(ray, transform: CGAffineTransform(translationX: c.x, y: c.y).rotated(by: angle))
-        }
-        return p
-    }
-}
-
-/// A loose interlocking knot, in the spirit of OpenAI's mark.
-struct Knot: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let c = CGPoint(x: rect.midX, y: rect.midY)
-        let r = min(rect.width, rect.height) / 2
-        for i in 0 ..< 3 {
-            let angle = Double(i) * .pi / 3
-            let capsule = Path(roundedRect: CGRect(x: -r * 0.36, y: -r * 0.95, width: r * 0.72, height: r * 1.9), cornerRadius: r * 0.36)
-            p.addPath(capsule, transform: CGAffineTransform(translationX: c.x, y: c.y).rotated(by: angle))
-        }
-        return p
-    }
-}
-
-/// A program's favicon: a small glossy "screen" tile.
+/// A program's favicon: a small glossy "screen" tile. Full-color brand marks
+/// drop the tile and show raw, like a browser favicon.
 struct ProgramTile: View {
     let kind: ProgramKind
     /// Tile height; width is 1.28× like a little display.
     var height: CGFloat = 16
 
+    /// Full-color brands skip the tinted tile.
+    private var isRawBrand: Bool {
+        if case .brand(_, template: false) = kind.glyph { return true }
+        return false
+    }
+
     var body: some View {
-        let top = kind.tileTop, bottom = kind.tileBottom
-        let width = height * 1.28
-        let shape = RoundedRectangle(cornerRadius: height * 0.26, style: .continuous)
-        ZStack {
-            shape.fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
-            // Glass: a soft sheen on the upper half and a crisp top edge.
-            shape
-                .fill(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0)], startPoint: .top, endPoint: .center))
-            shape.strokeBorder(
-                LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom),
-                lineWidth: 0.6
-            )
-            ProgramGlyph(kind: kind, size: height * 0.62)
-                .offset(x: kind.glyph == .prompt ? -height * 0.08 : 0)
+        if isRawBrand {
+            BrandIcon(asset: brandAsset, template: false, size: height * 1.02)
+                .frame(width: height * 1.28, height: height)
+                .shadow(color: .black.opacity(0.28), radius: 0.8, y: 0.6)
+        } else {
+            let top = kind.tileTop, bottom = kind.tileBottom
+            let width = height * 1.28
+            let shape = RoundedRectangle(cornerRadius: height * 0.26, style: .continuous)
+            ZStack {
+                shape.fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+                // Glass: a soft sheen on the upper half and a crisp top edge.
+                shape
+                    .fill(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0)], startPoint: .top, endPoint: .center))
+                shape.strokeBorder(
+                    LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.6
+                )
+                ProgramGlyph(kind: kind, size: height * 0.62)
+                    .offset(x: kind.glyph == .prompt ? -height * 0.08 : 0)
+            }
+            .frame(width: width, height: height)
+            .background(shape.fill(.black.opacity(0.45)).padding(-0.5))
+            .shadow(color: .black.opacity(0.28), radius: 0.8, y: 0.6)
         }
-        .frame(width: width, height: height)
-        .background(shape.fill(.black.opacity(0.45)).padding(-0.5))
-        .shadow(color: .black.opacity(0.28), radius: 0.8, y: 0.6)
+    }
+
+    private var brandAsset: String {
+        if case .brand(let asset, _) = kind.glyph { return asset }
+        return ""
     }
 }
 

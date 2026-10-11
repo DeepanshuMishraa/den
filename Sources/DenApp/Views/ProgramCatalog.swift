@@ -20,14 +20,10 @@ struct ProgramKind: Equatable {
         case symbol(String)
         /// One to three letters, set tight and bold.
         case monogram(String)
-        /// Claude's sparkle.
-        case starburst
-        /// OpenAI's knot.
-        case knot
-        /// Gemini's four-point star.
-        case sparkle
-        /// Bun's bun.
-        case bun
+        /// A real brand mark loaded from `Resources/ProgramIcons/<asset>.svg`.
+        /// `template` renders the mark in the tile's ink color; otherwise the
+        /// mark keeps its own brand colors and drops the tile.
+        case brand(asset: String, template: Bool)
     }
 
     static func == (a: ProgramKind, b: ProgramKind) -> Bool { a.id == b.id }
@@ -108,66 +104,68 @@ extension ProgramKind {
         shell("pwsh", name: "PowerShell", top: 0x2D7DD2, bottom: 0x012456, ink: 0xFFFFFF)
 
         // Coding agents.
-        add(["claude"], "claude", "Claude Code", 0xEC8A6A, 0xD25B3D, .starburst)
-        add(["codex"], "codex", "Codex", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .knot)
-        add(["gemini"], "gemini", "Gemini", 0x5B8DEF, 0x9B72CB, .sparkle)
-        add(["opencode"], "opencode", "OpenCode", 0x2B2B2B, 0x0A0A0A, .monogram("oc"))
+        add(["claude"], "claude", "Claude Code", 0xEC8A6A, 0xD25B3D, .brand(asset: "claude", template: true))
+        add(["codex"], "codex", "Codex", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .brand(asset: "codex", template: true))
+        add(["gemini"], "gemini", "Gemini", 0x5B8DEF, 0x9B72CB, .brand(asset: "gemini", template: false))
+        add(["antigravity"], "antigravity", "Antigravity", 0x2B2B2B, 0x0A0A0A, .brand(asset: "antigravity", template: false))
+        add(["grok", "xai"], "grok", "Grok", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .brand(asset: "grok", template: true))
+        add(["opencode"], "opencode", "OpenCode", 0x2B2B2B, 0x0A0A0A, .brand(asset: "opencode", template: true))
         add(["aider"], "aider", "Aider", 0x22C55E, 0x15803D, .monogram("ai"))
         add(["amp"], "amp", "Amp", 0xF6553F, 0xC2301F, .symbol("bolt.fill"))
-        add(["cursor-agent", "cursor"], "cursor", "Cursor", 0x2E2E2E, 0x0B0B0B, .symbol("cursorarrow"))
-        add(["copilot", "github-copilot-cli"], "copilot", "Copilot", 0x3B3F46, 0x16181C, .symbol("eyeglasses"))
+        add(["cursor-agent", "cursor"], "cursor", "Cursor", 0x2E2E2E, 0x0B0B0B, .brand(asset: "cursor", template: true))
+        add(["copilot", "github-copilot-cli"], "copilot", "Copilot", 0x3B3F46, 0x16181C, .brand(asset: "copilot", template: true))
         add(["goose"], "goose", "Goose", 0x1F1F1F, 0x000000, .monogram("g"))
         add(["crush"], "crush", "Crush", 0xFF6AC1, 0xB43A8C, .symbol("heart.fill"))
         add(["droid"], "droid", "Droid", 0xF97316, 0xC2410C, .symbol("cpu.fill"))
-        add(["qwen"], "qwen", "Qwen", 0x7C6CF2, 0x4B3FC2, .monogram("Q"))
+        add(["qwen"], "qwen", "Qwen", 0x7C6CF2, 0x4B3FC2, .brand(asset: "qwen", template: true))
         add(["llm"], "llm", "LLM", 0x64748B, 0x334155, .symbol("text.bubble.fill"))
 
         // Editors.
-        add(["nvim"], "nvim", "Neovim", 0x5FB04A, 0x2B6CB0, .monogram("N"))
-        add(["vim", "vi", "view", "vimdiff"], "vim", "Vim", 0x2EA44F, 0x0F6B2E, .monogram("V"))
+        add(["nvim"], "nvim", "Neovim", 0x5FB04A, 0x2B6CB0, .brand(asset: "nvim", template: false))
+        add(["vim", "vi", "view", "vimdiff"], "vim", "Vim", 0x2EA44F, 0x0F6B2E, .brand(asset: "vim", template: false))
         add(["hx", "helix"], "helix", "Helix", 0x8E7BDF, 0x55449C, .monogram("hx"))
         add(["emacs", "emacsclient"], "emacs", "Emacs", 0x9269C9, 0x5B3A8E, .monogram("e"))
         add(["nano", "pico"], "nano", "nano", 0x5C6BC0, 0x303F9F, .monogram("n"))
         add(["micro"], "micro", "micro", 0x4C566A, 0x2E3440, .symbol("pencil"))
         add(["kak", "kakoune"], "kakoune", "Kakoune", 0xE3B341, 0xB0812A, ink: 0x1A1A1A, .monogram("k"))
-        add(["zed"], "zed", "Zed", 0x3B82F6, 0x1E40AF, .monogram("Z"))
+        add(["zed"], "zed", "Zed", 0x3B82F6, 0x1E40AF, .brand(asset: "zed", template: true))
 
         // Version control.
-        add(["git"], "git", "Git", 0xF4664B, 0xC9361C, .symbol("arrow.triangle.branch"))
-        add(["lazygit", "lg"], "lazygit", "Git Changes", 0xF4664B, 0xC9361C, .symbol("plus.forwardslash.minus"))
+        add(["git"], "git", "Git", 0xF4664B, 0xC9361C, .brand(asset: "git", template: true))
+        add(["lazygit", "lg"], "lazygit", "Git Changes", 0xF4664B, 0xC9361C, .brand(asset: "git", template: true))
         add(["tig"], "tig", "tig", 0xF4664B, 0xC9361C, .symbol("list.bullet.indent"))
-        add(["gitui"], "gitui", "GitUI", 0xF4664B, 0xC9361C, .symbol("plus.forwardslash.minus"))
+        add(["gitui"], "gitui", "GitUI", 0xF4664B, 0xC9361C, .brand(asset: "git", template: true))
         add(["jj", "jjui"], "jj", "Jujutsu", 0x4C9F70, 0x2D6A4A, .monogram("jj"))
         add(["gh"], "gh", "GitHub", 0x2F3337, 0x0D1117, .symbol("chevron.left.forwardslash.chevron.right"))
         add(["glab"], "glab", "GitLab", 0xFC8A4E, 0xE24329, .symbol("chevron.left.forwardslash.chevron.right"))
 
         // JavaScript and TypeScript.
-        add(["node", "nodejs"], "node", "Node", 0x6CC24A, 0x3C873A, .symbol("hexagon.fill"))
-        add(["npm", "npx"], "npm", "npm", 0xE0484A, 0xB52A2C, .monogram("npm"))
-        add(["pnpm", "pnpx"], "pnpm", "pnpm", 0xF9AD00, 0xE07A00, ink: 0x2B2B2B, .monogram("pn"))
-        add(["yarn"], "yarn", "Yarn", 0x37A5D6, 0x1F7EAA, .monogram("y"))
+        add(["node", "nodejs"], "node", "Node", 0x6CC24A, 0x3C873A, .brand(asset: "node", template: false))
+        add(["npm", "npx"], "npm", "npm", 0xE0484A, 0xB52A2C, .brand(asset: "npm", template: false))
+        add(["pnpm", "pnpx"], "pnpm", "pnpm", 0xF9AD00, 0xE07A00, ink: 0x2B2B2B, .brand(asset: "pnpm", template: false))
+        add(["yarn"], "yarn", "Yarn", 0x37A5D6, 0x1F7EAA, .brand(asset: "yarn", template: false))
         add(["deno"], "deno", "Deno", 0x2B2B2B, 0x0A0A0A, .symbol("lizard.fill"))
-        add(["bun", "bunx"], "bun", "Bun", 0xFCF1DC, 0xEBD2A6, ink: 0x5A4127, .bun)
-        add(["vite"], "vite", "Vite", 0x8A7DFF, 0xB03CF0, ink: 0xFFD62E, .symbol("bolt.fill"))
-        add(["next-server", "next"], "next", "Next.js", 0x2B2B2B, 0x000000, .monogram("N"))
-        add(["tsx", "ts-node", "tsc"], "typescript", "TypeScript", 0x4A8FDB, 0x2563A8, .monogram("TS"))
+        add(["bun", "bunx"], "bun", "Bun", 0xFCF1DC, 0xEBD2A6, ink: 0x5A4127, .brand(asset: "bun", template: false))
+        add(["vite"], "vite", "Vite", 0x8A7DFF, 0xB03CF0, ink: 0xFFD62E, .brand(asset: "vite", template: false))
+        add(["next-server", "next"], "next", "Next.js", 0x2B2B2B, 0x000000, .brand(asset: "next", template: false))
+        add(["tsx", "ts-node", "tsc"], "typescript", "TypeScript", 0x4A8FDB, 0x2563A8, .brand(asset: "typescript", template: false))
         add(["eslint", "biome", "prettier", "oxlint"], "lint", "Lint", 0x7C3AED, 0x4C1D95, .symbol("checkmark.seal.fill"))
         add(["vitest", "jest", "playwright"], "jstest", "Tests", 0x84CC16, 0x4D7C0F, .symbol("checkmark.diamond.fill"))
 
         // Python.
-        add(["python", "ipython", "bpython", "ptpython"], "python", "Python", 0x4B8BBE, 0x2B5B84, ink: 0xFFD43B, .monogram("py"))
-        add(["uv", "uvx"], "uv", "uv", 0xDE5FE9, 0x9B2BA8, .monogram("uv"))
+        add(["python", "ipython", "bpython", "ptpython"], "python", "Python", 0x4B8BBE, 0x2B5B84, ink: 0xFFD43B, .brand(asset: "python", template: false))
+        add(["uv", "uvx"], "uv", "uv", 0xDE5FE9, 0x9B2BA8, .brand(asset: "uv", template: true))
         add(["pip", "pipx", "poetry", "pdm", "hatch", "rye"], "pip", "Python Packages", 0x3E7BB6, 0x2A5A88, .symbol("shippingbox.fill"))
         add(["pytest"], "pytest", "pytest", 0x0EA5E9, 0x0369A1, .symbol("checkmark.diamond.fill"))
         add(["jupyter", "jupyter-lab"], "jupyter", "Jupyter", 0xF8A15A, 0xE46E1E, .symbol("book.pages.fill"))
 
         // Other languages and toolchains.
-        add(["cargo", "rustc", "rustup", "bacon", "rust-analyzer"], "rust", "Rust", 0xD9603B, 0x8A2C1B, .symbol("gearshape.fill"))
-        add(["go", "gopls", "air"], "go", "Go", 0x29BEB0, 0x00839A, .monogram("go"))
-        add(["ruby", "irb", "rails", "bundle", "bundler", "rake", "gem"], "ruby", "Ruby", 0xE0453B, 0x9E1B16, .symbol("diamond.fill"))
+        add(["cargo", "rustc", "rustup", "bacon", "rust-analyzer"], "rust", "Rust", 0xD9603B, 0x8A2C1B, .brand(asset: "rust", template: true))
+        add(["go", "gopls", "air"], "go", "Go", 0x29BEB0, 0x00839A, .brand(asset: "go", template: true))
+        add(["ruby", "irb", "rails", "bundle", "bundler", "rake", "gem"], "ruby", "Ruby", 0xE0453B, 0x9E1B16, .brand(asset: "ruby", template: false))
         add(["iex", "mix", "elixir", "erl"], "elixir", "Elixir", 0x7A4C9E, 0x4B275F, .symbol("drop.fill"))
         add(["java", "gradle", "gradlew", "mvn", "kotlin", "sbt", "scala"], "jvm", "Java", 0xF08A24, 0xB35A09, .symbol("cup.and.saucer.fill"))
-        add(["swift", "swiftc", "xcodebuild", "xcrun", "swift-frontend"], "swift", "Swift", 0xFA7343, 0xE63A1E, .symbol("swift"))
+        add(["swift", "swiftc", "xcodebuild", "xcrun", "swift-frontend"], "swift", "Swift", 0xFA7343, 0xE63A1E, .brand(asset: "swift", template: false))
         add(["zig"], "zig", "Zig", 0xF7A41D, 0xC97B0C, ink: 0x1A1A1A, .monogram("zig"))
         add(["ghc", "ghci", "cabal", "stack"], "haskell", "Haskell", 0x8F6CB8, 0x5E4089, .monogram("λ"))
         add(["lua", "luajit"], "lua", "Lua", 0x3D4BC4, 0x1F2A80, .symbol("moon.fill"))
@@ -183,7 +181,7 @@ extension ProgramKind {
             0x24344D, 0x0F172A, ink: 0x4ADE80, .symbol("gauge.with.dots.needle.67percent"))
 
         // Containers, clusters, infrastructure.
-        add(["docker", "lazydocker", "docker-compose", "colima", "orb", "orbctl"], "docker", "Docker", 0x48A9F2, 0x1E6EC0, .symbol("shippingbox.fill"))
+        add(["docker", "lazydocker", "docker-compose", "colima", "orb", "orbctl"], "docker", "Docker", 0x48A9F2, 0x1E6EC0, .brand(asset: "docker", template: true))
         add(["podman"], "podman", "Podman", 0xA54BC0, 0x6B2385, .symbol("shippingbox.fill"))
         add(["kubectl", "k9s", "helm", "kubectx", "kubens", "minikube", "kind"], "kubernetes", "Kubernetes", 0x4F86EC, 0x2350B8, .symbol("steeringwheel"))
         add(["terraform", "tofu", "terragrunt"], "terraform", "Terraform", 0x8F5CDB, 0x5C2DAA, .symbol("square.stack.3d.up.fill"))
@@ -218,7 +216,8 @@ extension ProgramKind {
         add(["fzf", "sk", "television", "tv"], "fzf", "Finder", 0x94A3B8, 0x475569, .symbol("magnifyingglass"))
         add(["rg", "grep", "ag", "ack", "fd", "find"], "search", "Search", 0x94A3B8, 0x475569, .symbol("text.magnifyingglass"))
         add(["openssl", "gpg", "age", "op", "pass"], "crypto", "Keys", 0xFACC15, 0xCA8A04, ink: 0x1A1A1A, .symbol("key.fill"))
-        add(["ollama", "lms", "mlx_lm.generate"], "ollama", "Ollama", 0xFFFFFF, 0xE5E5E5, ink: 0x111111, .monogram("ol"))
+        add(["ollama", "lms", "mlx_lm.generate"], "ollama", "Ollama", 0xFFFFFF, 0xE5E5E5, ink: 0x111111, .brand(asset: "ollama", template: true))
+        add(["ngrok"], "ngrok", "ngrok", 0xE8ECF5, 0xC9D4EA, ink: 0x10239E, .brand(asset: "ngrok", template: true))
         return table
     }()
 }

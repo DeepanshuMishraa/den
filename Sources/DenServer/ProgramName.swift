@@ -8,6 +8,13 @@ import Foundation
 enum ProgramName {
     static let interpreters: Set<String> = ["node", "nodejs", "bun", "deno", "python", "ruby", "perl", "php", "lua", "luajit", "java", "osascript"]
 
+    /// File stems and directories that name the packaging convention, not the
+    /// tool: `main.js`, `cli.js`, `dist/`, `node_modules/`, `.bin/`.
+    static let genericNames: Set<String> = [
+        "cli", "main", "index", "server", "app", "run", "start",
+        "bin", "lib", "dist", "build", "out", "src", "node_modules", ".bin",
+    ]
+
     static func resolve(process: String, arguments: [String]) -> String {
         let bare = String(process.prefix { !$0.isNumber && $0 != "." })
         guard interpreters.contains(bare) else { return process }
@@ -21,10 +28,25 @@ enum ProgramName {
             // Options, and inline code (`node -e "…"`) which is never a path.
             if arg.hasPrefix("-") { continue }
             guard arg.contains("/") else { return process }
-            let name = (arg as NSString).lastPathComponent
-            // `node dist/index.js` says nothing; an extensionless path is a
-            // shebang-launched tool, usually a symlink named for it.
-            return name.isEmpty || name.contains(".") ? process : name
+            let parts = arg.split(separator: "/").map(String.init)
+            guard let file = parts.last, !file.isEmpty else { return process }
+            // Extensionless paths are shebang-launched tools named for
+            // themselves: `/opt/homebrew/bin/codex` is codex.
+            guard file.contains(".") else { return file }
+            // Dotted entries name the tool through their stem:
+            // `npm-cli.js` → npm, `pnpm.cjs` → pnpm, `codex.js` → codex.
+            var stem = file.split(separator: ".").first.map(String.init) ?? file
+            if stem.hasSuffix("-cli") || stem.hasSuffix("_cli") { stem = String(stem.dropLast(4)) }
+            if !genericNames.contains(stem.lowercased()) { return stem }
+            // Generic entries (`main.js`, `cli.js`) say nothing on their own,
+            // so walk up past packaging dirs to the owning tool or project:
+            // `shottr-mcp/dist/main.js` is shottr-mcp.
+            for dir in parts.dropLast().reversed() {
+                let clean = dir.lowercased()
+                if clean.isEmpty || genericNames.contains(clean) || clean.hasPrefix(".") { continue }
+                return dir.hasPrefix("@") ? String(dir.dropFirst()) : dir
+            }
+            return process
         }
         return process
     }
