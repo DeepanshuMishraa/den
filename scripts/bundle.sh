@@ -23,6 +23,13 @@ if command -v cargo >/dev/null 2>&1 && [[ -f "$root/vendor/fsearch/Cargo.toml" ]
 else
   echo "warning: cargo or vendor/fsearch missing; Den.app ships without fsearch (run git submodule update --init)" >&2
 fi
+# Linux dend builds that Den installs on remote hosts (scripts/build-dend-linux.sh).
+# Resources, not MacOS: they're ELF files, which codesign can't sign as code.
+if compgen -G "$root/dist/linux/dend-linux-*" >/dev/null; then
+  cp "$root"/dist/linux/dend-linux-* "$app/Contents/Resources/"
+else
+  echo "warning: no dist/linux/dend-linux-*; Den.app can't set up Linux hosts (run scripts/build-dend-linux.sh)" >&2
+fi
 # SwiftPM resources (bundled fonts); Bundle.module finds them in Resources.
 cp -R "$bin/Den_DenApp.bundle" "$app/Contents/Resources/"
 

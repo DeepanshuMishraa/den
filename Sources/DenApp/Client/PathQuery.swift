@@ -1,3 +1,4 @@
+import DenProtocol
 import Foundation
 
 /// What the path picker's field says: a folder to list (traditional path
@@ -23,11 +24,12 @@ struct PathQuery: Equatable {
 
     /// The text a pane gets: relative to its working directory when inside
     /// it, `~/…` under home, else absolute; shell-quoted when needed.
-    static func insertion(for path: String, cwd: String?, home: String = NSHomeDirectory()) -> String {
+    /// `home` nil (a remote host whose home isn't known yet) keeps paths absolute.
+    static func insertion(for path: String, cwd: String?, home: String? = NSHomeDirectory()) -> String {
         var shown = path
         if let cwd, cwd != "/", path.hasPrefix(cwd + "/") {
             shown = String(path.dropFirst(cwd.count + 1))
-        } else if path == home || path.hasPrefix(home + "/") {
+        } else if let home, path == home || path.hasPrefix(home + "/") {
             shown = "~" + path.dropFirst(home.count)
         }
         return quoted(shown)
@@ -100,5 +102,14 @@ struct PathEntry: Equatable, Identifiable {
             fm.fileExists(atPath: path, isDirectory: &isDir)
             return PathEntry(path: path, isDirectory: isDir.boolValue)
         }
+    }
+
+    /// The same, from a folder a remote dend listed.
+    static func listing(of directory: String, entries: [DirectoryEntry], matching fragment: String, limit: Int = 300) -> [PathEntry] {
+        let visible = entries
+            .filter { !$0.name.hasPrefix(".") || fragment.hasPrefix(".") }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let ordered = fragment.isEmpty ? visible : Fuzzy.filter(visible, query: fragment, key: \.name)
+        return ordered.prefix(limit).map { PathEntry(path: (directory as NSString).appendingPathComponent($0.name), isDirectory: $0.isDirectory) }
     }
 }

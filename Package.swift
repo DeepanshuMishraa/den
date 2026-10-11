@@ -1,6 +1,15 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
+#if os(Linux)
+// Linux builds only dend (scripts/build-dend-linux.sh), against the static
+// libghostty-vt that script builds; it passes the per-arch -L.
+let ghosttyVt = Target.systemLibrary(name: "GhosttyVt", path: "Frameworks/linux/GhosttyVt")
+#else
+// Built by scripts/build-libghostty-vt.sh from vendor/ghostty.
+let ghosttyVt = Target.binaryTarget(name: "GhosttyVt", path: "Frameworks/ghostty-vt.xcframework")
+#endif
+
 let package = Package(
     name: "Den",
     platforms: [.macOS(.v15)],
@@ -9,13 +18,12 @@ let package = Package(
         .executable(name: "dend", targets: ["dend"]),
     ],
     targets: [
-        // Built by scripts/build-libghostty-vt.sh from vendor/ghostty.
-        .binaryTarget(name: "GhosttyVt", path: "Frameworks/ghostty-vt.xcframework"),
+        ghosttyVt,
         .target(name: "CDenPTY"),
         .target(name: "DenVT", dependencies: ["GhosttyVt"]),
         .target(name: "DenProtocol"),
         .target(name: "DenServer", dependencies: ["DenVT", "DenProtocol", "CDenPTY"]),
-        .executableTarget(name: "dend", dependencies: ["DenServer"]),
+        .executableTarget(name: "dend", dependencies: ["DenServer", "DenProtocol", "CDenPTY"]),
         .executableTarget(
             name: "DenApp",
             dependencies: ["DenVT", "DenProtocol"],

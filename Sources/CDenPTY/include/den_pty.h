@@ -25,4 +25,13 @@ int den_pty_resize(int master, unsigned short cols, unsigned short rows,
 /// Process group currently in the PTY foreground, or -1.
 pid_t den_pty_foreground(int master);
 
+/// A pidfd for `pid` that turns readable when it exits (Linux 5.3+), or -1
+/// with errno set (always on macOS).
+int den_pidfd_open(pid_t pid);
+
+/// Starts `path` as a daemon: new session, double fork, stdin from
+/// /dev/null, stdout and stderr appended to `log_path`. Returns once the
+/// daemon is forked (not once it is ready), or -1 with errno set.
+pid_t den_spawn_detached(const char *path, char *const argv[], const char *log_path);
+
 #endif

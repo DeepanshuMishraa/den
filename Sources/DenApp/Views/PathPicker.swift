@@ -20,6 +20,12 @@ struct PathPickerOverlay: View {
     static let rowHeight: CGFloat = 24
     static let maxRows = 10
 
+    private var host: HostID { model.host(ofPane: request.pane) }
+    /// The pane's host user's home; nil for a remote host not asked yet.
+    private var home: String? { model.hostHomes[host] }
+    /// For parsing and abbreviating; an unknown remote home never matches.
+    private var homeOrRoot: String { home ?? "/" }
+
     var body: some View {
         GeometryReader { geo in
             let origin = CGPoint(x: TerminalView.padding.width + CGFloat(request.col) * cell.width,
@@ -60,7 +66,7 @@ struct PathPickerOverlay: View {
     /// The selected path, previewed where it will land.
     @ViewBuilder private var ghost: some View {
         if entries.indices.contains(selection) {
-            Text(PathQuery.insertion(for: entries[selection].path, cwd: request.cwd))
+            Text(PathQuery.insertion(for: entries[selection].path, cwd: request.cwd, home: home))
                 .font(.custom(model.fontFamily, size: model.fontSize))
                 .foregroundStyle(model.theme.tertiaryText)
                 .lineLimit(1)
@@ -141,10 +147,10 @@ struct PathPickerOverlay: View {
     /// Children by name; deeper hits and recents by their path from the
     /// listed folder (or `~`).
     private func label(for entry: PathEntry) -> String {
-        let query = PathQuery.parse(text)
+        let query = PathQuery.parse(text, home: homeOrRoot)
         if let dir = query.directory, (entry.path as NSString).deletingLastPathComponent == dir { return entry.name }
         if let dir = query.directory, entry.path.hasPrefix(dir + "/") { return String(entry.path.dropFirst(dir.count + 1)) }
-        return PathQuery.abbreviate(entry.path)
+        return home.map { PathQuery.abbreviate(entry.path, home: $0) } ?? entry.path
     }
 
     // MARK: Behavior
@@ -152,7 +158,8 @@ struct PathPickerOverlay: View {
     private func enter() {
         let metrics = FontMetrics(family: model.fontFamily, pointSize: model.fontSize, scale: 2)
         cell = CGSize(width: metrics.cellWidth / 2, height: metrics.cellHeight / 2)
-        text = PathQuery.abbreviate(request.cwd ?? NSHomeDirectory()) + "/"
+        let start = request.cwd ?? home ?? "/"
+        text = (home.map { PathQuery.abbreviate(start, home: $0) } ?? start) + (start == "/" ? "" : "/")
         KeyboardFocus.takeFromTerminal { focused = true }
     }
 
@@ -165,22 +172,25 @@ struct PathPickerOverlay: View {
     private func descend() {
         guard entries.indices.contains(selection) else { return }
         let entry = entries[selection]
-        text = PathQuery.abbreviate(entry.path) + (entry.isDirectory ? "/" : "")
+        text = (home.map { PathQuery.abbreviate(entry.path, home: $0) } ?? entry.path) + (entry.isDirectory ? "/" : "")
     }
 
     private func submit() {
         if entries.indices.contains(selection) {
             model.insertPath(entries[selection].path)
         } else {
-            let typed = (text as NSString).expandingTildeInPath
-            if FileManager.default.fileExists(atPath: typed) { model.insertPath(typed) }
+            let typed = PathQuery.parse(text, home: homeOrRoot)
+            let path = typed.directory.map { ($0 as NSString).appendingPathComponent(typed.fragment) } ?? typed.fragment
+            // Remote paths can't be checked from here; dend lists them as you type.
+            if host != .local || FileManager.default.fileExists(atPath: path) { model.insertPath(path) }
         }
     }
 
     private func refresh() async {
-        let query = PathQuery.parse(text)
+        let query = PathQuery.parse(text, home: homeOrRoot)
         selection = 0
         note = nil
+        if host != .local { return await refreshRemote(query) }
         var shown: [PathEntry] = []
         if let dir = query.directory {
             if query.fragment.isEmpty {
@@ -224,5 +234,23 @@ struct PathPickerOverlay: View {
         case .failure(.failed(let reason)):
             if entries.isEmpty { note = "Search failed: \(reason). Folder browsing still works." }
         }
+    }
+}
+
+extension PathPickerOverlay {
+    /// A remote pane: its dend lists the typed folder. fsearch indexes this
+    /// Mac only, so bare names don't search the host's disk.
+    fileprivate func refreshRemote(_ query: PathQuery) async {
+        guard let dir = query.directory else {
+            entries = []
+            if !query.fragment.isEmpty { note = "On \(model.hostLabel(host)), type a folder path to browse; whole-disk search covers this Mac only." }
+            return
+        }
+        guard let (path, listed) = await model.listDirectory(dir, on: host), !Task.isCancelled else {
+            if !Task.isCancelled { note = "\(model.hostLabel(host)) isn't connected or its dend is too old to list folders." }
+            return
+        }
+        entries = PathEntry.listing(of: path, entries: listed, matching: query.fragment)
+        if entries.isEmpty { note = query.fragment.isEmpty ? "This folder is empty or can't be read." : "Nothing here matches “\(query.fragment)”." }
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
-/// What this build speaks. 4 added `movePane`.
-public let protocolVersion: UInt16 = 4
+/// What this build speaks. 4 added `movePane`, 5 `listDirectory`.
+public let protocolVersion: UInt16 = 5
 /// The oldest version dend still serves, and what clients say hello with so
 /// an older dend (which wants an exact match) keeps working. Features newer
 /// than this are used only when dend's welcome reports a version that has them.
@@ -28,6 +28,9 @@ public enum ClientMessage: Equatable, Sendable {
     case movePane(PaneID, to: PaneID, placement: PanePlacement)
     case input(PaneID, Data)
     case resize(PaneID, GridSize)
+    /// Protocol 5: the entries of a folder on dend's host, so a remote
+    /// client can browse it. A leading `~` means the host user's home.
+    case listDirectory(request: UInt32, path: String)
 }
 
 /// Messages dend sends to clients. Pane output is ordered with resizes so
@@ -44,6 +47,9 @@ public enum ServerMessage: Equatable, Sendable {
     /// The pane's full set of OSC 7501 records, sent on change and on attach.
     case programStatus(PaneID, [StatusRecord])
     case sessionClosed(SessionID)
+    /// Protocol 5: reply to `listDirectory`. `path` is resolved (no `~`);
+    /// entries are empty when the folder can't be read.
+    case directoryListing(request: UInt32, path: String, entries: [DirectoryEntry])
     case error(String)
 }
 
@@ -181,6 +187,8 @@ extension ClientMessage {
             w.u8(0x0B); w.uuid(id.raw); w.bytes(bytes)
         case .resize(let id, let size):
             w.u8(0x0C); w.uuid(id.raw); w.gridSize(size)
+        case .listDirectory(let request, let path):
+            w.u8(0x10); w.u32(request); w.string(path)
         }
         return w.data
     }
@@ -222,6 +230,7 @@ extension ClientMessage {
             return .movePane(pane, to: target, placement: placement)
         case 0x0B: return .input(PaneID(try r.uuid("input.id")), try r.bytes("input.bytes"))
         case 0x0C: return .resize(PaneID(try r.uuid("resize.id")), try r.gridSize("resize.size"))
+        case 0x10: return .listDirectory(request: try r.u32("list.request"), path: try r.string("list.path"))
         default: throw .invalidTag(tag, type: "ClientMessage")
         }
     }
@@ -254,6 +263,9 @@ extension ServerMessage {
         case .programStatus(let id, let records):
             w.u8(0x8A); w.uuid(id.raw); w.u32(UInt32(records.count))
             for record in records { w.statusRecord(record) }
+        case .directoryListing(let request, let path, let entries):
+            w.u8(0x8B); w.u32(request); w.string(path); w.u32(UInt32(entries.count))
+            for entry in entries { w.string(entry.name); w.u8(entry.isDirectory ? 1 : 0) }
         case .error(let message):
             w.u8(0x8F); w.string(message)
         }
@@ -292,6 +304,14 @@ extension ServerMessage {
             var records: [StatusRecord] = []
             for _ in 0 ..< count { records.append(try r.statusRecord()) }
             return .programStatus(id, records)
+        case 0x8B:
+            let request = try r.u32("listing.request")
+            let path = try r.string("listing.path")
+            let count = try r.u32("listing.count")
+            guard count <= DirectoryEntry.maxPerListing else { throw .invalidTag(255, type: "directoryListing count") }
+            var entries: [DirectoryEntry] = []
+            for _ in 0 ..< count { entries.append(DirectoryEntry(name: try r.string("listing.name"), isDirectory: try r.u8("listing.kind") == 1)) }
+            return .directoryListing(request: request, path: path, entries: entries)
         case 0x8F: return .error(try r.string("error.message"))
         default: throw .invalidTag(tag, type: "ServerMessage")
         }

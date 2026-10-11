@@ -52,7 +52,7 @@ final class TestClient {
         case .paneMeta(let id, let meta): metas[id] = meta
         case .paneExited(let id, _): exited.insert(id)
         case .programStatus(let id, let records): status[id] = records
-        case .welcome, .sessionClosed, .error: break
+        case .welcome, .sessionClosed, .directoryListing, .error: break
         }
     }
 

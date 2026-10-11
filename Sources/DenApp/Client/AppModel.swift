@@ -32,14 +32,29 @@ enum AppearanceMode: String, CaseIterable {
     }
 }
 
-/// Client-side state for one window. dend streams every session; which
-/// session and tab are shown is purely local, so switching is instant.
+/// Client-side state for one window. Each connected dend (this Mac's, and
+/// one per remote host) streams every session; which session and tab are
+/// shown is purely local, so switching is instant, across hosts too.
 @MainActor @Observable
 final class AppModel {
+    /// The local dend's connection.
     private(set) var connectionState = ConnectionState.connecting
-    /// The protocol version the connected dend speaks (from its welcome).
-    private(set) var dendProtocol: UInt16 = 0
+    /// The protocol version each connected dend speaks (from its welcome).
+    @ObservationIgnored private var protocols: [HostID: UInt16] = [:]
+    /// Every host's sessions: this Mac's first, then each remote host's.
     private(set) var sessions: [SessionSummary] = []
+    @ObservationIgnored private var hostSessions: [HostID: [SessionSummary]] = [:]
+    /// Which dend owns each session; entries outlive a dropped connection so
+    /// the session can show that it's reconnecting.
+    private(set) var sessionHosts: [SessionID: HostID] = [:]
+    @ObservationIgnored private var paneHosts: [PaneID: HostID] = [:]
+    /// Saved remote hosts and how each connection stands.
+    private(set) var remoteHosts: [RemoteHost] = RemoteHostStore.load()
+    private(set) var remoteStates: [RemoteHost.ID: RemoteState] = [:]
+    /// Set when a host needs a user name and password.
+    var loginRequest: LoginRequest?
+    /// Each host user's home folder, for `~` in titles and paths.
+    private(set) var hostHomes: [HostID: String] = [.local: NSHomeDirectory()]
     private(set) var layouts: [SessionID: SessionLayout] = [:]
     private(set) var currentSession: SessionID?
     private var activeTabs: [SessionID: TabID] = [:]
@@ -198,7 +213,16 @@ final class AppModel {
             if keys != readyPanes { readyPanes = keys }
         }
     }
-    @ObservationIgnored private var connection: DenConnection?
+    @ObservationIgnored private var connections: [HostID: DenConnection] = [:]
+    @ObservationIgnored private var channels: [RemoteHost.ID: SSH.Channel] = [:]
+    /// Bumped per connection attempt so a stale attempt's result is ignored.
+    @ObservationIgnored private var attempts: [RemoteHost.ID: Int] = [:]
+    /// Hosts whose sessions should come to the front once they arrive.
+    @ObservationIgnored private var revealOnConnect: Set<RemoteHost.ID> = []
+    /// After a password login, install Den's key on these hosts.
+    @ObservationIgnored private var installKeyAfterLogin: Set<RemoteHost.ID> = []
+    @ObservationIgnored private var listings: [UInt32: (host: HostID, reply: CheckedContinuation<(String, [DirectoryEntry])?, Never>)] = [:]
+    @ObservationIgnored private var nextListing: UInt32 = 1
     @ObservationIgnored private var sentSizes: [PaneID: GridSize] = [:]
     @ObservationIgnored private var lastSeen: [PaneID: Date] = [:]
     /// Unobserved on purpose: it changes on every write. Activity Mode reads
@@ -211,6 +235,9 @@ final class AppModel {
     @ObservationIgnored var defaultGridSize = GridSize(cols: 100, rows: 30, cellWidthPx: 16, cellHeightPx: 34)
 
     private static let lastSessionKey = "lastSessionID"
+    /// The session open when Den last quit, until it's back on screen or
+    /// you pick another one.
+    @ObservationIgnored private var awaitingRemembered = UserDefaults.standard.string(forKey: AppModel.lastSessionKey).flatMap(UUID.init(uuidString:)).map(SessionID.init)
 
     init(systemIsDark: Bool) {
         let d = UserDefaults.standard
@@ -234,59 +261,163 @@ final class AppModel {
 
     // MARK: Connection
 
+    @ObservationIgnored private var startedRemotes = false
+
+    /// Connects to this Mac's dend (starting it if needed), and on first
+    /// launch to every saved remote host.
     func connect() async {
         connectionState = .connecting
         do {
             let fd = try await DendLauncher.connect()
-            let conn = DenConnection(
-                fd: fd,
-                deliver: { [weak self] batch in self?.receive(batch) },
-                closed: { [weak self] reason in self?.connectionClosed(reason) }
-            )
-            connection = conn
-            await conn.start()
-            // The oldest version we speak, so an older running dend still
-            // accepts us; its welcome says what it can do.
-            send(.hello(version: minimumProtocolVersion, client: "Den.app"))
-            send(.subscribe)
+            await attach(fd: fd, to: .local) { [weak self] reason in self?.connectionClosed(.local, reason) }
         } catch {
             connectionState = .disconnected(error.description)
         }
+        if !startedRemotes {
+            startedRemotes = true
+            for host in remoteHosts { connectRemote(host.id, reveal: false) }
+        }
     }
 
+    private func attach(fd: Int32, to host: HostID, closed: @escaping DenConnection.Closed) async {
+        let conn = DenConnection(fd: fd, deliver: { [weak self] batch in self?.receive(batch, from: host) }, closed: closed)
+        connections[host] = conn
+        await conn.start()
+        // The oldest version we speak, so an older running dend still
+        // accepts us; its welcome says what it can do.
+        conn.send(.hello(version: minimumProtocolVersion, client: "Den.app"))
+        conn.send(.subscribe)
+    }
+
+    /// Sends to the dend that owns what the message is about.
     private func send(_ message: ClientMessage) {
-        connection?.send(message)
+        send(message, to: route(message))
     }
 
-    private func connectionClosed(_ reason: String) {
-        connection = nil
-        connectionState = .disconnected(reason)
-        replicas.removeAll()
-        sentSizes.removeAll()
-        layouts.removeAll()
+    private func send(_ message: ClientMessage, to host: HostID) {
+        connections[host]?.send(message)
+    }
+
+    private func route(_ message: ClientMessage) -> HostID {
+        switch message {
+        case .killSession(let id), .renameSession(let id, _), .newTab(let id, _, _, _, _):
+            sessionHosts[id] ?? .local
+        case .renameTab(let tab, _), .moveTab(let tab, _), .setSplitRatio(let tab, _, _):
+            host(ofTab: tab)
+        case .splitPane(let pane, _, _, _), .closePane(let pane), .movePane(let pane, _, _), .input(let pane, _), .resize(let pane, _):
+            paneHosts[pane] ?? .local
+        case .hello, .listSessions, .subscribe, .createSession, .listDirectory:
+            .local
+        }
+    }
+
+    private func host(ofTab tab: TabID) -> HostID {
+        layouts.first { $0.value.tabs.contains { $0.id == tab } }.flatMap { sessionHosts[$0.key] } ?? .local
+    }
+
+    func host(ofPane pane: PaneID?) -> HostID { pane.flatMap { paneHosts[$0] } ?? .local }
+
+    /// The host of the session on screen.
+    var currentHost: HostID { currentSession.flatMap { sessionHosts[$0] } ?? .local }
+
+    private func connectionClosed(_ host: HostID, _ reason: String) {
+        connections[host] = nil
+        protocols[host] = nil
+        forget(host)
+        if host == .local { connectionState = .disconnected(reason) }
+    }
+
+    /// Drops everything streamed from `host`; its next subscribe resends it.
+    private func forget(_ host: HostID) {
+        for (sid, h) in sessionHosts where h == host { layouts.removeValue(forKey: sid) }
+        hostSessions[host] = nil
+        rebuildSessions()
+        for (pane, h) in paneHosts where h == host { dropPane(pane) }
+        for (id, waiting) in listings where waiting.host == host {
+            listings.removeValue(forKey: id)
+            waiting.reply.resume(returning: nil)
+        }
+    }
+
+    private func dropPane(_ id: PaneID) {
+        replicas.removeValue(forKey: id)
+        sentSizes.removeValue(forKey: id)
+        metas.removeValue(forKey: id)
+        titles.removeValue(forKey: id)
+        activity.remove(id)
+        programStatus.removeValue(forKey: id)
+        seenStatus.removeValue(forKey: id)
+        statusSince.removeValue(forKey: id)
+        lastOutput.removeValue(forKey: id)
+        statusSyncPending.remove(id)
+        paneHosts.removeValue(forKey: id)
+    }
+
+    private func rebuildSessions() {
+        sessions = (hostSessions[.local] ?? []) + remoteHosts.flatMap { hostSessions[.remote($0.id)] ?? [] }
     }
 
     // MARK: Server messages
 
-    private func receive(_ batch: [ServerMessage]) {
-        for message in batch { handle(message) }
+    private func receive(_ batch: [ServerMessage], from host: HostID) {
+        for message in batch { handle(message, from: host) }
     }
 
-    private func handle(_ message: ServerMessage) {
+    private func handle(_ message: ServerMessage, from host: HostID) {
         switch message {
-        case .welcome(let version, let host):
-            dendProtocol = version
-            connectionState = .connected(host: host)
+        case .welcome(let version, let name):
+            protocols[host] = version
+            switch host {
+            case .local:
+                connectionState = .connected(host: name)
+            case .remote(let id):
+                remoteStates[id] = .connected(hostName: name)
+                retryDelays[id] = nil
+                if version >= 5 {
+                    Task { [weak self] in
+                        if let (home, _) = await self?.listDirectory("~", on: host) { self?.hostHomes[host] = home }
+                    }
+                }
+                if installKeyAfterLogin.remove(id) != nil { installKey(on: id) }
+            }
 
         case .sessions(let list):
-            sessions = list
-            if list.isEmpty, !creatingFirstSession, pendingSession == nil {
-                creatingFirstSession = true
-                createSession(name: "")
+            hostSessions[host] = list
+            for s in list { sessionHosts[s.id] = host }
+            let live = Set(list.map(\.id))
+            for (sid, h) in sessionHosts where h == host && !live.contains(sid) {
+                sessionHosts.removeValue(forKey: sid)
+                layouts.removeValue(forKey: sid)
+            }
+            rebuildSessions()
+            if let current = currentSession, sessionHosts[current] == nil, pendingSession != current {
+                currentSession = nil
+                pickSession(excluding: current)
+            }
+            switch host {
+            case .local:
+                if list.isEmpty, !creatingFirstSession, pendingSession == nil {
+                    creatingFirstSession = true
+                    createSession(name: "", on: .local)
+                }
+            case .remote(let id):
+                // A host you just connected to opens on screen: its first
+                // session, or a new one when it has none.
+                guard revealOnConnect.remove(id) != nil else { break }
+                if let first = list.first {
+                    if layouts[first.id] != nil { switchSession(first.id) } else { pendingSession = first.id }
+                } else {
+                    createSession(name: "", on: host)
+                }
             }
 
         case .layout(let layout):
+            sessionHosts[layout.session.id] = host
+            for pane in layout.tabs.flatMap(\.root.panes) { paneHosts[pane] = host }
             apply(layout)
+
+        case .directoryListing(let request, let path, let entries):
+            listings.removeValue(forKey: request)?.reply.resume(returning: (path, entries))
 
         case .paneSnapshot(let id, let bytes):
             statusSyncPending.insert(id)
@@ -333,27 +464,19 @@ final class AppModel {
             if isVisible(id) { seenStatus[id] = records }
 
         case .paneExited(let id, _):
-            replicas.removeValue(forKey: id)
-            sentSizes.removeValue(forKey: id)
-            metas.removeValue(forKey: id)
-            titles.removeValue(forKey: id)
-            activity.remove(id)
-            programStatus.removeValue(forKey: id)
-            seenStatus.removeValue(forKey: id)
-            statusSince.removeValue(forKey: id)
-            lastOutput.removeValue(forKey: id)
-            statusSyncPending.remove(id)
+            dropPane(id)
 
         case .sessionClosed(let id):
             layouts.removeValue(forKey: id)
             activeTabs.removeValue(forKey: id)
+            sessionHosts.removeValue(forKey: id)
             if currentSession == id {
                 currentSession = nil
                 pickSession(excluding: id)
             }
 
         case .error(let message):
-            lastError = message
+            lastError = host == .local ? message : "\(hostLabel(host)): \(message)"
         }
     }
 
@@ -384,11 +507,15 @@ final class AppModel {
         if pendingSession == sid {
             pendingSession = nil
             switchSession(sid)
+        } else if awaitingRemembered == sid {
+            // The last session you had open, possibly on a host that
+            // connected after this Mac's dend.
+            switchSession(sid)
         } else if currentSession == nil {
-            // Reopen the last session; the session list arrives before layouts.
-            let remembered = defaults.string(forKey: Self.lastSessionKey).flatMap(UUID.init(uuidString:)).map(SessionID.init)
-            let rememberedExists = remembered.map { r in sessions.contains { $0.id == r } } ?? false
-            if !rememberedExists || remembered == sid { switchSession(sid) }
+            // Reopen the last session; the session list arrives before
+            // layouts. Meanwhile show this one, still waiting for that.
+            let rememberedExists = awaitingRemembered.map { r in sessions.contains { $0.id == r } } ?? false
+            if !rememberedExists { show(sid) }
         }
     }
 
@@ -396,7 +523,7 @@ final class AppModel {
         if let next = sessions.first(where: { $0.id != excluding && layouts[$0.id] != nil }) {
             switchSession(next.id)
         } else {
-            createSession(name: "")
+            createSession(name: "", on: .local)
         }
     }
 
@@ -417,12 +544,258 @@ final class AppModel {
         return activeLayout?.root.contains(pane) == true
     }
 
+    // MARK: Remote hosts
+
+    /// Seconds before the next reconnect attempt, doubling up to a minute.
+    @ObservationIgnored private var retryDelays: [RemoteHost.ID: Int] = [:]
+
+    func remoteHost(_ id: RemoteHost.ID) -> RemoteHost? { remoteHosts.first { $0.id == id } }
+
+    func hostLabel(_ host: HostID) -> String {
+        switch host {
+        case .local: "This Mac"
+        case .remote(let id): remoteHost(id)?.label ?? "A removed host"
+        }
+    }
+
+    func sessions(on host: HostID) -> [SessionSummary] {
+        orderedSessions.filter { sessionHosts[$0.id] == host }
+    }
+
+    /// Adds a host from what was typed (`user@host:port`) and connects;
+    /// a host already saved is reconnected or brought to the front instead.
+    func addRemoteHost(_ text: String) {
+        guard let parsed = RemoteHost.parse(text) else {
+            lastError = "“\(text)” isn't a host address. Type a name or IP, optionally with a user and port (user@host:2222). No host was added."
+            return
+        }
+        if let existing = remoteHosts.first(where: { $0.sameDestination(as: parsed) }) {
+            if let session = sessions(on: .remote(existing.id)).first {
+                switchSession(session.id)
+            } else {
+                connectRemote(existing.id, reveal: true)
+            }
+            return
+        }
+        remoteHosts.append(parsed)
+        RemoteHostStore.save(remoteHosts)
+        connectRemote(parsed.id, reveal: true)
+    }
+
+    /// Forgets a host and its saved password. Its sessions keep running on
+    /// the host; adding it again reattaches them.
+    func removeRemoteHost(_ id: RemoteHost.ID) {
+        guard let host = remoteHost(id) else { return }
+        disconnectRemote(id)
+        remoteHosts.removeAll { $0.id == id }
+        RemoteHostStore.save(remoteHosts)
+        SSHPasswords.delete(for: host.account)
+        remoteStates[id] = nil
+        retryDelays[id] = nil
+        if loginRequest?.host == id { loginRequest = nil }
+        for (sid, h) in sessionHosts where h == .remote(id) { sessionHosts.removeValue(forKey: sid) }
+        rebuildSessions()
+        if let current = currentSession, sessionHosts[current] == nil {
+            currentSession = nil
+            pickSession(excluding: current)
+        }
+        showToast("Removed \(host.label)")
+    }
+
+    /// Connects now, replacing any connection or attempt in progress.
+    /// `reveal` brings the host's session on screen once it's up.
+    func connectRemote(_ id: RemoteHost.ID, reveal: Bool) {
+        guard let host = remoteHost(id) else { return }
+        disconnectRemote(id)
+        if reveal { revealOnConnect.insert(id) }
+        remoteStates[id] = .connecting(step: "Connecting to \(host.address)…")
+        let attempt = attempts[id, default: 0]
+        Task { await establish(host, attempt: attempt) }
+    }
+
+    /// Ends the connection and invalidates attempts and retries in flight.
+    private func disconnectRemote(_ id: RemoteHost.ID) {
+        attempts[id, default: 0] += 1
+        channels.removeValue(forKey: id)?.terminate()
+        if connections[.remote(id)] != nil { connectionClosed(.remote(id), "disconnected") }
+    }
+
+    /// Probe, install or update dend if needed, then open the stream.
+    private func establish(_ host: RemoteHost, attempt: Int) async {
+        let id = host.id
+        let ssh = SSH(host: host)
+        let probe: RemoteSetup.Probe
+        switch await ssh.run(RemoteSetup.probeCommand) {
+        case .failure(let failure):
+            guard attempts[id] == attempt else { return }
+            return setupFailed(host, failure)
+        case .success(let output):
+            guard attempts[id] == attempt else { return }
+            guard let parsed = RemoteSetup.parseProbe(output.text) else {
+                return setupFailed(host, .launch("\(host.address) answered Den's setup check with output Den can't read (\(output.text.prefix(120))). Nothing was installed."))
+            }
+            probe = parsed
+        }
+
+        let binary: URL
+        switch RemoteSetup.binary(for: probe) {
+        case .failure(let failure): return setupFailed(host, failure)
+        case .success(let url): binary = url
+        }
+        if RemoteSetup.sha256(of: binary) != probe.installedHash {
+            remoteStates[id] = .connecting(step: probe.installedHash == nil ? "Installing dend on \(host.address)…" : "Updating dend on \(host.address)…")
+            guard let data = try? Data(contentsOf: binary) else {
+                return setupFailed(host, .launch("Den could not read its dend build at \(binary.path). Nothing was installed."))
+            }
+            let installed = await ssh.run(RemoteSetup.installCommand, input: data, compress: true)
+            guard attempts[id] == attempt else { return }
+            if case .failure(let failure) = installed { return setupFailed(host, failure) }
+        }
+
+        remoteStates[id] = .connecting(step: "Attaching to \(host.address)…")
+        switch ssh.openChannel(RemoteSetup.streamCommand) {
+        case .failure(let failure):
+            setupFailed(host, failure)
+        case .success(let channel):
+            guard attempts[id] == attempt else { return channel.terminate() }
+            channels[id] = channel
+            await attach(fd: channel.fd, to: .remote(id)) { [weak self] reason in
+                self?.remoteClosed(id, attempt: attempt, reason: reason, channel: channel)
+            }
+        }
+    }
+
+    private func setupFailed(_ host: RemoteHost, _ failure: SSH.Failure) {
+        let id = host.id
+        switch failure {
+        case .authentication:
+            remoteStates[id] = .needsLogin
+            // Only interrupt with a form when you asked for this host;
+            // background reconnects wait in the session menu instead.
+            guard revealOnConnect.contains(id) else { return }
+            let triedPassword = SSHPasswords.password(for: host.account) != nil
+            loginRequest = LoginRequest(
+                host: id, user: host.user ?? NSUserName(),
+                message: triedPassword ? "That user name and password didn't work. Nothing was changed on the host; check them and try again." : nil
+            )
+        case .unreachable(let detail):
+            // Hosts that are down or asleep get retried until they're up.
+            scheduleRetry(id, reason: detail.isEmpty ? "\(host.address) isn't answering." : detail)
+        case .hostKeyChanged, .remote, .launch:
+            revealOnConnect.remove(id)
+            remoteStates[id] = .failed(failure.description)
+            lastError = "\(host.label): \(failure.description)"
+        }
+    }
+
+    private func remoteClosed(_ id: RemoteHost.ID, attempt: Int, reason: String, channel: SSH.Channel) {
+        guard attempts[id] == attempt else { return }
+        channels[id] = nil
+        connectionClosed(.remote(id), reason)
+        let said = channel.lastError
+        scheduleRetry(id, reason: said.isEmpty ? "The connection closed. Sessions keep running on the host." : said)
+    }
+
+    private func scheduleRetry(_ id: RemoteHost.ID, reason: String) {
+        let delay = min((retryDelays[id] ?? 1) * 2, 60)
+        retryDelays[id] = delay
+        remoteStates[id] = .reconnecting(reason: reason, retryIn: delay)
+        let attempt = attempts[id, default: 0]
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, self.attempts[id] == attempt else { return }
+            self.connectRemote(id, reveal: false)
+        }
+    }
+
+    /// From the login form: saves the password to the Keychain and retries.
+    func logIn(_ request: LoginRequest, password: String, installKey: Bool) {
+        guard var host = remoteHost(request.host) else { return }
+        let previous = host.account
+        let user = request.user.trimmingCharacters(in: .whitespaces)
+        host.user = user.isEmpty ? nil : user
+        if let i = remoteHosts.firstIndex(where: { $0.id == host.id }) { remoteHosts[i] = host }
+        RemoteHostStore.save(remoteHosts)
+        if previous != host.account { SSHPasswords.delete(for: previous) }
+        if case .failure(let failure) = SSHPasswords.save(password, for: host.account) {
+            lastError = "\(failure). The password wasn't saved, so Den can't log in to \(host.address) with it. Unlock the login keychain and try again."
+            return
+        }
+        loginRequest = nil
+        if installKey { installKeyAfterLogin.insert(host.id) } else { installKeyAfterLogin.remove(host.id) }
+        connectRemote(host.id, reveal: true)
+    }
+
+    func cancelLogin() {
+        guard let request = loginRequest else { return }
+        loginRequest = nil
+        revealOnConnect.remove(request.host)
+    }
+
+    /// Opens the login form for a host waiting on credentials.
+    func requestLogin(_ id: RemoteHost.ID) {
+        guard let host = remoteHost(id) else { return }
+        revealOnConnect.insert(id)
+        loginRequest = LoginRequest(host: id, user: host.user ?? NSUserName(), message: nil)
+    }
+
+    /// Adds Den's public key to the host's authorized_keys, so later logins
+    /// don't need the password (which stays saved as a fallback).
+    private func installKey(on id: RemoteHost.ID) {
+        guard let host = remoteHost(id) else { return }
+        Task { [weak self] in
+            switch await RemoteSetup.publicKey() {
+            case .failure(let failure):
+                self?.lastError = "\(host.label): \(failure.description)"
+            case .success(let key):
+                switch await SSH(host: host).run(RemoteSetup.authorizeCommand(publicKey: key)) {
+                case .success: self?.showToast("Installed Den's SSH key on \(host.address)")
+                case .failure(let failure):
+                    self?.lastError = "Den couldn't add its SSH key on \(host.address): \(failure.description) Logins keep using the saved password."
+                }
+            }
+        }
+    }
+
+    /// A folder's entries on `host`'s dend; nil when it's not connected or
+    /// too old to list folders (protocol 5).
+    func listDirectory(_ path: String, on host: HostID) async -> (String, [DirectoryEntry])? {
+        guard (protocols[host] ?? 0) >= 5, let conn = connections[host] else { return nil }
+        let request = nextListing
+        nextListing &+= 1
+        return await withCheckedContinuation { continuation in
+            listings[request] = (host, continuation)
+            conn.send(.listDirectory(request: request, path: path))
+        }
+    }
+
+    /// Why the session on screen has nothing to show, when its host is
+    /// remote and not connected.
+    var currentHostProblem: (host: RemoteHost.ID, message: String)? {
+        guard case .remote(let id) = currentHost, let sid = currentSession, layouts[sid] == nil else { return nil }
+        let name = remoteHost(id)?.address ?? "the host"
+        let message = switch remoteStates[id] {
+        case .connecting(let step): step
+        case .needsLogin: "\(name) needs you to log in."
+        case .reconnecting(let reason, let retryIn): "Lost \(name): \(reason) Retrying in \(retryIn)s; your sessions keep running there."
+        case .failed(let reason): reason
+        case .connected, nil: "Reattaching to \(name)…"
+        }
+        return (id, message)
+    }
+
     // MARK: Sessions
 
     var orderedSessions: [SessionSummary] { sessions.filter { layouts[$0.id] != nil } }
 
     func switchSession(_ id: SessionID) {
         guard layouts[id] != nil || pendingSession == id else { return }
+        awaitingRemembered = nil
+        show(id)
+    }
+
+    /// Shows a session without giving up on reopening the remembered one.
+    private func show(_ id: SessionID) {
         currentSession = id
         zoomedPane = nil
         defaults.set(id.raw.uuidString, forKey: Self.lastSessionKey)
@@ -435,10 +808,16 @@ final class AppModel {
         switchSession(list[(i + delta + list.count) % list.count].id)
     }
 
-    func createSession(name: String) {
+    /// A new session on `host`, by default the host of the session on screen.
+    func createSession(name: String, on host: HostID? = nil) {
+        let target = host ?? currentHost
+        guard connections[target] != nil else {
+            lastError = "\(hostLabel(target)) isn't connected, so no session was created. Wait for it to reconnect, or create the session on this Mac."
+            return
+        }
         let id = SessionID()
         pendingSession = id
-        send(.createSession(id: id, name: name, size: defaultGridSize))
+        send(.createSession(id: id, name: name, size: defaultGridSize), to: target)
     }
 
     func killSession(_ id: SessionID) { send(.killSession(id)) }
@@ -530,7 +909,7 @@ final class AppModel {
     /// Moves `pane` beside `target` (or swaps them) within their tab. Needs
     /// a dend that speaks protocol 4; an older one would drop the connection.
     func movePane(_ pane: PaneID, to target: PaneID, placement: PanePlacement) {
-        guard dendProtocol >= 4 else {
+        guard (protocols[host(ofPane: pane)] ?? 0) >= 4 else {
             lastError = "The running dend is older than this Den and can't move panes. Your panes are unchanged. Quit dend (its shells end) and reopen Den to use the new one."
             return
         }
@@ -656,11 +1035,15 @@ final class AppModel {
     /// Types the path at the pane's cursor, as if the user had.
     func insertPath(_ path: String) {
         guard let request = pathPicker else { return }
-        let text = PathQuery.insertion(for: path, cwd: request.cwd)
+        let host = host(ofPane: request.pane)
+        let text = PathQuery.insertion(for: path, cwd: request.cwd, home: hostHomes[host])
         replicas[request.pane]?.scroll(.bottom)
         input(request.pane, Data(text.utf8))
-        recentPaths = Array(([path] + recentPaths.filter { $0 != path }).prefix(20))
-        defaults.set(recentPaths, forKey: "recentPaths")
+        // Recents are this Mac's paths; a remote host's would mislead.
+        if host == .local {
+            recentPaths = Array(([path] + recentPaths.filter { $0 != path }).prefix(20))
+            defaults.set(recentPaths, forKey: "recentPaths")
+        }
         pathPicker = nil
     }
 
@@ -767,7 +1150,7 @@ final class AppModel {
         if !atPrompt, let t = titles[pane], !t.isEmpty { return t }
         guard let meta = metas[pane] else { return titles[pane].flatMap { $0.isEmpty ? nil : $0 } ?? "shell" }
         guard let cwd = meta.cwd else { return kind.name }
-        let folder = Self.abbreviate(cwd)
+        let folder = abbreviate(cwd, on: host(ofPane: pane))
         guard atPrompt else { return "\(kind.name) \(folder)" }
         return folder == "~" ? "~ - \(kind.name)" : folder
     }
@@ -831,7 +1214,11 @@ final class AppModel {
     func cwd(of pane: PaneID?) -> String? { pane.flatMap { metas[$0]?.cwd } }
 
     static func abbreviate(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+        PathQuery.abbreviate(path)
+    }
+
+    /// `~`-abbreviated against the home of the host the path is on.
+    func abbreviate(_ path: String, on host: HostID) -> String {
+        hostHomes[host].map { PathQuery.abbreviate(path, home: $0) } ?? path
     }
 }

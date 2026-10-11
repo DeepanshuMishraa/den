@@ -40,6 +40,7 @@ struct RootView: View {
         .animation(.den, value: model.density)
         .animation(.easeInOut(duration: 0.25), value: model.effectiveInterfaceStyle)
         .animation(.easeOut(duration: 0.18), value: model.toast)
+        .animation(.easeOut(duration: 0.18), value: model.loginRequest)
         .animation(.easeInOut(duration: 0.25), value: theme)
     }
 
@@ -125,19 +126,41 @@ struct RootView: View {
         RoundedRectangle(cornerRadius: model.density.cornerRadius, style: .continuous)
             .fill(model.surfaces.card)
             .overlay {
-                switch model.connectionState {
-                case .connecting, .connected:
-                    ProgressView().controlSize(.small)
-                case .disconnected(let reason):
+                if let problem = model.currentHostProblem {
                     VStack(spacing: 10) {
-                        Text("Not connected to dend").font(.system(size: 13, weight: .semibold))
-                        Text(reason).font(.system(size: 12)).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
-                        Button("Reconnect") { Task { await model.connect() } }
+                        Text(model.hostLabel(.remote(problem.host))).font(.system(size: 13, weight: .semibold))
+                        Text(problem.message).font(.system(size: 12)).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
+                        HStack {
+                            if model.remoteStates[problem.host] == .needsLogin {
+                                Button("Log In…") { model.requestLogin(problem.host) }
+                            } else {
+                                Button("Reconnect Now") { model.connectRemote(problem.host, reveal: true) }
+                            }
+                        }
                     }
                     .padding(24)
                     .frame(maxWidth: 420)
+                } else {
+                    localPlaceholder
                 }
             }
+    }
+
+    @ViewBuilder
+    private var localPlaceholder: some View {
+        let theme = model.theme
+        switch model.connectionState {
+        case .connecting, .connected:
+            ProgressView().controlSize(.small)
+        case .disconnected(let reason):
+            VStack(spacing: 10) {
+                Text("Not connected to dend").font(.system(size: 13, weight: .semibold))
+                Text(reason).font(.system(size: 12)).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
+                Button("Reconnect") { Task { await model.connect() } }
+            }
+            .padding(24)
+            .frame(maxWidth: 420)
+        }
     }
 
     // MARK: Overlays
@@ -168,6 +191,17 @@ struct RootView: View {
                 .padding(.top, TitleBar.height + 4)
                 .frame(maxWidth: .infinity, alignment: .top)
                 .transition(.asymmetric(insertion: .scale(scale: 0.97, anchor: .top).combined(with: .opacity), removal: .opacity))
+        }
+
+        if let request = model.loginRequest {
+            Color.black.opacity(0.18)
+                .onTapGesture { model.cancelLogin() }
+                .transition(.opacity)
+            LoginForm(request: request)
+                .id("\(request.host)-\(request.message ?? "")")
+                .padding(.top, TitleBar.height + 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
         }
 
         if let toast = model.toast {

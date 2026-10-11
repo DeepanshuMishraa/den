@@ -29,6 +29,11 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 - **Persistent sessions.** The app starts dend in its own session (`setsid`), so
   quitting Den keeps every shell running. The next launch reattaches to the
   last session.
+- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
+  the system `ssh`. Den runs `dend --stdio` there, which starts the host's dend
+  if needed and relays the SSH channel to its socket, so a remote session
+  speaks the same protocol and outlives dropped connections. See
+  [Remote hosts](#remote-hosts).
 
 | Module | Role |
 | --- | --- |
@@ -44,11 +49,43 @@ git submodule update --init
 scripts/build-libghostty-vt.sh   # fetches Zig 0.16 into .tools/, builds the xcframework
 swift test
 swift build && .build/debug/Den  # dev run (dend is started from next to the binary)
+scripts/build-dend-linux.sh       # static Linux dend (x86_64, aarch64) for remote hosts; needs Docker
 scripts/bundle.sh                # dist/Den.app (builds vendor/fsearch with cargo if present)
 ```
 
 dend logs to `~/Library/Application Support/Den/dend.log` and listens on
 `dend.sock` in the same folder. `pkill dend` ends all sessions.
+
+## Remote hosts
+
+⇧⌘P → **Add Remote Host…** (or ⌘K → Add Remote Host…), then type `host`,
+`user@host`, `host:2222`, an IP or a Tailscale MagicDNS name.
+
+1. Den reaches the host with `/usr/bin/ssh`, so `~/.ssh/config`, the agent,
+   ProxyJump and Tailscale SSH all apply. New host keys are trusted on first
+   use; a changed key stops the connection.
+2. If key login is refused, Den asks for a user name and password. The
+   password goes to the login Keychain (service "Den SSH") and reaches ssh
+   through Den's own binary acting as `SSH_ASKPASS`. Optionally Den installs
+   its key (`~/Library/Application Support/Den/ssh/id_ed25519`) in the
+   host's `authorized_keys` so the password isn't needed again.
+3. Den uploads the matching dend to `~/.den/bin/dend` when it's missing or
+   differs (by SHA-256), and enables systemd lingering so dend survives
+   logout. On the host, dend logs to `~/.den/dend.log` and listens on
+   `~/.den/dend.sock`; under systemd it runs as the user unit `den-dend`.
+4. Remote sessions appear in the session menu under their host. Unreachable
+   hosts and dropped connections retry with backoff (up to a minute); the
+   shells keep running on the host meanwhile. Right-click a host there to
+   remove it (its sessions keep running on the host).
+
+Go to Directory (⇧⌘G) and Insert Path (⌘O) list folders on the pane's host
+through its dend (protocol 5). Whole-disk search (fsearch) covers this Mac
+only.
+
+`DEN_TEST_SSH=user@host:port swift test --filter RemoteIntegrationTests` runs
+the whole setup against a real SSH server (key login with Den's key, after
+`scripts/build-dend-linux.sh`): probe, upload, `dend --stdio`, a shell on the
+host's PTY, and pane exit.
 
 ## Shortcuts
 

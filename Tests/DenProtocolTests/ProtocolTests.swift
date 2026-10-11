@@ -23,6 +23,7 @@ import Testing
             .closePane(PaneID()),
             .input(PaneID(), Data("ls -la\r".utf8)),
             .resize(PaneID(), size),
+            .listDirectory(request: 7, path: "~/src"),
         ]
         for m in messages {
             #expect(try ClientMessage.decode(m.encode()) == m)
@@ -35,6 +36,8 @@ import Testing
         let summary = SessionSummary(id: SessionID(), name: "Default", tabCount: 2)
         let messages: [ServerMessage] = [
             .welcome(version: protocolVersion, host: "Mac Studio"),
+            .directoryListing(request: 7, path: "/home/me/src", entries: [DirectoryEntry(name: "den", isDirectory: true), DirectoryEntry(name: "notes.md", isDirectory: false)]),
+            .directoryListing(request: 8, path: "/root", entries: []),
             .sessions([summary, SessionSummary(id: SessionID(), name: "Website", tabCount: 0)]),
             .layout(SessionLayout(session: summary, tabs: [TabLayout(id: TabID(), root: tree), TabLayout(id: TabID(), root: .pane(PaneID()), title: "logs")])),
             .paneSnapshot(a, Data([0x47, 0x48, 0x00, 0xFF])),

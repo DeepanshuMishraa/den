@@ -1,5 +1,11 @@
 import CDenPTY
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 import DenProtocol
 import DenVT
@@ -38,7 +44,7 @@ final class Pane {
     var lastInput = Date.distantPast
     let ptyWriter: FDWriter
     var readSource: DispatchSourceRead?
-    var exitSource: DispatchSourceProcess?
+    var exitSource: DispatchSourceProtocol?
 
     init(id: PaneID, size: GridSize, cwd: String?, queue: DispatchQueue) throws {
         let shell = Pane.userShell()
@@ -102,19 +108,36 @@ final class Pane {
     func probeMeta() -> PaneMeta {
         let pgrp = den_pty_foreground(master)
         let target = pgrp > 0 ? pgrp : pid
+        let process = Self.processName(target).map { ProgramName.resolve(process: $0, arguments: ProgramName.arguments(of: target)) } ?? meta.process
+        return PaneMeta(process: process, cwd: Self.workingDirectory(target) ?? meta.cwd)
+    }
+
+    #if os(Linux)
+    static func processName(_ pid: pid_t) -> String? {
+        guard let comm = try? String(contentsOfFile: "/proc/\(pid)/comm", encoding: .utf8) else { return nil }
+        let name = comm.trimmingCharacters(in: .newlines)
+        return name.isEmpty ? nil : name
+    }
+
+    static func workingDirectory(_ pid: pid_t) -> String? {
+        try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(pid)/cwd")
+    }
+    #else
+    static func processName(_ pid: pid_t) -> String? {
         var nameBuf = [UInt8](repeating: 0, count: 256)
-        let process = proc_name(target, &nameBuf, UInt32(nameBuf.count)) > 0
-            ? ProgramName.resolve(process: String(decoding: nameBuf.prefix(while: { $0 != 0 }), as: UTF8.self), arguments: ProgramName.arguments(of: target))
-            : meta.process
+        guard proc_name(pid, &nameBuf, UInt32(nameBuf.count)) > 0 else { return nil }
+        return String(decoding: nameBuf.prefix(while: { $0 != 0 }), as: UTF8.self)
+    }
+
+    static func workingDirectory(_ pid: pid_t) -> String? {
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        let cwd: String? = proc_pidinfo(target, PROC_PIDVNODEPATHINFO, 0, &info, size) == size
-            ? withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
-                String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
-            }
-            : meta.cwd
-        return PaneMeta(process: process, cwd: cwd)
+        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        return withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
+            String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
     }
+    #endif
 
     func terminate() {
         readSource?.cancel()
@@ -135,7 +158,7 @@ final class Pane {
             if fm.isExecutableFile(atPath: s) { return s }
         }
         if let s = ProcessInfo.processInfo.environment["SHELL"], fm.isExecutableFile(atPath: s) { return s }
-        return "/bin/zsh"
+        return ["/bin/zsh", "/bin/bash"].first(where: fm.isExecutableFile(atPath:)) ?? "/bin/sh"
     }
 }
 

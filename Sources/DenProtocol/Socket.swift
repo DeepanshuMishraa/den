@@ -1,10 +1,34 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
+
+// libc entry points by their own name, where Swift methods would shadow them.
+private func sysConnect(_ fd: Int32, _ addr: UnsafePointer<sockaddr>, _ len: socklen_t) -> Int32 { connect(fd, addr, len) }
+private func sysListen(_ fd: Int32, _ backlog: Int32) -> Int32 { listen(fd, backlog) }
+private func sysWrite(_ fd: Int32, _ buf: UnsafeRawPointer?, _ count: Int) -> Int { write(fd, buf, count) }
+
+#if canImport(Glibc)
+private let streamSocket = Int32(SOCK_STREAM.rawValue)
+#else
+private let streamSocket = SOCK_STREAM
+#endif
 
 /// Locations shared by dend and its clients.
 public enum DenPaths {
+    /// `~/Library/Application Support/Den` on macOS, `~/.den` on Linux (where
+    /// Den.app installs dend as `~/.den/bin/dend`).
     public static var supportDirectory: URL {
+        #if os(macOS)
         FileManager.default.homeDirectoryForCurrentUser
             .appending(path: "Library/Application Support/Den", directoryHint: .isDirectory)
+        #else
+        FileManager.default.homeDirectoryForCurrentUser.appending(path: ".den", directoryHint: .isDirectory)
+        #endif
     }
 
     /// `DEN_SOCKET` overrides the path, e.g. to run a second dend for testing.
@@ -40,17 +64,19 @@ public enum UnixSocket {
             raw.copyBytes(from: bytes)
             raw[bytes.count] = 0
         }
+        #if canImport(Darwin)
         addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
         return addr
     }
 
     /// Opens a non-blocking client connection to `path`.
     public static func connect(_ path: String) throws(SocketError) -> Int32 {
         var addr = try address(path)
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, streamSocket, 0)
         guard fd >= 0 else { throw SocketError(operation: "socket", path: path, errno: errno) }
         let rc = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sysConnect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard rc == 0 else {
             let e = errno
@@ -65,7 +91,7 @@ public enum UnixSocket {
     public static func listen(_ path: String) throws(SocketError) -> Int32 {
         var addr = try address(path)
         unlink(path)
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, streamSocket, 0)
         guard fd >= 0 else { throw SocketError(operation: "socket", path: path, errno: errno) }
         let rc = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
@@ -76,7 +102,7 @@ public enum UnixSocket {
             throw SocketError(operation: "bind", path: path, errno: e)
         }
         chmod(path, 0o600)
-        guard Darwin.listen(fd, 64) == 0 else {
+        guard sysListen(fd, 64) == 0 else {
             let e = errno
             close(fd)
             throw SocketError(operation: "listen", path: path, errno: e)
@@ -86,8 +112,10 @@ public enum UnixSocket {
     }
 
     public static func configure(_ fd: Int32, path: String) throws(SocketError) {
+        #if canImport(Darwin)
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        #endif
         let flags = fcntl(fd, F_GETFL)
         guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
             throw SocketError(operation: "fcntl O_NONBLOCK", path: path, errno: errno)
@@ -115,7 +143,7 @@ public final class FDWriter {
     public func write(_ data: Data) {
         guard !data.isEmpty else { return }
         if pending.isEmpty {
-            let written = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let written = data.withUnsafeBytes { sysWrite(fd, $0.baseAddress, $0.count) }
             if written == data.count { return }
             if written < 0, errno != EAGAIN, errno != EINTR {
                 onError?(errno)
@@ -138,7 +166,7 @@ public final class FDWriter {
 
     private func flush() {
         while !pending.isEmpty {
-            let written = pending.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let written = pending.withUnsafeBytes { sysWrite(fd, $0.baseAddress, $0.count) }
             if written > 0 {
                 pending.removeFirst(written)
             } else if written < 0, errno == EAGAIN || errno == EINTR {

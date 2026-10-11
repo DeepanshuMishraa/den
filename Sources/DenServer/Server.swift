@@ -1,5 +1,11 @@
 import CDenPTY
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 import Foundation
 import DenProtocol
 import DenVT
@@ -39,8 +45,9 @@ final class ClientConnection {
 /// Every client keeps a replica of each pane's terminal, seeded from a
 /// snapshot and advanced with the same byte stream the server consumed.
 public actor DenServer {
-    private let queue: DispatchSerialQueue
-    public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+    private let executor: QueueExecutor
+    private let queue: DispatchQueue
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
 
     private let socketPath: String
     private let hostName: String
@@ -60,7 +67,8 @@ public actor DenServer {
     private static let maxClientBacklog = 128 * 1024 * 1024
 
     public init(socketPath: String, hostName: String) {
-        self.queue = DispatchSerialQueue(label: "dend")
+        self.executor = QueueExecutor(label: "dend")
+        self.queue = executor.queue
         self.socketPath = socketPath
         self.hostName = hostName
     }
@@ -286,7 +294,25 @@ public actor DenServer {
             } catch {
                 send(.error("Resizing \(id) to \(size.cols)x\(size.rows) failed: \(error)"), to: conn)
             }
+
+        case .listDirectory(let request, let path):
+            let (resolved, entries) = Self.listDirectory(path)
+            send(.directoryListing(request: request, path: resolved, entries: entries), to: conn)
         }
+    }
+
+    /// `~` expanded to this user's home; symlinked folders count as folders.
+    static func listDirectory(_ path: String) -> (String, [DirectoryEntry]) {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        let resolved = path == "~" ? home : path.hasPrefix("~/") ? home + path.dropFirst() : path
+        guard let names = try? fm.contentsOfDirectory(atPath: resolved) else { return (resolved, []) }
+        let entries = names.sorted().prefix(Int(DirectoryEntry.maxPerListing)).map { name in
+            var isDir: ObjCBool = false
+            _ = fm.fileExists(atPath: (resolved as NSString).appendingPathComponent(name), isDirectory: &isDir)
+            return DirectoryEntry(name: name, isDirectory: isDir.boolValue)
+        }
+        return (resolved, Array(entries))
     }
 
     private func session(_ id: SessionID) -> Session? { sessions.first { $0.id == id } }
@@ -317,10 +343,23 @@ public actor DenServer {
         pane.readSource = read
 
         let pid = pane.pid
+        #if os(Linux)
+        // No process sources in Linux Dispatch: a pidfd turns readable on
+        // exit. Kernels before 5.3 lack pidfds; refreshMeta polls those.
+        let pidfd = den_pidfd_open(pid)
+        if pidfd >= 0 {
+            let exit = DispatchSource.makeReadSource(fileDescriptor: pidfd, queue: queue)
+            exit.setEventHandler { [self] in assumeIsolated { $0.paneProcessExited(id, pid: pid) } }
+            exit.setCancelHandler { close(pidfd) }
+            exit.resume()
+            pane.exitSource = exit
+        }
+        #else
         let exit = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
         exit.setEventHandler { [self] in assumeIsolated { $0.paneProcessExited(id, pid: pid) } }
         exit.resume()
         pane.exitSource = exit
+        #endif
         return pane
     }
 
@@ -350,9 +389,9 @@ public actor DenServer {
         broadcast(.paneOutput(id, chunk))
     }
 
-    private func paneProcessExited(_ id: PaneID, pid: pid_t) {
-        var status: Int32 = 0
-        waitpid(pid, &status, WNOHANG)
+    private func paneProcessExited(_ id: PaneID, pid: pid_t, reaped: Int32? = nil) {
+        var status: Int32 = reaped ?? 0
+        if reaped == nil { waitpid(pid, &status, WNOHANG) }
         log("\(id) process \(pid) exited with status \(status)")
         if panes[id] != nil { paneReadable(id) }
         retire(id)
@@ -395,6 +434,10 @@ public actor DenServer {
     }
 
     private func refreshMeta() {
+        for (id, pane) in panes where pane.exitSource == nil {
+            var status: Int32 = 0
+            if waitpid(pane.pid, &status, WNOHANG) == pane.pid { paneProcessExited(id, pid: pane.pid, reaped: status) }
+        }
         for (id, pane) in panes {
             expireStatus(of: pane)
             let meta = pane.probeMeta()

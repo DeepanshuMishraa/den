@@ -204,3 +204,17 @@ extension SplitNode {
         }
     }
 }
+
+/// One child of a folder listed with `listDirectory`.
+public struct DirectoryEntry: Equatable, Sendable {
+    /// dend lists at most this many entries per folder.
+    public static let maxPerListing: UInt32 = 5000
+
+    public let name: String
+    public let isDirectory: Bool
+
+    public init(name: String, isDirectory: Bool) {
+        self.name = name
+        self.isDirectory = isDirectory
+    }
+}

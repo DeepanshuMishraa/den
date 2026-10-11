@@ -10,6 +10,14 @@ let socketPath: String = {
     return DenPaths.socket.path
 }()
 
+if arguments.contains("--version") {
+    print("dend protocol \(minimumProtocolVersion)-\(protocolVersion)")
+    exit(0)
+}
+
+// Den.app's SSH transport: relay stdin/stdout to this host's dend.
+if arguments.contains("--stdio") { StdioProxy.run(socketPath: socketPath) }
+
 do {
     try FileManager.default.createDirectory(at: URL(filePath: socketPath).deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 } catch {
@@ -24,7 +32,12 @@ if let fd = try? UnixSocket.connect(socketPath) {
     exit(0)
 }
 
-let server = DenServer(socketPath: socketPath, hostName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName)
+#if os(macOS)
+let hostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+#else
+let hostName = ProcessInfo.processInfo.hostName
+#endif
+let server = DenServer(socketPath: socketPath, hostName: hostName)
 Task {
     do {
         try await server.start()

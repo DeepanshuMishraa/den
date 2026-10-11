@@ -33,7 +33,7 @@ enum PaletteRoute: Equatable {
         case .renameSession: "Session name"
         case .renameTab: "Tab title"
         case .goToDirectory: "Path"
-        case .addHost: "https://machine.tailnet.ts.net"
+        case .addHost: "user@host, 100.x.y.z or machine.tailnet.ts.net"
         case .deleteTheme: "Select a custom theme…"
         }
     }
@@ -67,6 +67,9 @@ struct CommandPalette: View {
     @State private var selection = 0
     /// fsearch's folder matches for Go to Directory, refreshed as you type.
     @State private var folderHits: [PathEntry] = []
+    /// Go to Directory on a remote host: the folder its dend listed, keyed
+    /// by the path as typed so a stale reply isn't shown for a new query.
+    @State private var remoteListing: (requested: String, path: String, entries: [DirectoryEntry])?
     /// Where the palette was opened; escaping from there closes it.
     @State private var openedAt = PaletteRoute.root
     @FocusState private var focused: Bool
@@ -119,6 +122,14 @@ struct CommandPalette: View {
         .task(id: route == .goToDirectory ? query : "") {
             guard route == .goToDirectory else { return }
             folderHits = []
+            let host = model.currentHost
+            if host != .local {
+                let parent = Self.remoteParent(query)
+                guard remoteListing?.requested != parent else { return }
+                guard let (path, entries) = await model.listDirectory(parent, on: host), !Task.isCancelled else { return }
+                remoteListing = (parent, path, entries)
+                return
+            }
             let parsed = PathQuery.parse(query)
             // A typed folder lists its own children; fsearch is for bare names.
             guard parsed.directory == nil, !parsed.fragment.isEmpty else { return }
@@ -177,7 +188,7 @@ struct CommandPalette: View {
 
     private var emptyHint: String {
         switch route {
-        case .addHost: "Type the address of a Den host"
+        case .addHost: "Type an SSH address; Den installs dend there"
         case .goToDirectory: "No folders match"
         default: "No matches"
         }
@@ -232,7 +243,7 @@ struct CommandPalette: View {
         switch target {
         case .renameSession: query = model.currentSummary?.name ?? ""
         case .renameTab: query = model.activeLayout.map(model.tabTitle) ?? ""
-        case .goToDirectory: query = (model.cwd(of: model.focused) ?? FileManager.default.homeDirectoryForCurrentUser.path) + "/"
+        case .goToDirectory: query = (model.cwd(of: model.focused) ?? (model.currentHost == .local ? FileManager.default.homeDirectoryForCurrentUser.path : "~")) + "/"
         case .theme:
             query = ""
             selection = model.themesForCurrentAppearance.firstIndex { $0.name == model.selectedThemeName } ?? 0
@@ -301,10 +312,13 @@ struct CommandPalette: View {
             }
             return [PaletteItem(id: "rename", title: "Rename tab to “\(q)”", shortcut: "↩", action: .run { model.renameTab(tab, to: q) })]
         case .addHost:
-            guard !q.isEmpty else { return [] }
-            return [PaletteItem(id: "connect", icon: "network", title: "Connect to “\(q)”", shortcut: "↩", action: .run {
-                model.report("Remote hosts need a dend that listens on the network, which this build doesn't include yet. No host was added.")
-            })]
+            let saved = model.remoteHosts.map { host in
+                PaletteItem(id: "host-\(host.id)", section: "Saved Hosts", sectionIcon: "server.rack", icon: "server.rack", title: host.label,
+                            detail: model.remoteStates[host.id].map(HostStatus.short), action: .run { model.connectRemote(host.id, reveal: true) })
+            }
+            guard !q.isEmpty else { return saved }
+            let connect = PaletteItem(id: "connect", icon: "network", title: "Connect to “\(q)”", shortcut: "↩", action: .run { model.addRemoteHost(q) })
+            return [connect] + Fuzzy.filter(saved, query: q, key: \.title)
         case .goToDirectory:
             return directoryItems(query)
         }
@@ -355,7 +369,7 @@ struct CommandPalette: View {
     private var rootItems: [PaletteItem] {
         let session = model.currentSummary?.name
         let tabTitle = model.activeLayout.map(model.tabTitle)
-        let cwd = model.cwd(of: model.focused).map(AppModel.abbreviate)
+        let cwd = model.cwd(of: model.focused).map { model.abbreviate($0, on: model.currentHost) }
         var items: [PaletteItem] = [
             PaletteItem(id: "change-session", title: "Change Session", detail: session, submenu: true, action: .push(.changeSession)),
             PaletteItem(id: "rename-session", title: "Rename Session", detail: session, submenu: true, action: .push(.renameSession)),
@@ -433,7 +447,35 @@ struct CommandPalette: View {
 
     /// Folders to open a tab in: the typed folder's children, then fsearch's
     /// matches below it, or across the disk for a bare name.
+    /// The folder part of a remote path as typed; `~` stays for dend to expand.
+    private static func remoteParent(_ text: String) -> String {
+        if text.hasSuffix("/") || text == "~" { return text }
+        let parent = (text as NSString).deletingLastPathComponent
+        return parent.isEmpty ? "~" : parent
+    }
+
+    /// Go to Directory on a remote host: the typed folder's subfolders from
+    /// its dend (no whole-disk search there).
+    private func remoteDirectoryItems(_ text: String) -> [PaletteItem] {
+        guard let listing = remoteListing, listing.requested == Self.remoteParent(text) else { return [] }
+        let prefix = text.hasSuffix("/") || text == "~" ? "" : (text as NSString).lastPathComponent
+        let folders = listing.entries.filter { $0.isDirectory && (!$0.name.hasPrefix(".") || prefix.hasPrefix(".")) }.map(\.name)
+        let base = listing.path == "/" ? "" : listing.path
+        var items: [PaletteItem] = []
+        if prefix.isEmpty {
+            let name = (listing.path as NSString).lastPathComponent
+            items.append(PaletteItem(id: listing.path, section: "Go to", sectionIcon: "folder", icon: "folder.fill",
+                                     title: name.isEmpty ? "/" : name, action: .run { model.newTab(cwd: listing.path) }))
+        }
+        for name in Fuzzy.filter(folders, query: prefix, key: { $0 }).prefix(200) {
+            let path = base + "/" + name
+            items.append(PaletteItem(id: path, section: "Go to", sectionIcon: "folder", icon: "folder.fill", title: name, action: .run { model.newTab(cwd: path) }))
+        }
+        return items
+    }
+
     private func directoryItems(_ text: String) -> [PaletteItem] {
+        if model.currentHost != .local { return remoteDirectoryItems(text) }
         let deeper = folderHits.map { hit in
             PaletteItem(id: hit.path, section: "Go to", sectionIcon: "folder", icon: "folder.fill",
                         title: PathQuery.abbreviate(hit.path), action: .run { model.newTab(cwd: hit.path) })

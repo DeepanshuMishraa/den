@@ -89,7 +89,7 @@ struct SessionButton: View {
             model.showSessionMenu.toggle()
         } label: {
             HStack(spacing: 7) {
-                Image(systemName: "laptopcomputer")
+                Image(systemName: model.currentHost == .local ? "laptopcomputer" : "server.rack")
                     .font(.system(size: 13.5, weight: .regular))
                     .foregroundStyle(theme.secondaryText)
                 if showsName {
@@ -134,11 +134,16 @@ struct SessionButton: View {
     }
 
     private var isConnected: Bool {
-        if case .connected = model.connectionState { true } else { false }
+        if case .remote(let id) = model.currentHost { return model.remoteStates[id]?.isConnected == true }
+        if case .connected = model.connectionState { return true } else { return false }
     }
 
     private var hostLabel: String {
-        switch model.connectionState {
+        if case .remote(let id) = model.currentHost {
+            let address = model.remoteHost(id)?.address ?? "removed host"
+            return model.remoteStates[id].map { $0.isConnected ? address : "\(address) · \(HostStatus.short($0).lowercased())" } ?? address
+        }
+        return switch model.connectionState {
         case .connected: "This Mac"
         case .connecting: "starting dend"
         case .disconnected: "disconnected"

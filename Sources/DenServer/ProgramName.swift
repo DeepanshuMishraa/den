@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// Names the program in a pane's foreground. For scripts run by an
@@ -51,6 +53,13 @@ enum ProgramName {
         return process
     }
 
+    #if os(Linux)
+    /// The process's argv, from /proc.
+    static func arguments(of pid: pid_t) -> [String] {
+        guard let data = FileManager.default.contents(atPath: "/proc/\(pid)/cmdline") else { return [] }
+        return data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+    }
+    #else
     /// The process's argv, from the kernel (KERN_PROCARGS2).
     static func arguments(of pid: pid_t) -> [String] {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
@@ -72,4 +81,5 @@ enum ProgramName {
         }
         return args
     }
+    #endif
 }
