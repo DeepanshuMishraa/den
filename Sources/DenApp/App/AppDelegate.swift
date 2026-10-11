@@ -171,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item("Actual Size", "0") { model.resetFontSize() },
             .separator(),
             item("Toggle Vertical Tabs", "s", [.command, .control], animate { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal }),
+            item("Toggle Sidebar", "s", [.command, .option], animate { model.toggleSidebar() }),
             item("Toggle Pane Headers", "", [], animate { model.showPaneHeaders.toggle() }),
             .separator(),
             item("Peek at Tabs", String(UnicodeScalar(NSDownArrowFunctionKey).map(Character.init) ?? "↓"), [.command, .control], animate { model.stepOverview(1) }),

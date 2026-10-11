@@ -21,6 +21,12 @@ final class Pane {
     let terminal: VTTerminal
     private(set) var size: GridSize
     var meta: PaneMeta
+    /// OSC 7501 records this pane's programs reported.
+    var status = StatusRecords()
+    var statusScanner = StatusScanner()
+    /// Process group that sent the latest working/blocked report; when it is
+    /// gone, those records end.
+    var statusOwner: pid_t?
     let ptyWriter: FDWriter
     var readSource: DispatchSourceRead?
     var exitSource: DispatchSourceProcess?
@@ -76,6 +82,12 @@ final class Pane {
         size = newSize
     }
 
+    /// The PTY's foreground process group, if any.
+    func foregroundGroup() -> pid_t? {
+        let pgrp = den_pty_foreground(master)
+        return pgrp > 0 ? pgrp : nil
+    }
+
     /// Foreground process name and its working directory, read from the
     /// kernel so it works for programs that never emit OSC 7.
     func probeMeta() -> PaneMeta {
@@ -83,7 +95,7 @@ final class Pane {
         let target = pgrp > 0 ? pgrp : pid
         var nameBuf = [UInt8](repeating: 0, count: 256)
         let process = proc_name(target, &nameBuf, UInt32(nameBuf.count)) > 0
-            ? String(decoding: nameBuf.prefix(while: { $0 != 0 }), as: UTF8.self)
+            ? ProgramName.resolve(process: String(decoding: nameBuf.prefix(while: { $0 != 0 }), as: UTF8.self), arguments: ProgramName.arguments(of: target))
             : meta.process
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)

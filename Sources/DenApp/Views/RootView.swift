@@ -45,17 +45,29 @@ struct RootView: View {
         let pad = model.density.outerPadding
         Group {
             if model.tabStyle == .vertical {
+                let collapsed = model.sidebarCollapsed
                 HStack(spacing: 0) {
-                    Sidebar()
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                    content
-                        .padding(.vertical, pad)
-                        .padding(.trailing, pad)
-                        .overlay(alignment: .leading) {
-                            // Compact density: a hairline instead of a gap.
-                            if model.density == .compact { surfaces.hairline.frame(width: 1) }
+                    if !collapsed {
+                        Sidebar()
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+                    VStack(spacing: 0) {
+                        if collapsed {
+                            CollapsedSidebarBar()
+                                .transition(.opacity)
                         }
+                        content
+                            .padding(.top, collapsed ? 0 : pad)
+                            .padding(.bottom, pad)
+                            .padding(.leading, collapsed ? pad : 0)
+                            .padding(.trailing, pad)
+                            .overlay(alignment: .leading) {
+                                // Compact density: a hairline instead of a gap.
+                                if model.density == .compact, !collapsed { surfaces.hairline.frame(width: 1) }
+                            }
+                    }
                 }
+                .animation(.den, value: collapsed)
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else {
                 VStack(spacing: 0) {

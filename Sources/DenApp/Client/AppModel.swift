@@ -47,6 +47,14 @@ final class AppModel {
     private(set) var titles: [PaneID: String] = [:]
     /// Panes that produced output while not visible: the tab's favicon badge.
     private(set) var activity: Set<PaneID> = []
+    /// OSC 7501 records per pane, as dend reports them.
+    private(set) var programStatus: [PaneID: [StatusRecord]] = [:]
+    /// Each pane's records as of when it was last on screen: done and error
+    /// results in here have been seen and stop being flagged.
+    private var seenStatus: [PaneID: [StatusRecord]] = [:]
+    /// Panes whose next status message is the attach-time sync, not news.
+    @ObservationIgnored private var statusSyncPending: Set<PaneID> = []
+    @ObservationIgnored private var chime = StatusChime()
     private(set) var lastError: String?
     /// Panes whose replica exists; observed so views attach once snapshots land.
     private(set) var readyPanes: Set<PaneID> = []
@@ -113,7 +121,20 @@ final class AppModel {
             lastError = "Could not save the shell setting to \(DenConfig.url.path): \(error.localizedDescription). New panes keep using \((defaultShell as NSString).lastPathComponent)."
         }
     }
-    var tabStyle: TabStyle { didSet { defaults.set(tabStyle.rawValue, forKey: "tabStyle") } }
+    var tabStyle: TabStyle {
+        didSet {
+            defaults.set(tabStyle.rawValue, forKey: "tabStyle")
+            // Choosing vertical tabs means wanting to see them.
+            if tabStyle == .vertical { sidebarCollapsed = false }
+        }
+    }
+    /// Vertical tabs only: the sidebar is folded away, leaving the terminal
+    /// the full width.
+    var sidebarCollapsed: Bool { didSet { defaults.set(sidebarCollapsed, forKey: "sidebarCollapsed") } }
+
+    func toggleSidebar() {
+        if tabStyle == .vertical { sidebarCollapsed.toggle() } else { tabStyle = .vertical }
+    }
     var showPaneHeaders: Bool { didSet { defaults.set(showPaneHeaders, forKey: "showPaneHeaders") } }
     var contrastCorrection: Bool { didSet { defaults.set(contrastCorrection, forKey: "acc"); refreshReplicas() } }
     var interfaceStyle: InterfaceStyle { didSet { defaults.set(interfaceStyle.rawValue, forKey: "interfaceStyle") } }
@@ -161,6 +182,7 @@ final class AppModel {
         let d = UserDefaults.standard
         self.systemIsDark = systemIsDark
         tabStyle = TabStyle(rawValue: d.string(forKey: "tabStyle") ?? "") ?? .horizontal
+        sidebarCollapsed = d.bool(forKey: "sidebarCollapsed")
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
         interfaceStyle = InterfaceStyle(rawValue: d.string(forKey: "interfaceStyle") ?? "") ?? .themed
@@ -228,6 +250,7 @@ final class AppModel {
             apply(layout)
 
         case .paneSnapshot(let id, let bytes):
+            statusSyncPending.insert(id)
             do {
                 if let existing = replicas[id] {
                     try existing.reset(snapshot: bytes)
@@ -244,6 +267,9 @@ final class AppModel {
             }
 
         case .paneOutput(let id, let bytes):
+            // Output means the attach sync is over (an older dend sends no
+            // status message when a pane has none).
+            statusSyncPending.remove(id)
             replicas[id]?.write(bytes)
             markActivity(id)
 
@@ -257,12 +283,22 @@ final class AppModel {
         case .paneMeta(let id, let meta):
             metas[id] = meta
 
+        case .programStatus(let id, let records):
+            if statusSyncPending.remove(id) == nil, let sound = StatusChime.sound(old: programStatus[id] ?? [], new: records) {
+                chime.play(sound)
+            }
+            programStatus[id] = records
+            if isVisible(id) { seenStatus[id] = records }
+
         case .paneExited(let id, _):
             replicas.removeValue(forKey: id)
             sentSizes.removeValue(forKey: id)
             metas.removeValue(forKey: id)
             titles.removeValue(forKey: id)
             activity.remove(id)
+            programStatus.removeValue(forKey: id)
+            seenStatus.removeValue(forKey: id)
+            statusSyncPending.remove(id)
 
         case .sessionClosed(let id):
             layouts.removeValue(forKey: id)
@@ -417,9 +453,11 @@ final class AppModel {
         let now = Date()
         // The tab being left counts as just seen, too.
         for pane in lastVisiblePanes { lastSeen[pane] = now }
+        for pane in lastVisiblePanes { seenStatus[pane] = programStatus[pane] }
         guard let tab = activeLayout else { return }
         activity.subtract(tab.root.panes)
         for pane in tab.root.panes { lastSeen[pane] = now }
+        for pane in tab.root.panes { seenStatus[pane] = programStatus[pane] }
         lastVisiblePanes = tab.root.panes
     }
 
@@ -605,8 +643,9 @@ final class AppModel {
     func title(for pane: PaneID) -> String {
         if let t = titles[pane], !t.isEmpty { return t }
         guard let meta = metas[pane] else { return "shell" }
-        guard let cwd = meta.cwd else { return meta.process }
-        return "\(meta.process) \(Self.abbreviate(cwd))"
+        let name = program(for: pane).name
+        guard let cwd = meta.cwd else { return name }
+        return "\(name) \(Self.abbreviate(cwd))"
     }
 
     func tabTitle(_ tab: TabLayout) -> String {
@@ -622,11 +661,23 @@ final class AppModel {
     func deck(for tab: TabLayout) -> [ProgramKind] {
         let front = focusedPanes[tab.id] ?? tab.root.panes.first
         let rest = tab.root.panes.filter { $0 != front }
-        return (front.map { [program(for: $0)] } ?? [.shell]) + rest.map(program(for:))
+        return (front.map { [program(for: $0)] } ?? [ProgramKind.shell]) + rest.map(program(for:))
     }
 
     func hasActivity(_ tab: TabLayout) -> Bool {
         tab.root.panes.contains(where: activity.contains)
+    }
+
+    /// What the tab's programs report, if anything worth showing.
+    func status(of tab: TabLayout) -> TabStatus? {
+        let panes = tab.root.panes
+        return TabStatus.summarize(panes.flatMap { programStatus[$0] ?? [] }, seen: panes.flatMap { seenStatus[$0] ?? [] })
+    }
+
+    /// A tab in this session (other than the one on screen) finished or is
+    /// waiting on the user.
+    func sessionWantsAttention(_ id: SessionID) -> Bool {
+        tabs(in: id).contains { $0.id != activeTab && status(of: $0)?.wantsAttention == true }
     }
 
     func cwd(of pane: PaneID?) -> String? { pane.flatMap { metas[$0]?.cwd } }

@@ -71,27 +71,41 @@ struct TitleBarBackground: NSViewRepresentable {
     }
 }
 
+/// The session's icon and name. Left alone, the name folds away so the tabs
+/// get the room; clicking (or switching session) brings it back.
 struct SessionButton: View {
     @Environment(AppModel.self) private var model
     @State private var hovering = false
+    @State private var expanded = true
+
+    /// How long the name stays out once nothing is touching it.
+    private static let idleDelay: Duration = .seconds(3)
 
     var body: some View {
         let theme = model.theme
-        Button { model.showSessionMenu.toggle() } label: {
+        let showsName = expanded || model.showSessionMenu || !isConnected
+        Button {
+            withAnimation(.den) { expanded = true }
+            model.showSessionMenu.toggle()
+        } label: {
             HStack(spacing: 7) {
                 Image(systemName: "laptopcomputer")
                     .font(.system(size: 13.5, weight: .regular))
                     .foregroundStyle(theme.secondaryText)
-                VStack(alignment: .leading, spacing: -1) {
-                    Text(model.currentSummary?.name ?? "Connecting…")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(theme.chromeText)
-                    Text(hostLabel)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(theme.tertiaryText)
+                if showsName {
+                    VStack(alignment: .leading, spacing: -1) {
+                        Text(model.currentSummary?.name ?? "Connecting…")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(theme.chromeText)
+                        Text(hostLabel)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.tertiaryText)
+                    }
+                    .lineLimit(1)
+                    .fixedSize()
+                    .contentTransition(.opacity)
+                    .transition(.opacity.combined(with: .offset(x: -6)))
                 }
-                .lineLimit(1)
-                .contentTransition(.opacity)
             }
             .padding(.horizontal, 7)
             .frame(height: 32)
@@ -102,6 +116,25 @@ struct SessionButton: View {
         .onHover { hovering = $0 }
         .denTooltip("Change Session", keys: ["⌘", "K"])
         .animation(.denFast, value: model.currentSession)
+        .onChange(of: model.currentSession) { withAnimation(.den) { expanded = true } }
+        // Restarts whenever any of these change; collapses only once all is quiet.
+        .task(id: IdleKey(expanded: expanded, hovering: hovering, menuOpen: model.showSessionMenu, session: model.currentSession)) {
+            guard expanded, !hovering, !model.showSessionMenu else { return }
+            try? await Task.sleep(for: Self.idleDelay)
+            guard !Task.isCancelled else { return }
+            withAnimation(.den) { expanded = false }
+        }
+    }
+
+    private struct IdleKey: Equatable {
+        let expanded: Bool
+        let hovering: Bool
+        let menuOpen: Bool
+        let session: SessionID?
+    }
+
+    private var isConnected: Bool {
+        if case .connected = model.connectionState { true } else { false }
     }
 
     private var hostLabel: String {
@@ -199,10 +232,15 @@ struct TabItem: View {
         // 0 → 1 as the peek drawer opens; follows the fingers mid-swipe.
         let peek = min(model.overviewLevel, 1)
         let radius = 15 - 5 * peek
+        // Unfocused tabs only: the one on screen speaks for itself.
+        let status = active ? nil : model.status(of: tab)
         let compact = width < TabStrip.compactTabWidth
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 DeckIcon(deck: model.deck(for: tab), height: 15, badge: !active && model.hasActivity(tab))
+                    .overlay(alignment: .bottomTrailing) {
+                        if compact, let status { StatusGlyph(indicator: status.indicator, size: 9).offset(x: 4, y: 4) }
+                    }
                 if !compact {
                     Text(model.tabTitle(tab))
                         .font(.system(size: 13, weight: active ? .medium : .regular))
@@ -221,6 +259,8 @@ struct TabItem: View {
                     }
                     .buttonStyle(.plain)
                     .transition(.opacity)
+                } else if !compact, let status {
+                    StatusGlyph(indicator: status.indicator)
                 }
             }
             .padding(.leading, 10)
@@ -265,6 +305,7 @@ struct TabItem: View {
         .padding(.top, 5)
         .contentShape(Rectangle())
         .onTapGesture { model.selectTab(tab.id) }
-        .denTooltip(model.tabTitle(tab), keys: index < 9 ? ["⌘", "\(index + 1)"] : [])
+        .denTooltip([model.tabTitle(tab), status?.message].compactMap { $0 }.joined(separator: " — "), keys: index < 9 ? ["⌘", "\(index + 1)"] : [])
+        .animation(.denFast, value: status)
     }
 }

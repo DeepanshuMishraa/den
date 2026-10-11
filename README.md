@@ -80,6 +80,15 @@ dend logs to `~/Library/Application Support/Den/dend.log` and listens on
   chip submenus (Theme with live preview, Change/Rename Session, Rename Tab,
   Go to Directory, Add Host).
 - **Vertical tabs** sidebar grouped by host and session.
+- **Program status** ([OSC 7501](https://www.superlogical.com/rex/docs/build/program-status)):
+  dend parses reports, answers `OSC 7501 ; ?`, and ends working/blocked
+  records when the reporting process exits or a new prompt starts (OSC 133;A).
+  Unfocused tabs show a spinner, a blocked symbol (permission, question,
+  auth) or an unseen done/error mark; sessions with finished or blocked work
+  get a dot in the session menu and sidebar. New blocked, error and done
+  states play a sound. Try it (then switch tabs; the reporter has to stay
+  alive, since working/blocked end with their process):
+  `sh -c 'sleep 3; printf "\033]7501;state=blocked:kind=question:msg=Q29udGludWU/\007"; sleep 60'`
 - **Themes**: 41 built-ins (27 dark, 14 light) that tint the chrome too,
   System/Light/Dark appearance, import of Ghostty theme files and Omarchy
   theme folders, migration from your Ghostty config.

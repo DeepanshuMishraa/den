@@ -287,6 +287,8 @@ public actor DenServer {
         do {
             send(.paneSnapshot(pane.id, try pane.terminal.snapshot()), to: conn)
             send(.paneMeta(pane.id, pane.meta), to: conn)
+            // Always, even empty: clients treat this first one as a sync, not news.
+            send(.programStatus(pane.id, pane.status.records), to: conn)
         } catch {
             send(.error("Snapshot of \(pane.id) failed: \(error). The pane keeps running; reattach to retry."), to: conn)
         }
@@ -331,6 +333,9 @@ public actor DenServer {
             break
         }
         guard !chunk.isEmpty else { return }
+        // Before the VT engine: a status query's reply must go out ahead of
+        // the DA reply a program sends right after it.
+        applyStatus(pane.statusScanner.feed(chunk), to: pane)
         pane.terminal.write(chunk)
         broadcast(.paneOutput(id, chunk))
     }
@@ -381,11 +386,40 @@ public actor DenServer {
 
     private func refreshMeta() {
         for (id, pane) in panes {
+            expireStatus(of: pane)
             let meta = pane.probeMeta()
             guard meta != pane.meta else { continue }
             pane.meta = meta
             broadcast(.paneMeta(id, meta))
         }
+    }
+
+    // MARK: Program status (OSC 7501)
+
+    private func applyStatus(_ events: [StatusScanner.Event], to pane: Pane) {
+        guard !events.isEmpty else { return }
+        var changed = false
+        for event in events {
+            switch event {
+            case .status(.query):
+                pane.ptyWriter.write(StatusReport.queryReply)
+            case .status(let report):
+                if case .update(let record) = report, record.phase.isTransient { pane.statusOwner = pane.foregroundGroup() }
+                changed = pane.status.apply(report) || changed
+            case .promptStart:
+                changed = pane.status.dropTransient() || changed
+            case .fullReset:
+                changed = pane.status.removeAll() || changed
+            }
+        }
+        if changed { broadcast(.programStatus(pane.id, pane.status.records)) }
+    }
+
+    /// Working and blocked records end with the process that reported them.
+    private func expireStatus(of pane: Pane) {
+        guard pane.status.hasTransient, let owner = pane.statusOwner, kill(-owner, 0) == -1, errno == ESRCH else { return }
+        pane.statusOwner = nil
+        if pane.status.dropTransient() { broadcast(.programStatus(pane.id, pane.status.records)) }
     }
 
     private func log(_ message: String) {

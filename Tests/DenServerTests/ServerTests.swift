@@ -13,6 +13,7 @@ final class TestClient {
     var sessions: [SessionSummary] = []
     var metas: [PaneID: PaneMeta] = [:]
     var exited: Set<PaneID> = []
+    var status: [PaneID: [StatusRecord]] = [:]
 
     init(path: String) throws {
         fd = try UnixSocket.connect(path)
@@ -50,6 +51,7 @@ final class TestClient {
         case .paneResized(let id, let s): try replicas[id]?.resize(cols: s.cols, rows: s.rows, cellWidthPx: s.cellWidthPx, cellHeightPx: s.cellHeightPx)
         case .paneMeta(let id, let meta): metas[id] = meta
         case .paneExited(let id, _): exited.insert(id)
+        case .programStatus(let id, let records): status[id] = records
         case .welcome, .sessionClosed, .error: break
         }
     }
@@ -166,5 +168,42 @@ final class TestClient {
         c.send(.input(pane, Data("stty size\r".utf8)))
         #expect(try c.pump(timeout: 10) { try c.text(pane).contains("30 100") })
         #expect(c.replicas[pane]?.cols == 100)
+    }
+}
+
+@Suite(.serialized) struct ProgramStatusServerTests {
+    let size = GridSize(cols: 100, rows: 24, cellWidthPx: 8, cellHeightPx: 16)
+
+    /// A subscribed client with one pane, ready for typed commands.
+    func paneClient() async throws -> (TestClient, PaneID) {
+        let path = "/tmp/dend-test-\(UUID().uuidString.prefix(8)).sock"
+        let server = DenServer(socketPath: path, hostName: "Test Mac")
+        try await server.start()
+        let c = try TestClient(path: path)
+        c.send(.hello(version: protocolVersion, client: "test"))
+        c.send(.createSession(id: SessionID(), name: "status", size: size))
+        c.send(.subscribe)
+        #expect(try c.pump { c.layout?.tabs.first != nil && !c.replicas.isEmpty })
+        return (c, try #require(c.layout?.tabs.first?.root.panes.first))
+    }
+
+    // `sh` and `\007` keep the commands portable across login shells.
+    @Test func workingEndsWithItsProcessWhileDoneStays() async throws {
+        let (c, pane) = try await paneClient()
+        c.send(.input(pane, Data("sh -c \"printf '\\033]7501;state=working:app=t\\007'; sleep 2\"\r".utf8)))
+        #expect(try c.pump(timeout: 10) { c.status[pane] == [StatusRecord(phase: .working(progress: nil), app: "t")] })
+        #expect(try c.pump(timeout: 10) { c.status[pane] == [] })
+
+        c.send(.input(pane, Data("sh -c \"printf '\\033]7501;state=done:app=t\\007'\"\r".utf8)))
+        #expect(try c.pump(timeout: 10) { c.status[pane] == [StatusRecord(phase: .done, app: "t")] })
+        // Through the next prompt and the expiry sweep, done stays.
+        _ = try c.pump(timeout: 2.5) { false }
+        #expect(c.status[pane] == [StatusRecord(phase: .done, app: "t")])
+    }
+
+    @Test func queryIsAnsweredOnThePTY() async throws {
+        let (c, pane) = try await paneClient()
+        c.send(.input(pane, Data("sh -c \"stty -echo -icanon; printf '\\033]7501;?\\007'; head -c 14 | tr -c 'a-z?:=' _; stty sane\"\r".utf8)))
+        #expect(try c.pump(timeout: 10) { try c.text(pane).contains("_______?:state") })
     }
 }

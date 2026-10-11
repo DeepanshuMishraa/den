@@ -12,8 +12,7 @@ struct Sidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 2) {
                 Color.clear.frame(width: TitleBar.leadingInset - 4)
-                IconButton(symbol: "sidebar.left", size: 14) { withAnimation(.den) { model.tabStyle = .horizontal } }
-                    .denTooltip("Switch to Horizontal Tabs")
+                SidebarToggle()
                 Spacer()
                 IconButton(symbol: "command", size: 13) { model.palette = .root }
                     .denTooltip("Command Palette", keys: ["⇧", "⌘", "P"])
@@ -38,6 +37,11 @@ struct Sidebar: View {
                         Text(session.name)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(theme.tertiaryText)
+                            .overlay(alignment: .trailing) {
+                                if session.id != model.currentSession, model.sessionWantsAttention(session.id) {
+                                    Circle().fill(theme.accent).frame(width: 6, height: 6).offset(x: 10)
+                                }
+                            }
                             .padding(.horizontal, 10)
                             .padding(.top, 10)
                             .padding(.bottom, 3)
@@ -68,6 +72,30 @@ struct Sidebar: View {
     }
 }
 
+/// Folds the sidebar away and back. Sits in the same spot either way.
+struct SidebarToggle: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        IconButton(symbol: "sidebar.left", size: 14) { withAnimation(.den) { model.toggleSidebar() } }
+            .denTooltip(model.sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar", keys: ["⌥", "⌘", "S"])
+    }
+}
+
+/// What stays of a collapsed sidebar: room for the traffic lights, the
+/// toggle to bring it back, and a strip to drag the window by.
+struct CollapsedSidebarBar: View {
+    var body: some View {
+        HStack(spacing: 2) {
+            Color.clear.frame(width: TitleBar.leadingInset - 4)
+            SidebarToggle()
+            Spacer()
+        }
+        .frame(height: TitleBar.height)
+        .background(TitleBarBackground())
+    }
+}
+
 struct SidebarRow: View {
     let tab: TabLayout
     let selected: Bool
@@ -75,6 +103,7 @@ struct SidebarRow: View {
     @State private var hovering = false
 
     var body: some View {
+        let status = selected ? nil : model.status(of: tab)
         let theme = model.theme
         HStack(spacing: 9) {
             DeckIcon(deck: model.deck(for: tab), height: 15, badge: !selected && model.hasActivity(tab))
@@ -89,6 +118,8 @@ struct SidebarRow: View {
                         .frame(width: 18, height: 18).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+            } else if let status {
+                StatusGlyph(indicator: status.indicator)
             }
         }
         .padding(.horizontal, 9)

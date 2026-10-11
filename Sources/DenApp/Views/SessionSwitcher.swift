@@ -98,6 +98,10 @@ struct SessionMenu: View {
                     .frame(width: 12)
                 Fuzzy.highlighted(s.name, hits: Fuzzy.match(query, in: s.name) ?? [], base: fg, accent: highlighted ? fg : theme.accent)
                     .font(.system(size: 13))
+                if s.id != model.currentSession, model.sessionWantsAttention(s.id) {
+                    // Something there finished or is waiting on you.
+                    Circle().fill(highlighted ? fg : theme.accent).frame(width: 6, height: 6)
+                }
                 Spacer()
                 if let shortcut { Text("⌘\(shortcut)").font(.system(size: 11.5)).foregroundStyle(dim) }
             case .create(let name):

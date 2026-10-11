@@ -395,6 +395,8 @@ struct CommandPalette: View {
         view += [
             PaletteItem(id: "tabs", title: model.tabStyle == .horizontal ? "Switch to Vertical Tabs" : "Switch to Horizontal Tabs",
                         action: .run { withAnimation(.den) { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal } }),
+            PaletteItem(id: "sidebar", title: model.tabStyle == .vertical && !model.sidebarCollapsed ? "Hide Sidebar" : "Show Sidebar", shortcut: "⌥⌘S",
+                        action: .run { withAnimation(.den) { model.toggleSidebar() } }),
             PaletteItem(id: "headers", title: model.showPaneHeaders ? "Hide Pane Headers" : "Show Pane Headers",
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
             PaletteItem(id: "acc", title: "Automatic Contrast Correction", checked: model.contrastCorrection,
