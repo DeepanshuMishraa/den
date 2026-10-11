@@ -52,6 +52,9 @@ final class AppModel {
     /// Each pane's records as of when it was last on screen: done and error
     /// results in here have been seen and stop being flagged.
     private var seenStatus: [PaneID: [StatusRecord]] = [:]
+    /// When each pane's headline status last changed state, for "12h" ages
+    /// in Activity Mode.
+    private(set) var statusSince: [PaneID: Date] = [:]
     /// Panes whose next status message is the attach-time sync, not news.
     @ObservationIgnored private var statusSyncPending: Set<PaneID> = []
     @ObservationIgnored private var chime = StatusChime()
@@ -74,6 +77,20 @@ final class AppModel {
             }
         }
     }
+    /// The path picker, open over a pane at its cursor.
+    var pathPicker: PathPickerRequest? {
+        didSet { if oldValue != nil, pathPicker == nil { terminalFocusRequest &+= 1 } }
+    }
+    struct PathPickerRequest: Equatable {
+        let pane: PaneID
+        let cwd: String?
+        /// Cursor cell when it opened; the picker hangs off it.
+        let col: Int, row: Int
+        let rows: Int
+    }
+    /// Paths inserted with the picker, newest first.
+    private(set) var recentPaths: [String]
+
     /// Bumped when an overlay closes; the focused terminal takes keyboard
     /// focus back so typing goes to the shell again.
     private(set) var terminalFocusRequest = 0
@@ -135,6 +152,18 @@ final class AppModel {
     func toggleSidebar() {
         if tabStyle == .vertical { sidebarCollapsed.toggle() } else { tabStyle = .vertical }
     }
+
+    /// Activity Mode lives in the sidebar, so turning it on shows that.
+    func toggleActivityMode() {
+        activityMode.toggle()
+        if activityMode, tabStyle != .vertical || sidebarCollapsed {
+            tabStyle = .vertical
+            sidebarCollapsed = false
+        }
+    }
+    /// The sidebar lists only tabs running agents or reporting status, each
+    /// with what it's doing and since when.
+    var activityMode: Bool { didSet { defaults.set(activityMode, forKey: "activityMode") } }
     var showPaneHeaders: Bool { didSet { defaults.set(showPaneHeaders, forKey: "showPaneHeaders") } }
     var contrastCorrection: Bool { didSet { defaults.set(contrastCorrection, forKey: "acc"); refreshReplicas() } }
     var interfaceStyle: InterfaceStyle { didSet { defaults.set(interfaceStyle.rawValue, forKey: "interfaceStyle") } }
@@ -170,6 +199,9 @@ final class AppModel {
     @ObservationIgnored private var connection: DenConnection?
     @ObservationIgnored private var sentSizes: [PaneID: GridSize] = [:]
     @ObservationIgnored private var lastSeen: [PaneID: Date] = [:]
+    /// Unobserved on purpose: it changes on every write. Activity Mode reads
+    /// it on a timer.
+    @ObservationIgnored private var lastOutput: [PaneID: Date] = [:]
     @ObservationIgnored private var pendingFocus: PaneID?
     @ObservationIgnored private var pendingSession: SessionID?
     @ObservationIgnored private var creatingFirstSession = false
@@ -183,6 +215,8 @@ final class AppModel {
         self.systemIsDark = systemIsDark
         tabStyle = TabStyle(rawValue: d.string(forKey: "tabStyle") ?? "") ?? .horizontal
         sidebarCollapsed = d.bool(forKey: "sidebarCollapsed")
+        activityMode = d.bool(forKey: "activityMode")
+        recentPaths = d.stringArray(forKey: "recentPaths") ?? []
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
         interfaceStyle = InterfaceStyle(rawValue: d.string(forKey: "interfaceStyle") ?? "") ?? .themed
@@ -271,6 +305,7 @@ final class AppModel {
             // status message when a pane has none).
             statusSyncPending.remove(id)
             replicas[id]?.write(bytes)
+            lastOutput[id] = Date()
             markActivity(id)
 
         case .paneResized(let id, let size):
@@ -287,6 +322,8 @@ final class AppModel {
             if statusSyncPending.remove(id) == nil, let sound = StatusChime.sound(old: programStatus[id] ?? [], new: records) {
                 chime.play(sound)
             }
+            let before = StatusRecords(programStatus[id] ?? []).headline?.phase
+            if statusSince[id] == nil || StatusRecords(records).headline?.phase != before { statusSince[id] = Date() }
             programStatus[id] = records
             if isVisible(id) { seenStatus[id] = records }
 
@@ -298,6 +335,8 @@ final class AppModel {
             activity.remove(id)
             programStatus.removeValue(forKey: id)
             seenStatus.removeValue(forKey: id)
+            statusSince.removeValue(forKey: id)
+            lastOutput.removeValue(forKey: id)
             statusSyncPending.remove(id)
 
         case .sessionClosed(let id):
@@ -546,6 +585,25 @@ final class AppModel {
 
     func replica(_ pane: PaneID) -> PaneReplica? { replicas[pane] }
 
+    // MARK: Path picker
+
+    func openPathPicker() {
+        guard let pane = focused, let terminal = replicas[pane]?.terminal else { return }
+        let cursor = terminal.cursorPosition
+        pathPicker = PathPickerRequest(pane: pane, cwd: cwd(of: pane), col: Int(cursor.col), row: Int(cursor.row), rows: Int(terminal.rows))
+    }
+
+    /// Types the path at the pane's cursor, as if the user had.
+    func insertPath(_ path: String) {
+        guard let request = pathPicker else { return }
+        let text = PathQuery.insertion(for: path, cwd: request.cwd)
+        replicas[request.pane]?.scroll(.bottom)
+        input(request.pane, Data(text.utf8))
+        recentPaths = Array(([path] + recentPaths.filter { $0 != path }).prefix(20))
+        defaults.set(recentPaths, forKey: "recentPaths")
+        pathPicker = nil
+    }
+
     func dismissError() { lastError = nil }
 
     func report(_ message: String) { lastError = message }
@@ -640,12 +698,18 @@ final class AppModel {
 
     // MARK: Titles
 
+    /// A shell at its prompt shows its folder ("~/site"), or "~ - fish" at
+    /// home, whatever title it sets;
+    /// other programs keep the title they set, else "Node ~/site".
     func title(for pane: PaneID) -> String {
-        if let t = titles[pane], !t.isEmpty { return t }
-        guard let meta = metas[pane] else { return "shell" }
-        let name = program(for: pane).name
-        guard let cwd = meta.cwd else { return name }
-        return "\(name) \(Self.abbreviate(cwd))"
+        let kind = program(for: pane)
+        let atPrompt = kind.glyph == .prompt
+        if !atPrompt, let t = titles[pane], !t.isEmpty { return t }
+        guard let meta = metas[pane] else { return titles[pane].flatMap { $0.isEmpty ? nil : $0 } ?? "shell" }
+        guard let cwd = meta.cwd else { return kind.name }
+        let folder = Self.abbreviate(cwd)
+        guard atPrompt else { return "\(kind.name) \(folder)" }
+        return folder == "~" ? "~ - \(kind.name)" : folder
     }
 
     func tabTitle(_ tab: TabLayout) -> String {
@@ -672,6 +736,30 @@ final class AppModel {
     func status(of tab: TabLayout) -> TabStatus? {
         let panes = tab.root.panes
         return TabStatus.summarize(panes.flatMap { programStatus[$0] ?? [] }, seen: panes.flatMap { seenStatus[$0] ?? [] })
+    }
+
+    /// The tab's line in Activity Mode, or nil for tabs it leaves out. The
+    /// most urgent reported status wins (dend infers one for agents that
+    /// don't report their own).
+    func activity(of tab: TabLayout, now: Date) -> TabActivity? {
+        let panes = tab.root.panes
+        let reported = panes.compactMap { pane in
+            StatusRecords(programStatus[pane] ?? []).headline.map { (record: $0, pane: pane) }
+        }
+        if let top = reported.min(by: { $0.record.phase.urgency < $1.record.phase.urgency }) {
+            return TabActivity(record: top.record, since: statusSince[top.pane] ?? now)
+        }
+        let agents = panes.filter { program(for: $0).isAgent }
+        guard !agents.isEmpty else { return nil }
+        return TabActivity.unreported(lastOutput: agents.compactMap { lastOutput[$0] }.max(), now: now)
+    }
+
+    /// Something outside the tab on screen finished or is waiting on the
+    /// user: the Activity Mode button wears a dot.
+    var anyTabWantsAttention: Bool {
+        layouts.values.contains { layout in
+            layout.tabs.contains { $0.id != activeTab && status(of: $0)?.wantsAttention == true }
+        }
     }
 
     /// A tab in this session (other than the one on screen) finished or is

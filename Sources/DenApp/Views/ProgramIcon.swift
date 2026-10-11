@@ -80,69 +80,74 @@ struct ProgramGlyph: View {
     }
 }
 
-/// A program's favicon: a small glossy "screen" tile. Full-color brand marks
-/// drop the tile and show raw, like a browser favicon.
+/// A program's favicon: a small glossy "screen" tile with the mark on it,
+/// framed by a thin rim that lifts it off the chrome (white on light themes,
+/// near-black on dark), like Rex's tab icons.
 struct ProgramTile: View {
     let kind: ProgramKind
     /// Tile height; width is 1.28× like a little display.
     var height: CGFloat = 16
-
-    /// Full-color brands skip the tinted tile.
-    private var isRawBrand: Bool {
-        if case .brand(_, template: false) = kind.glyph { return true }
-        return false
-    }
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        if isRawBrand {
-            BrandIcon(asset: brandAsset, template: false, size: height * 1.02)
-                .frame(width: height * 1.28, height: height)
-                .shadow(color: .black.opacity(0.28), radius: 0.8, y: 0.6)
-        } else {
-            let top = kind.tileTop, bottom = kind.tileBottom
-            let width = height * 1.28
-            let shape = RoundedRectangle(cornerRadius: height * 0.26, style: .continuous)
-            ZStack {
-                shape.fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
-                // Glass: a soft sheen on the upper half and a crisp top edge.
-                shape
-                    .fill(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0)], startPoint: .top, endPoint: .center))
-                shape.strokeBorder(
-                    LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom),
-                    lineWidth: 0.6
-                )
-                ProgramGlyph(kind: kind, size: height * 0.62)
-                    .offset(x: kind.glyph == .prompt ? -height * 0.08 : 0)
-            }
-            .frame(width: width, height: height)
-            .background(shape.fill(.black.opacity(0.45)).padding(-0.5))
-            .shadow(color: .black.opacity(0.28), radius: 0.8, y: 0.6)
+        let width = height * 1.28
+        let shape = RoundedRectangle(cornerRadius: height * 0.27, style: .continuous)
+        let dark = scheme == .dark
+        ZStack {
+            shape.fill(LinearGradient(colors: [kind.tileTop, kind.tileBottom], startPoint: .top, endPoint: .bottom))
+            // Glass: a soft sheen on the upper half and a crisp top edge.
+            shape.fill(LinearGradient(colors: [.white.opacity(0.2), .white.opacity(0)], startPoint: .top, endPoint: .center))
+            shape.strokeBorder(
+                LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.04)], startPoint: .top, endPoint: .bottom),
+                lineWidth: 0.5
+            )
+            mark
         }
+        .frame(width: width, height: height)
+        .background(
+            shape.fill(dark ? Color.black.opacity(0.55) : Color.white)
+                .overlay(shape.strokeBorder(.black.opacity(dark ? 0.3 : 0.1), lineWidth: 0.5))
+                .padding(-1.25)
+        )
+        .shadow(color: .black.opacity(dark ? 0.35 : 0.14), radius: 1, y: 0.6)
     }
 
-    private var brandAsset: String {
-        if case .brand(let asset, _) = kind.glyph { return asset }
-        return ""
+    @ViewBuilder private var mark: some View {
+        switch kind.glyph {
+        case .brand(let asset, template: false):
+            // Full-color marks keep their colors and sit a touch larger.
+            BrandIcon(asset: asset, template: false, size: height * 0.66)
+        case .prompt:
+            ProgramGlyph(kind: kind, size: height * 0.62).offset(x: -height * 0.08)
+        default:
+            ProgramGlyph(kind: kind, size: height * 0.62)
+        }
     }
 }
 
 /// Den's "Deck" icon: the focused program's tile in front, the tab's other
-/// panes as cards fanned out behind it. A single-pane tab is a single tile.
+/// panes as cards behind it. A single-pane tab is a single tile.
 struct DeckIcon: View {
+    /// Where the cards behind peek out: to the right in the tab bar, above
+    /// in the sidebar.
+    enum Fan { case right, up }
+
     let deck: [ProgramKind]
     var height: CGFloat = 16
     var badge = false
+    var fan = Fan.right
 
     var body: some View {
         let front = deck.first ?? .shell
         let behind = Array(deck.dropFirst().prefix(2))
-        let step = height * 0.2
+        let step = height * (fan == .right ? 0.22 : 0.17)
         ZStack(alignment: .leading) {
             ForEach(Array(behind.enumerated().reversed()), id: \.offset) { index, kind in
+                let depth = CGFloat(index + 1)
                 ProgramTile(kind: kind, height: height)
-                    .scaleEffect(1 - 0.1 * CGFloat(index + 1), anchor: .trailing)
-                    .brightness(-0.12 * Double(index + 1))
-                    .offset(x: step * CGFloat(index + 1))
+                    .scaleEffect(1 - 0.1 * depth, anchor: fan == .right ? .trailing : .top)
+                    .brightness(-0.08 * Double(depth))
+                    .offset(x: fan == .right ? step * depth : 0, y: fan == .up ? -step * depth : 0)
             }
             ProgramTile(kind: front, height: height)
                 .overlay(alignment: .topTrailing) {
@@ -156,7 +161,8 @@ struct DeckIcon: View {
                     }
                 }
         }
-        .frame(width: height * 1.28 + step * CGFloat(behind.count), height: height, alignment: .leading)
+        // Cards fanned up overflow the frame so rows keep their height.
+        .frame(width: height * 1.28 + (fan == .right ? step * CGFloat(behind.count) : 0), height: height, alignment: .leading)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: badge)
     }
 }

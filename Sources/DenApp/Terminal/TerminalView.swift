@@ -325,11 +325,16 @@ final class TerminalView: MTKView {
             if scalar.value < 0x20 || scalar.value == 0x7F || (0xF700 ... 0xF8FF).contains(scalar.value) { return nil }
             return s
         }
+        // Control and command never translate text; option doesn't either
+        // since it's treated as alt. Whatever remains (shift, caps lock)
+        // produced the text, so kitty-mode programs get `:` and not `<S-;>`.
+        var consumed = mods.subtracting([.ctrl, .alt, .super])
+        if text == nil { consumed = [] }
         let unshifted = (event.type == .keyDown || event.type == .keyUp)
             ? event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
             : 0
         return KeyInput(macKeyCode: (event.type == .keyDown || event.type == .keyUp) ? event.keyCode : 0,
-                        action: action, mods: mods, text: text, unshifted: unshifted)
+                        action: action, mods: mods, consumedMods: consumed, text: text, unshifted: unshifted)
     }
 
     @objc func paste(_ sender: Any?) {
@@ -467,7 +472,7 @@ final class TerminalView: MTKView {
             }
             model.input(paneID, out)
         } else if terminal.isAlternateScreen, terminal.alternateScroll, let keyEncoder {
-            let key = KeyInput(macKeyCode: UInt16(lines > 0 ? kVK_UpArrow : kVK_DownArrow), action: .press, mods: [], text: nil, unshifted: 0)
+            let key = KeyInput(macKeyCode: UInt16(lines > 0 ? kVK_UpArrow : kVK_DownArrow), action: .press, mods: [], consumedMods: [], text: nil, unshifted: 0)
             let one = keyEncoder.encode(key, terminal: terminal, optionAsAlt: true)
             model.input(paneID, (0 ..< abs(lines)).reduce(into: Data()) { acc, _ in acc.append(one) })
         } else {

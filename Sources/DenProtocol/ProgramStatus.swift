@@ -26,6 +26,18 @@ public enum ProgramPhase: Equatable, Sendable {
         }
     }
 
+    /// Lower is more urgent: blocked needs you, then failures, live work,
+    /// finished results, idle.
+    public var urgency: Int {
+        switch self {
+        case .blocked: 0
+        case .error: 1
+        case .working: 2
+        case .done: 3
+        case .idle: 4
+        }
+    }
+
     static let names = ["idle", "working", "done", "blocked", "error"]
 }
 
@@ -201,6 +213,12 @@ public struct StatusRecords: Equatable, Sendable {
     }
 
     public var hasTransient: Bool { records.contains { $0.phase.isTransient } }
+
+    /// The record that speaks for the whole terminal: the most urgent, and
+    /// the most recently updated among equally urgent ones.
+    public var headline: StatusRecord? {
+        records.reversed().min { $0.phase.urgency < $1.phase.urgency }
+    }
 
     /// `app` for a record, inherited from the nearest ancestor that set one.
     public func app(for record: StatusRecord) -> String? {

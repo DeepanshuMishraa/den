@@ -65,6 +65,8 @@ struct CommandPalette: View {
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var selection = 0
+    /// fsearch's folder matches for Go to Directory, refreshed as you type.
+    @State private var folderHits: [PathEntry] = []
     /// Where the palette was opened; escaping from there closes it.
     @State private var openedAt = PaletteRoute.root
     @FocusState private var focused: Bool
@@ -90,7 +92,7 @@ struct CommandPalette: View {
                         VStack(alignment: .leading, spacing: 1) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                                 VStack(alignment: .leading, spacing: 1) {
-                                    if let section = item.section, index == 0 || items[index - 1].section != section {
+                                    if query.trimmingCharacters(in: .whitespaces).isEmpty, let section = item.section, index == 0 || items[index - 1].section != section {
                                         SectionHeader(title: section, icon: item.sectionIcon, theme: theme)
                                     }
                                     row(item, highlighted: index == selection)
@@ -114,6 +116,16 @@ struct CommandPalette: View {
         .background(MenuSurface(theme: theme))
         .onAppear(perform: enter)
         .onChange(of: model.palette) { enter() }
+        .task(id: route == .goToDirectory ? query : "") {
+            guard route == .goToDirectory else { return }
+            folderHits = []
+            let parsed = PathQuery.parse(query)
+            guard !parsed.fragment.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled, case .success(let hits) = await PathSearch.shared.search(parsed.fragment, in: parsed.directory, foldersOnly: true, limit: 80),
+                  !Task.isCancelled else { return }
+            folderHits = Array(PathEntry.ranked(hits, matching: parsed.fragment, under: parsed.directory ?? NSHomeDirectory()).prefix(30))
+        }
         .onChange(of: query) {
             selection = 0
             if route == .theme || route == .interfaceStyle { previewSelection(visibleItems) }
@@ -277,7 +289,7 @@ struct CommandPalette: View {
         case .root, .theme, .interfaceStyle, .font, .shell, .changeSession, .deleteTheme:
             let all = items(for: route)
             guard !q.isEmpty else { return all }
-            return all.filter { Fuzzy.match(q, in: $0.title) != nil }
+            return Fuzzy.filter(all, query: q, key: \.title)
         case .renameSession:
             guard !q.isEmpty, let id = model.currentSession else { return [] }
             return [PaletteItem(id: "rename", title: "Rename session to “\(q)”", shortcut: "↩", action: .run { model.renameSession(id, to: q) })]
@@ -350,6 +362,9 @@ struct CommandPalette: View {
             PaletteItem(id: "add-host", icon: "network", title: "Add Remote Host…", submenu: true, action: .push(.addHost)),
             PaletteItem(id: "new-session", title: "New Session", shortcut: "⇧⌘N", action: .run { model.createSession(name: "") }),
             PaletteItem(id: "new-tab", title: "New Tab", shortcut: "⌘T", action: .run { model.newTab() }),
+            PaletteItem(id: "insert-path", icon: "text.insert", title: "Insert Path…", shortcut: "⌘O",
+                        // After the palette hands focus back to the terminal.
+                        action: .run { DispatchQueue.main.async { model.openPathPicker() } }),
             PaletteItem(id: "goto", icon: "folder", title: "Go to Directory…", detail: cwd, shortcut: "⇧⌘G", submenu: true, action: .push(.goToDirectory)),
             PaletteItem(id: "close-tab", title: "Close Tab", shortcut: "⇧⌘W", action: .run { model.activeTab.map(model.closeTab) }),
             PaletteItem(id: "prev-session", title: "Previous Session", action: .run { model.cycleSession(-1) }),
@@ -397,6 +412,8 @@ struct CommandPalette: View {
                         action: .run { withAnimation(.den) { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal } }),
             PaletteItem(id: "sidebar", title: model.tabStyle == .vertical && !model.sidebarCollapsed ? "Hide Sidebar" : "Show Sidebar", shortcut: "⌥⌘S",
                         action: .run { withAnimation(.den) { model.toggleSidebar() } }),
+            PaletteItem(id: "activity", title: model.activityMode ? "Leave Activity Mode" : "Activity Mode", shortcut: "⇧⌘A",
+                        action: .run { withAnimation(.den) { model.toggleActivityMode() } }),
             PaletteItem(id: "headers", title: model.showPaneHeaders ? "Hide Pane Headers" : "Show Pane Headers",
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
             PaletteItem(id: "acc", title: "Automatic Contrast Correction", checked: model.contrastCorrection,
@@ -413,7 +430,14 @@ struct CommandPalette: View {
         return items
     }
 
+    /// Folders to open a tab in: the typed folder's children, then fsearch's
+    /// matches below it, or across the disk for a bare name.
     private func directoryItems(_ text: String) -> [PaletteItem] {
+        let deeper = folderHits.map { hit in
+            PaletteItem(id: hit.path, section: "Go to", sectionIcon: "folder", icon: "folder.fill",
+                        title: PathQuery.abbreviate(hit.path), action: .run { model.newTab(cwd: hit.path) })
+        }
+        guard text.contains("/") || text.hasPrefix("~") else { return deeper }
         let expanded = (text as NSString).expandingTildeInPath
         let endsWithSlash = expanded.hasSuffix("/")
         let parent = endsWithSlash ? expanded : (expanded as NSString).deletingLastPathComponent
@@ -421,11 +445,11 @@ struct CommandPalette: View {
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: parent, isDirectory: &isDir), isDir.boolValue else { return [] }
-        let children = ((try? fm.contentsOfDirectory(atPath: parent)) ?? [])
+        let folders = ((try? fm.contentsOfDirectory(atPath: parent)) ?? [])
             .filter { !$0.hasPrefix(".") || prefix.hasPrefix(".") }
-            .filter { prefix.isEmpty || $0.lowercased().hasPrefix(prefix.lowercased()) }
             .filter { var d: ObjCBool = false; return fm.fileExists(atPath: (parent as NSString).appendingPathComponent($0), isDirectory: &d) && d.boolValue }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let children = Fuzzy.filter(folders, query: prefix, key: { $0 })
         var items: [PaletteItem] = []
         if endsWithSlash {
             let path = String(parent.dropLast()).isEmpty ? "/" : String(parent.dropLast())
@@ -436,7 +460,8 @@ struct CommandPalette: View {
             let path = (parent as NSString).appendingPathComponent(name)
             items.append(PaletteItem(id: path, section: "Go to", sectionIcon: "folder", icon: "folder.fill", title: name, action: .run { model.newTab(cwd: path) }))
         }
-        return items
+        let shown = Set(items.map(\.id))
+        return items + deeper.filter { !shown.contains($0.id) }
     }
 
     private func importTheme() {

@@ -268,6 +268,7 @@ public actor DenServer {
             detach(id, status: 0)
 
         case .input(let id, let bytes):
+            panes[id]?.lastInput = Date()
             panes[id]?.ptyWriter.write(bytes)
 
         case .resize(let id, let size):
@@ -336,6 +337,8 @@ public actor DenServer {
         // Before the VT engine: a status query's reply must go out ahead of
         // the DA reply a program sends right after it.
         applyStatus(pane.statusScanner.feed(chunk), to: pane)
+        // Echo of what the user just typed isn't the agent working.
+        if Date().timeIntervalSince(pane.lastInput) > Self.echoWindow { pane.agentOutput = true }
         pane.terminal.write(chunk)
         broadcast(.paneOutput(id, chunk))
     }
@@ -388,9 +391,11 @@ public actor DenServer {
         for (id, pane) in panes {
             expireStatus(of: pane)
             let meta = pane.probeMeta()
-            guard meta != pane.meta else { continue }
-            pane.meta = meta
-            broadcast(.paneMeta(id, meta))
+            if meta != pane.meta {
+                pane.meta = meta
+                broadcast(.paneMeta(id, meta))
+            }
+            inferAgentStatus(of: pane)
         }
     }
 
@@ -404,6 +409,7 @@ public actor DenServer {
             case .status(.query):
                 pane.ptyWriter.write(StatusReport.queryReply)
             case .status(let report):
+                pane.reportsOwnStatus = true
                 if case .update(let record) = report, record.phase.isTransient { pane.statusOwner = pane.foregroundGroup() }
                 changed = pane.status.apply(report) || changed
             case .promptStart:
@@ -413,6 +419,34 @@ public actor DenServer {
             }
         }
         if changed { broadcast(.programStatus(pane.id, pane.status.records)) }
+    }
+
+    /// The record dend reports for agents that don't report their own.
+    static let inferredID = ["den-agent"]
+    /// Output this soon after input is taken for echo.
+    static let echoWindow: TimeInterval = 0.4
+
+    /// One inference tick for an agent that doesn't speak OSC 7501. When no
+    /// agent runs, or it turns out to report status itself, any inferred
+    /// record goes.
+    private func inferAgentStatus(of pane: Pane) {
+        let output = pane.agentOutput
+        pane.agentOutput = false
+        let isAgent = AgentStatusInference.isAgent(pane.meta.process)
+        if !isAgent { pane.reportsOwnStatus = false }
+        guard isAgent, !pane.reportsOwnStatus else {
+            pane.agentInference = nil
+            if pane.status.records.contains(where: { $0.id == Self.inferredID }), pane.status.apply(.clear(id: Self.inferredID)) {
+                broadcast(.programStatus(pane.id, pane.status.records))
+            }
+            return
+        }
+        var inference = pane.agentInference ?? AgentStatusInference()
+        let phase = inference.tick(output: output, title: pane.terminal.title)
+        pane.agentInference = inference
+        guard let phase else { return }
+        pane.status.apply(.update(StatusRecord(id: Self.inferredID, phase: phase, app: pane.meta.process)))
+        broadcast(.programStatus(pane.id, pane.status.records))
     }
 
     /// Working and blocked records end with the process that reported them.

@@ -149,4 +149,31 @@ import Testing
         let message = ServerMessage.programStatus(PaneID(), records)
         #expect(try ServerMessage.decode(message.encode()) == message)
     }
+
+    // MARK: Headline
+
+    @Test func headlinePrefersTheMostUrgentRecord() {
+        let records = [
+            StatusRecord(id: ["a"], phase: .done),
+            StatusRecord(id: ["b"], phase: .blocked(.question, progress: nil)),
+            StatusRecord(id: ["c"], phase: .working(progress: nil)),
+            StatusRecord(id: ["d"], phase: .error),
+            StatusRecord(id: ["e"], phase: .idle),
+        ]
+        #expect(StatusRecords(records).headline?.id == ["b"])
+        #expect(StatusRecords(records.filter { $0.id != ["b"] }).headline?.id == ["d"])
+    }
+
+    @Test func headlineTakesTheLatestAmongEquals() {
+        var records = StatusRecords()
+        records.apply(.update(StatusRecord(id: ["a"], phase: .working(progress: nil), msg: "first")))
+        records.apply(.update(StatusRecord(id: ["b"], phase: .working(progress: 50), msg: "second")))
+        #expect(records.headline?.msg == "second")
+        records.apply(.update(StatusRecord(id: ["a"], phase: .working(progress: nil), msg: "again")))
+        #expect(records.headline?.msg == "again")
+    }
+
+    @Test func headlineOfNothingIsNil() {
+        #expect(StatusRecords().headline == nil)
+    }
 }

@@ -237,7 +237,7 @@ struct TabItem: View {
         let compact = width < TabStrip.compactTabWidth
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                DeckIcon(deck: model.deck(for: tab), height: 15, badge: !active && model.hasActivity(tab))
+                DeckIcon(deck: model.deck(for: tab), height: 17, badge: !active && model.hasActivity(tab))
                     .overlay(alignment: .bottomTrailing) {
                         if compact, let status { StatusGlyph(indicator: status.indicator, size: 9).offset(x: 4, y: 4) }
                     }

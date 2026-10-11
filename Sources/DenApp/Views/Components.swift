@@ -153,31 +153,111 @@ extension Animation {
     static let denFast = Animation.spring(response: 0.22, dampingFraction: 0.9)
 }
 
-/// Fuzzy subsequence matching for the palette and menus.
+/// Fuzzy matching for the palette and menus, ranked so what you meant
+/// comes first: exact, then prefix, then a word starting with the query,
+/// then a plain substring, then letters scattered through the text (best
+/// when they land on word starts and run together).
 enum Fuzzy {
-    /// Returns matched character offsets, or nil when `query` doesn't match.
-    static func match(_ query: String, in text: String) -> [Int]? {
-        guard !query.isEmpty else { return [] }
-        let q = Array(query.lowercased())
-        let t = Array(text.lowercased())
-        // Prefer a contiguous substring hit, which reads best when highlighted.
-        if let range = text.lowercased().range(of: query.lowercased()) {
-            let start = text.lowercased().distance(from: text.lowercased().startIndex, to: range.lowerBound)
-            return Array(start ..< start + q.count)
-        }
-        var hits: [Int] = []
-        var qi = 0
-        for (i, ch) in t.enumerated() where qi < q.count && ch == q[qi] {
-            hits.append(i)
-            qi += 1
-        }
-        return qi == q.count ? hits : nil
+    struct Match: Equatable {
+        /// Matched character offsets, for highlighting.
+        let hits: [Int]
+        /// Higher is better.
+        let score: Int
     }
 
-    static func score(_ hits: [Int]) -> Int {
-        guard let first = hits.first else { return 0 }
-        let gaps = zip(hits, hits.dropFirst()).reduce(0) { $0 + ($1.1 - $1.0 - 1) }
-        return first * 2 + gaps * 3
+    /// Returns matched character offsets, or nil when `query` doesn't match.
+    static func match(_ query: String, in text: String) -> [Int]? {
+        rank(query, in: text)?.hits
+    }
+
+    static func rank(_ query: String, in text: String) -> Match? {
+        let q = fold(query.trimmingCharacters(in: .whitespaces))
+        guard !q.isEmpty else { return Match(hits: [], score: 0) }
+        let t = fold(text)
+        guard q.count <= t.count else { return nil }
+        // Shorter texts win ties: "Theme" over "Change Theme Folder".
+        let brevity = -t.count
+
+        if t == q { return Match(hits: Array(t.indices), score: 10_000) }
+        if let start = substring(q, in: t) {
+            let hits = Array(start ..< start + q.count)
+            if start == 0 { return Match(hits: hits, score: 8_000 + brevity) }
+            if let word = wordStarts(t).first(where: { substring(q, in: Array(t[$0...])) == 0 }) {
+                return Match(hits: Array(word ..< word + q.count), score: 6_000 - word * 4 + brevity)
+            }
+            return Match(hits: hits, score: 4_000 - start * 4 + brevity)
+        }
+        return scattered(q, in: t).map { Match(hits: $0.hits, score: $0.score + brevity) }
+    }
+
+    /// Ranks `items` by how well `key` matches `query`, dropping misses.
+    /// Equal scores keep their original order.
+    static func filter<T>(_ items: [T], query: String, key: (T) -> String) -> [T] {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return items }
+        return items.enumerated()
+            .compactMap { i, item in rank(query, in: key(item)).map { (i, item, $0.score) } }
+            .sorted { $0.2 != $1.2 ? $0.2 > $1.2 : $0.0 < $1.0 }
+            .map(\.1)
+    }
+
+    private static func fold(_ s: String) -> [Character] {
+        s.map { Character($0.lowercased().first.map(String.init) ?? String($0)) }
+    }
+
+    private static func substring(_ q: [Character], in t: [Character]) -> Int? {
+        guard q.count <= t.count else { return nil }
+        return (0 ... t.count - q.count).first { t[$0 ..< $0 + q.count].elementsEqual(q) }
+    }
+
+    private static func isWordStart(_ t: [Character], _ i: Int) -> Bool {
+        guard i > 0 else { return true }
+        let prev = t[i - 1]
+        return !(prev.isLetter || prev.isNumber) || (prev.isLowercase && t[i].isUppercase)
+    }
+
+    private static func wordStarts(_ t: [Character]) -> [Int] {
+        t.indices.filter { isWordStart(t, $0) && (t[$0].isLetter || t[$0].isNumber) }
+    }
+
+    /// Best subsequence placement: word starts and runs score, gaps cost.
+    private static func scattered(_ q: [Character], in t: [Character]) -> (hits: [Int], score: Int)? {
+        let n = t.count, m = q.count
+        let none = Int.min / 4
+        // best[j][i]: best score with q[..<j+1] matched and q[j] at t[i].
+        var best = Array(repeating: Array(repeating: none, count: n), count: m)
+        var from = Array(repeating: Array(repeating: -1, count: n), count: m)
+        for j in 0 ..< m {
+            // Max of best[j-1][k] + k over k <= i - 2: a gap of i - k - 1
+            // costs that many points.
+            var far = none, farAt = -1
+            for i in 0 ..< n {
+                if j > 0, i >= 2, best[j - 1][i - 2] > none, best[j - 1][i - 2] + (i - 2) > far {
+                    far = best[j - 1][i - 2] + (i - 2)
+                    farAt = i - 2
+                }
+                guard t[i] == q[j] else { continue }
+                let bonus = 10 + (isWordStart(t, i) ? 20 : 0)
+                if j == 0 {
+                    best[j][i] = bonus - i
+                    continue
+                }
+                let adjacent = i >= 1 && best[j - 1][i - 1] > none ? best[j - 1][i - 1] + 15 : none
+                let gapped = farAt >= 0 ? far - i + 1 : none
+                guard max(adjacent, gapped) > none else { continue }
+                if adjacent >= gapped {
+                    best[j][i] = adjacent + bonus
+                    from[j][i] = i - 1
+                } else {
+                    best[j][i] = gapped + bonus
+                    from[j][i] = farAt
+                }
+            }
+        }
+        guard let end = (0 ..< n).max(by: { best[m - 1][$0] < best[m - 1][$1] }), best[m - 1][end] > none else { return nil }
+        var hits = [end]
+        var j = m - 1, i = end
+        while j > 0 { i = from[j][i]; j -= 1; hits.append(i) }
+        return (hits.reversed(), best[m - 1][end])
     }
 
     static func highlighted(_ text: String, hits: [Int], base: Color, accent: Color) -> Text {

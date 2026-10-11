@@ -22,11 +22,19 @@ struct ProgramKind: Equatable {
         case monogram(String)
         /// A real brand mark loaded from `Resources/ProgramIcons/<asset>.svg`.
         /// `template` renders the mark in the tile's ink color; otherwise the
-        /// mark keeps its own brand colors and drops the tile.
+        /// mark keeps its own brand colors on a plate (the tile colors).
         case brand(asset: String, template: Bool)
     }
 
     static func == (a: ProgramKind, b: ProgramKind) -> Bool { a.id == b.id }
+
+    /// Coding agents: they get a line in Activity Mode even when they don't
+    /// report OSC 7501 status.
+    var isAgent: Bool { Self.agentIDs.contains(id) }
+    private static let agentIDs: Set<String> = [
+        "claude", "codex", "gemini", "antigravity", "grok", "opencode", "aider", "amp",
+        "cursor", "copilot", "goose", "crush", "droid", "qwen",
+    ]
 
     static let shell = ProgramKind(id: "shell", name: "shell", top: 0x45494F, bottom: 0x1D1F22, ink: 0x5EE38C, glyph: .prompt)
 
@@ -106,7 +114,7 @@ extension ProgramKind {
         // Coding agents.
         add(["claude"], "claude", "Claude Code", 0xEC8A6A, 0xD25B3D, .brand(asset: "claude", template: true))
         add(["codex"], "codex", "Codex", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .brand(asset: "codex", template: true))
-        add(["gemini"], "gemini", "Gemini", 0x5B8DEF, 0x9B72CB, .brand(asset: "gemini", template: false))
+        add(["gemini"], "gemini", "Gemini", 0xFFFFFF, 0xE4E6EA, .brand(asset: "gemini", template: false))
         add(["antigravity"], "antigravity", "Antigravity", 0x2B2B2B, 0x0A0A0A, .brand(asset: "antigravity", template: false))
         add(["grok", "xai"], "grok", "Grok", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .brand(asset: "grok", template: true))
         add(["opencode"], "opencode", "OpenCode", 0x2B2B2B, 0x0A0A0A, .brand(asset: "opencode", template: true))
@@ -121,8 +129,8 @@ extension ProgramKind {
         add(["llm"], "llm", "LLM", 0x64748B, 0x334155, .symbol("text.bubble.fill"))
 
         // Editors.
-        add(["nvim"], "nvim", "Neovim", 0x5FB04A, 0x2B6CB0, .brand(asset: "nvim", template: false))
-        add(["vim", "vi", "view", "vimdiff"], "vim", "Vim", 0x2EA44F, 0x0F6B2E, .brand(asset: "vim", template: false))
+        add(["nvim"], "nvim", "Neovim", 0x2E3238, 0x111316, .brand(asset: "nvim", template: false))
+        add(["vim", "vi", "view", "vimdiff"], "vim", "Vim", 0x2E3238, 0x111316, .brand(asset: "vim", template: false))
         add(["hx", "helix"], "helix", "Helix", 0x8E7BDF, 0x55449C, .monogram("hx"))
         add(["emacs", "emacsclient"], "emacs", "Emacs", 0x9269C9, 0x5B3A8E, .monogram("e"))
         add(["nano", "pico"], "nano", "nano", 0x5C6BC0, 0x303F9F, .monogram("n"))
@@ -140,20 +148,20 @@ extension ProgramKind {
         add(["glab"], "glab", "GitLab", 0xFC8A4E, 0xE24329, .symbol("chevron.left.forwardslash.chevron.right"))
 
         // JavaScript and TypeScript.
-        add(["node", "nodejs"], "node", "Node", 0x6CC24A, 0x3C873A, .brand(asset: "node", template: false))
-        add(["npm", "npx"], "npm", "npm", 0xE0484A, 0xB52A2C, .brand(asset: "npm", template: false))
-        add(["pnpm", "pnpx"], "pnpm", "pnpm", 0xF9AD00, 0xE07A00, ink: 0x2B2B2B, .brand(asset: "pnpm", template: false))
-        add(["yarn"], "yarn", "Yarn", 0x37A5D6, 0x1F7EAA, .brand(asset: "yarn", template: false))
+        add(["node", "nodejs"], "node", "Node", 0xFFFFFF, 0xE4E6EA, .brand(asset: "node", template: false))
+        add(["npm", "npx"], "npm", "npm", 0xFFFFFF, 0xE4E6EA, .brand(asset: "npm", template: false))
+        add(["pnpm", "pnpx"], "pnpm", "pnpm", 0x2E3238, 0x111316, ink: 0x2B2B2B, .brand(asset: "pnpm", template: false))
+        add(["yarn"], "yarn", "Yarn", 0xFFFFFF, 0xE4E6EA, .brand(asset: "yarn", template: false))
         add(["deno"], "deno", "Deno", 0x2B2B2B, 0x0A0A0A, .symbol("lizard.fill"))
         add(["bun", "bunx"], "bun", "Bun", 0xFCF1DC, 0xEBD2A6, ink: 0x5A4127, .brand(asset: "bun", template: false))
-        add(["vite"], "vite", "Vite", 0x8A7DFF, 0xB03CF0, ink: 0xFFD62E, .brand(asset: "vite", template: false))
-        add(["next-server", "next"], "next", "Next.js", 0x2B2B2B, 0x000000, .brand(asset: "next", template: false))
-        add(["tsx", "ts-node", "tsc"], "typescript", "TypeScript", 0x4A8FDB, 0x2563A8, .brand(asset: "typescript", template: false))
+        add(["vite"], "vite", "Vite", 0x2E3238, 0x111316, ink: 0xFFD62E, .brand(asset: "vite", template: false))
+        add(["next-server", "next"], "next", "Next.js", 0xFFFFFF, 0xE4E6EA, .brand(asset: "next", template: false))
+        add(["tsx", "ts-node", "tsc"], "typescript", "TypeScript", 0xFFFFFF, 0xE4E6EA, .brand(asset: "typescript", template: false))
         add(["eslint", "biome", "prettier", "oxlint"], "lint", "Lint", 0x7C3AED, 0x4C1D95, .symbol("checkmark.seal.fill"))
         add(["vitest", "jest", "playwright"], "jstest", "Tests", 0x84CC16, 0x4D7C0F, .symbol("checkmark.diamond.fill"))
 
         // Python.
-        add(["python", "ipython", "bpython", "ptpython"], "python", "Python", 0x4B8BBE, 0x2B5B84, ink: 0xFFD43B, .brand(asset: "python", template: false))
+        add(["python", "ipython", "bpython", "ptpython"], "python", "Python", 0xFFFFFF, 0xE4E6EA, ink: 0xFFD43B, .brand(asset: "python", template: false))
         add(["uv", "uvx"], "uv", "uv", 0xDE5FE9, 0x9B2BA8, .brand(asset: "uv", template: true))
         add(["pip", "pipx", "poetry", "pdm", "hatch", "rye"], "pip", "Python Packages", 0x3E7BB6, 0x2A5A88, .symbol("shippingbox.fill"))
         add(["pytest"], "pytest", "pytest", 0x0EA5E9, 0x0369A1, .symbol("checkmark.diamond.fill"))
@@ -162,10 +170,10 @@ extension ProgramKind {
         // Other languages and toolchains.
         add(["cargo", "rustc", "rustup", "bacon", "rust-analyzer"], "rust", "Rust", 0xD9603B, 0x8A2C1B, .brand(asset: "rust", template: true))
         add(["go", "gopls", "air"], "go", "Go", 0x29BEB0, 0x00839A, .brand(asset: "go", template: true))
-        add(["ruby", "irb", "rails", "bundle", "bundler", "rake", "gem"], "ruby", "Ruby", 0xE0453B, 0x9E1B16, .brand(asset: "ruby", template: false))
+        add(["ruby", "irb", "rails", "bundle", "bundler", "rake", "gem"], "ruby", "Ruby", 0xFFFFFF, 0xE4E6EA, .brand(asset: "ruby", template: false))
         add(["iex", "mix", "elixir", "erl"], "elixir", "Elixir", 0x7A4C9E, 0x4B275F, .symbol("drop.fill"))
         add(["java", "gradle", "gradlew", "mvn", "kotlin", "sbt", "scala"], "jvm", "Java", 0xF08A24, 0xB35A09, .symbol("cup.and.saucer.fill"))
-        add(["swift", "swiftc", "xcodebuild", "xcrun", "swift-frontend"], "swift", "Swift", 0xFA7343, 0xE63A1E, .brand(asset: "swift", template: false))
+        add(["swift", "swiftc", "xcodebuild", "xcrun", "swift-frontend"], "swift", "Swift", 0xFFFFFF, 0xE4E6EA, .brand(asset: "swift", template: false))
         add(["zig"], "zig", "Zig", 0xF7A41D, 0xC97B0C, ink: 0x1A1A1A, .monogram("zig"))
         add(["ghc", "ghci", "cabal", "stack"], "haskell", "Haskell", 0x8F6CB8, 0x5E4089, .monogram("λ"))
         add(["lua", "luajit"], "lua", "Lua", 0x3D4BC4, 0x1F2A80, .symbol("moon.fill"))

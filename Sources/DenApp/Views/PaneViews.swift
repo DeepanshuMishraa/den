@@ -82,6 +82,11 @@ struct PaneCard: View {
 
             TerminalHost(pane: pane, model: model, isFocused: focused && model.activeTab == tab && model.overview != .expose,
                          isReady: model.readyPanes.contains(pane))
+                .overlay {
+                    if let request = model.pathPicker, request.pane == pane {
+                        PathPickerOverlay(request: request)
+                    }
+                }
                 .padding(.top, model.showPaneHeaders ? 0 : 6)
         }
         .background(model.surfaces.card)

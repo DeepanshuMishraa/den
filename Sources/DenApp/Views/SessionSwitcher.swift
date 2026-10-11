@@ -19,7 +19,7 @@ struct SessionMenu: View {
     private var rows: [Row] {
         let q = query.trimmingCharacters(in: .whitespaces)
         let all = model.orderedSessions
-        let matches = all.enumerated().filter { q.isEmpty || Fuzzy.match(q, in: $0.element.name) != nil }
+        let matches = Fuzzy.filter(Array(all.enumerated()), query: q, key: \.element.name)
         var rows = matches.map { Row.session($0.element, shortcut: $0.offset < 9 ? $0.offset + 1 : nil) }
         if !q.isEmpty, !all.contains(where: { $0.name.caseInsensitiveCompare(q) == .orderedSame }) {
             rows.append(.create(q))

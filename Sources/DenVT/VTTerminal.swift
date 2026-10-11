@@ -159,6 +159,11 @@ public final class VTTerminal {
         return v
     }
 
+    /// Cursor cell within the active area, 0-indexed.
+    public var cursorPosition: (col: UInt16, row: UInt16) {
+        (get16(GHOSTTY_TERMINAL_DATA_CURSOR_X), get16(GHOSTTY_TERMINAL_DATA_CURSOR_Y))
+    }
+
     /// Title set via OSC 0/2, nil when unset.
     public var title: String? { string(GHOSTTY_TERMINAL_DATA_TITLE) }
     /// Working directory reported via OSC 7, nil when unset.

@@ -20,15 +20,19 @@ public struct KeyInput: Sendable {
     public var macKeyCode: UInt16
     public var action: KeyAction
     public var mods: KeyMods
+    /// Modifiers that took part in producing `text` (e.g. shift for `:`).
+    /// The encoder leaves these out of kitty/modifyOtherKeys sequences.
+    public var consumedMods: KeyMods
     /// Text the key produced after modifiers, if any.
     public var text: String?
     /// Codepoint the key produces without modifiers (for kitty protocol).
     public var unshifted: UInt32
 
-    public init(macKeyCode: UInt16, action: KeyAction, mods: KeyMods, text: String?, unshifted: UInt32) {
+    public init(macKeyCode: UInt16, action: KeyAction, mods: KeyMods, consumedMods: KeyMods, text: String?, unshifted: UInt32) {
         self.macKeyCode = macKeyCode
         self.action = action
         self.mods = mods
+        self.consumedMods = consumedMods
         self.text = text
         self.unshifted = unshifted
     }
@@ -69,7 +73,7 @@ public final class KeyEncoder {
         ghostty_key_event_set_action(event, action)
         ghostty_key_event_set_key(event, macKeycodes[input.macKeyCode] ?? GHOSTTY_KEY_UNIDENTIFIED)
         ghostty_key_event_set_mods(event, input.mods.rawValue)
-        ghostty_key_event_set_consumed_mods(event, 0)
+        ghostty_key_event_set_consumed_mods(event, input.consumedMods.rawValue)
         ghostty_key_event_set_unshifted_codepoint(event, input.unshifted)
         ghostty_key_event_set_composing(event, false)
 
