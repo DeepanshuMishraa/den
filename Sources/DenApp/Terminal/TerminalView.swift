@@ -24,8 +24,7 @@ final class TerminalView: MTKView {
     private var scrollRemainder: CGFloat = 0
     private var pressedButtons = 0
     private var selecting = false
-    private let scroller = NSScroller()
-    private var scrollerHide: DispatchWorkItem?
+    private let scroller = ScrollIndicator()
     var isFocusedPane = false {
         didSet {
             guard oldValue != isFocusedPane else { return }
@@ -57,12 +56,11 @@ final class TerminalView: MTKView {
         clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         renderState = try? VTRenderState()
         if mode == .interactive {
-            scroller.scrollerStyle = .overlay
-            scroller.knobStyle = .default
-            scroller.controlSize = .small
-            scroller.alphaValue = 0
-            scroller.target = self
-            scroller.action = #selector(scrollerMoved(_:))
+            scroller.onScroll = { [weak self] row in
+                guard let replica = self?.replica else { return }
+                replica.terminal.scrollViewport(toRow: row)
+                replica.touch()
+            }
             addSubview(scroller)
         }
         attach(model.replica(paneID))
@@ -163,8 +161,7 @@ final class TerminalView: MTKView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        let w = NSScroller.scrollerWidth(for: .small, scrollerStyle: .overlay)
-        scroller.frame = NSRect(x: newSize.width - w - 2, y: 2, width: w, height: max(newSize.height - 4, 0))
+        scroller.frame = NSRect(x: newSize.width - ScrollIndicator.hitWidth, y: 0, width: ScrollIndicator.hitWidth, height: newSize.height)
         // Drawing is on demand, so a new size needs an explicit redraw or the
         // pane shows the old frame until the server's reflow arrives.
         needsDisplay = true
@@ -208,7 +205,10 @@ final class TerminalView: MTKView {
             } catch {
                 NSLog("Den: render update for \(paneID) failed: \(error)")
             }
-            if mode == .interactive { updateScroller(replica.terminal.scrollbar) }
+            if mode == .interactive {
+                scroller.setColor((replica.theme).foreground.nsColor)
+                scroller.update(replica.terminal.scrollbar)
+            }
         }
 
         let clear = frame.clear.map { $0.simd() } ?? .zero
@@ -243,45 +243,6 @@ final class TerminalView: MTKView {
         encoder.endEncoding()
         buffer.present(drawable)
         buffer.commit()
-    }
-
-    // MARK: Scrollbar
-
-    private var lastScrollbar: Scrollbar?
-
-    private func updateScroller(_ bar: Scrollbar) {
-        guard bar != lastScrollbar else { return }
-        let moved = lastScrollbar.map { $0.offset != bar.offset } ?? false
-        lastScrollbar = bar
-        let hidden = bar.total <= bar.length
-        scroller.isHidden = hidden
-        guard !hidden else { return }
-        let range = Double(bar.total - bar.length)
-        scroller.knobProportion = CGFloat(Double(bar.length) / Double(bar.total))
-        scroller.doubleValue = range > 0 ? Double(bar.offset) / range : 1
-        if moved { flashScroller() }
-    }
-
-    /// Native overlay behavior: show while scrolling, fade out after.
-    private func flashScroller() {
-        scrollerHide?.cancel()
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.1; scroller.animator().alphaValue = 1 }
-        let hide = DispatchWorkItem { [weak self] in
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.4; self?.scroller.animator().alphaValue = 0 }
-        }
-        scrollerHide = hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: hide)
-    }
-
-    @objc private func scrollerMoved(_ sender: NSScroller) {
-        guard let replica, let bar = lastScrollbar else { return }
-        let range = Double(bar.total - bar.length)
-        switch sender.hitPart {
-        case .decrementPage: replica.scroll(.delta(-Int(bar.length)))
-        case .incrementPage: replica.scroll(.delta(Int(bar.length)))
-        default: replica.terminal.scrollViewport(toRow: UInt64((sender.doubleValue * range).rounded())); replica.touch()
-        }
-        flashScroller()
     }
 
     // MARK: Keyboard
@@ -401,7 +362,15 @@ final class TerminalView: MTKView {
     override func otherMouseUp(with event: NSEvent) { mouseReport(event, .release, .middle) }
     override func mouseMoved(with event: NSEvent) {
         updateCursor(event.modifierFlags)
+        // Nearing the right edge brings the scrollbar up to grab.
+        let nearEdge = convert(event.locationInWindow, from: nil).x > bounds.width - ScrollIndicator.hitWidth
+        scroller.setHovering(nearEdge)
+        if nearEdge, scroller.alphaValue > 0 { NSCursor.arrow.set() }
         mouseReport(event, .motion, nil)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        scroller.setHovering(false)
     }
 
     /// Holding ⌘ over a pane shows it can be grabbed.
@@ -430,7 +399,7 @@ final class TerminalView: MTKView {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
         guard mode == .interactive else { return }
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self))
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self))
     }
 
     override func cursorUpdate(with event: NSEvent) {
