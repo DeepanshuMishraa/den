@@ -1,0 +1,185 @@
+import DenProtocol
+import SwiftUI
+
+struct RootView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let theme = model.theme
+        let surfaces = model.surfaces
+        // 0 → 1 as the overview goes from peek to exposé.
+        let expose = min(max(model.overviewLevel - 1, 0), 1)
+        ZStack(alignment: .topLeading) {
+            LinearGradient(colors: [surfaces.windowTop, surfaces.windowBottom], startPoint: .top, endPoint: .bottom)
+
+            if expose < 1 {
+                mainLayout
+                    .opacity(1 - expose)
+                    .scaleEffect(1 - 0.03 * expose)
+                    .allowsHitTesting(expose == 0)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+            if expose > 0 {
+                ExposeView()
+                    .opacity(expose)
+                    .scaleEffect(1.04 - 0.04 * expose)
+                    .transition(.opacity.combined(with: .scale(scale: 1.04)))
+            }
+
+            overlays
+        }
+        .ignoresSafeArea()
+        .preferredColorScheme(theme.isDark ? .dark : .light)
+        .animation(.den, value: model.overview)
+        .animation(.den, value: model.tabStyle)
+        .animation(.den, value: model.density)
+        .animation(.easeInOut(duration: 0.25), value: model.effectiveInterfaceStyle)
+        .animation(.easeOut(duration: 0.18), value: model.toast)
+        .animation(.easeInOut(duration: 0.25), value: theme)
+    }
+
+    /// The normal window: tab bar or sidebar around the active tab.
+    @ViewBuilder
+    private var mainLayout: some View {
+        let surfaces = model.surfaces
+        let pad = model.density.outerPadding
+        Group {
+            if model.tabStyle == .vertical {
+                HStack(spacing: 0) {
+                    Sidebar()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    content
+                        .padding(.vertical, pad)
+                        .padding(.trailing, pad)
+                        .overlay(alignment: .leading) {
+                            // Compact density: a hairline instead of a gap.
+                            if model.density == .compact { surfaces.hairline.frame(width: 1) }
+                        }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            } else {
+                VStack(spacing: 0) {
+                    TitleBar().zIndex(1)
+                    content
+                        .padding(.horizontal, pad)
+                        .padding(.bottom, pad)
+                        .padding(.top, 2 * min(model.overviewLevel, 1))
+                        .overlay(alignment: .top) {
+                            if model.density == .compact { surfaces.hairline.frame(height: 1) }
+                        }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+        }
+    }
+
+    // MARK: Content
+
+    @ViewBuilder
+    private var content: some View {
+        ZStack {
+            if let tab = model.activeLayout {
+                Group {
+                    if let zoomed = model.zoomedPane, tab.root.contains(zoomed) {
+                        PaneCard(pane: zoomed, tab: tab.id)
+                            .transition(.scale(scale: 0.97).combined(with: .opacity))
+                    } else {
+                        SplitTreeView(node: tab.root, tab: tab.id)
+                    }
+                }
+                .id(tab.id)
+                .transition(.opacity)
+            } else {
+                placeholder
+            }
+        }
+        .animation(.denFast, value: model.activeTab)
+        .animation(.den, value: model.zoomedPane)
+        .animation(.den, value: model.activeLayout?.root)
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded {
+            if model.overview == .peek { withAnimation(.den) { model.overview = .none } }
+        })
+    }
+
+    @ViewBuilder
+    private var placeholder: some View {
+        let theme = model.theme
+        RoundedRectangle(cornerRadius: model.density.cornerRadius, style: .continuous)
+            .fill(model.surfaces.card)
+            .overlay {
+                switch model.connectionState {
+                case .connecting, .connected:
+                    ProgressView().controlSize(.small)
+                case .disconnected(let reason):
+                    VStack(spacing: 10) {
+                        Text("Not connected to dend").font(.system(size: 13, weight: .semibold))
+                        Text(reason).font(.system(size: 12)).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
+                        Button("Reconnect") { Task { await model.connect() } }
+                    }
+                    .padding(24)
+                    .frame(maxWidth: 420)
+                }
+            }
+    }
+
+    // MARK: Overlays
+
+    @ViewBuilder
+    private var overlays: some View {
+        let dismissible = model.showSessionMenu || model.palette != nil
+        if dismissible {
+            // Clicking anywhere outside a menu closes it.
+            Color.black.opacity(0.001)
+                .onTapGesture {
+                    model.showSessionMenu = false
+                    model.previewTheme = nil
+                    model.palette = nil
+                }
+        }
+
+        if model.showSessionMenu {
+            SessionMenu()
+                .padding(.leading, model.tabStyle == .vertical ? 14 : TitleBar.leadingInset + 2)
+                .padding(.top, TitleBar.height - 2)
+                .transition(.asymmetric(insertion: .scale(scale: 0.96, anchor: .topLeading).combined(with: .opacity), removal: .opacity))
+        }
+
+        if model.palette != nil {
+            // Centered under the title bar, as in Superlogical's Rex.
+            CommandPalette()
+                .padding(.top, TitleBar.height + 4)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .transition(.asymmetric(insertion: .scale(scale: 0.97, anchor: .top).combined(with: .opacity), removal: .opacity))
+        }
+
+        if let toast = model.toast {
+            VStack {
+                Spacer()
+                ToastView(toast: toast, theme: model.theme, fontFamily: model.fontFamily, fontSize: model.fontSize - 1)
+                    .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity)
+            .allowsHitTesting(false)
+            .id(toast.id)
+            .transition(.opacity.combined(with: .offset(y: 6)))
+        }
+
+        if let error = model.lastError {
+            VStack {
+                Spacer()
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                    Text(error).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Button { model.dismissError() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                }
+                .padding(12)
+                .frame(maxWidth: 520)
+                .background(MenuSurface(theme: model.theme))
+                .padding(18)
+            }
+            .frame(maxWidth: .infinity)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}

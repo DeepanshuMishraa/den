@@ -1,0 +1,471 @@
+import AppKit
+import Carbon.HIToolbox
+import MetalKit
+import DenProtocol
+import DenVT
+
+/// Draws one pane's replica with Metal. Interactive views also turn AppKit
+/// input into VT bytes; thumbnail views scale the whole grid to fit and
+/// ignore input (peek, exposé).
+@MainActor
+final class TerminalView: MTKView {
+    enum Mode { case interactive, thumbnail }
+
+    let paneID: PaneID
+    let mode: Mode
+    private weak var model: AppModel?
+    private var replica: PaneReplica?
+    private let pipelines: RenderPipelines
+    private var metrics: FontMetrics
+    private var renderState: VTRenderState?
+    private let keyEncoder = try? KeyEncoder()
+    private let mouseEncoder = try? MouseEncoder()
+    private let selection = try? SelectionGesture()
+    private var scrollRemainder: CGFloat = 0
+    private var pressedButtons = 0
+    private var selecting = false
+    private let scroller = NSScroller()
+    private var scrollerHide: DispatchWorkItem?
+    var isFocusedPane = false {
+        didSet {
+            guard oldValue != isFocusedPane else { return }
+            needsDisplay = true
+            if isFocusedPane { claimFocus() }
+        }
+    }
+
+    /// Inset of the grid inside the view, in points.
+    static let padding = CGSize(width: 12, height: 4)
+
+    init?(paneID: PaneID, model: AppModel, mode: Mode = .interactive) {
+        guard let pipelines = RenderPipelines.shared else { return nil }
+        self.paneID = paneID
+        self.model = model
+        self.mode = mode
+        self.pipelines = pipelines
+        self.metrics = FontMetrics(family: model.fontFamily, pointSize: model.fontSize, scale: NSScreen.main?.backingScaleFactor ?? 2)
+        super.init(frame: .zero, device: pipelines.device)
+        colorPixelFormat = .bgra8Unorm
+        framebufferOnly = true
+        isPaused = true
+        enableSetNeedsDisplay = true
+        autoResizeDrawable = true
+        layer?.isOpaque = false
+        clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        renderState = try? VTRenderState()
+        if mode == .interactive {
+            scroller.scrollerStyle = .overlay
+            scroller.knobStyle = .default
+            scroller.controlSize = .small
+            scroller.alphaValue = 0
+            scroller.target = self
+            scroller.action = #selector(scrollerMoved(_:))
+            addSubview(scroller)
+        }
+        attach(model.replica(paneID))
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    isolated deinit {
+        replica?.stopObserving(self)
+    }
+
+    /// Connects to the pane's replica once its snapshot has arrived.
+    func attach(_ replica: PaneReplica?) {
+        guard replica !== self.replica else { return }
+        self.replica?.stopObserving(self)
+        self.replica = replica
+        replica?.observe(self) { [weak self] in self?.needsDisplay = true }
+        needsDisplay = true
+        reportSize()
+    }
+
+    override var acceptsFirstResponder: Bool { mode == .interactive }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Thumbnails are part of a clickable card; let clicks reach SwiftUI.
+        mode == .thumbnail ? nil : super.hitTest(point)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        // Never switches tabs: a late focus change from a pane that is going
+        // away must not pull the window back to its tab.
+        model?.paneTookKeyboardFocus(paneID)
+        sendFocus(true)
+        needsDisplay = true
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        sendFocus(false)
+        needsDisplay = true
+        return true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if isFocusedPane { claimFocus() }
+    }
+
+    /// Takes keyboard focus when the model says this pane is focused. Only
+    /// moves focus between terminals, never away from a text field.
+    private func claimFocus() {
+        guard mode == .interactive else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isFocusedPane, let window = self.window, window.firstResponder !== self else { return }
+            let responder = window.firstResponder
+            if responder == nil || responder === window || responder is TerminalView {
+                window.makeFirstResponder(self)
+            }
+        }
+    }
+
+    private var lastFocusRequest = 0
+
+    /// After a menu or the palette closes, the focused pane takes the
+    /// keyboard back even though it no longer holds first responder.
+    func reclaimFocus(request: Int) {
+        guard request != lastFocusRequest else { return }
+        lastFocusRequest = request
+        guard mode == .interactive, isFocusedPane else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
+    private func sendFocus(_ gained: Bool) {
+        guard let replica, replica.terminal.focusReporting else { return }
+        model?.input(paneID, VTTerminal.encodeFocus(gained))
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        let scale = window?.backingScaleFactor ?? 2
+        if scale != metrics.scale { metrics = FontMetrics(family: metrics.family, pointSize: metrics.pointSize, scale: scale) }
+        reportSize()
+    }
+
+    /// Switches font or size; the grid is re-measured and dend told.
+    func applyFont(family: String, size: CGFloat) {
+        guard family != metrics.family || size != metrics.pointSize else { return }
+        metrics = FontMetrics(family: family, pointSize: size, scale: window?.backingScaleFactor ?? metrics.scale)
+        needsDisplay = true
+        reportSize()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let w = NSScroller.scrollerWidth(for: .small, scrollerStyle: .overlay)
+        scroller.frame = NSRect(x: newSize.width - w - 2, y: 2, width: w, height: max(newSize.height - 4, 0))
+        reportSize()
+    }
+
+    private func reportSize() {
+        guard mode == .interactive, let model, bounds.width > 0, bounds.height > 0 else { return }
+        let scale = metrics.scale
+        let usableW = (bounds.width - Self.padding.width * 2) * scale
+        let usableH = (bounds.height - Self.padding.height * 2) * scale
+        let cols = UInt16(clamping: max(2, Int(usableW / metrics.cellWidth)))
+        let rows = UInt16(clamping: max(1, Int(usableH / metrics.cellHeight)))
+        model.resize(paneID, GridSize(cols: cols, rows: rows, cellWidthPx: UInt32(metrics.cellWidth), cellHeightPx: UInt32(metrics.cellHeight)))
+    }
+
+    // MARK: Drawing
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let drawable = currentDrawable, let pass = currentRenderPassDescriptor,
+              let atlas = pipelines.atlas(for: metrics), let model,
+              let buffer = pipelines.queue.makeCommandBuffer() else { return }
+
+        let pad = SIMD2(Float(Self.padding.width * metrics.scale), Float(Self.padding.height * metrics.scale))
+        var frame = FrameBuilder(
+            metrics: metrics, atlas: atlas, pipelines: pipelines,
+            origin: mode == .thumbnail ? .zero : pad,
+            theme: replica?.theme ?? model.theme,
+            cursorFocused: mode == .interactive && isFocusedPane && window?.isKeyWindow == true,
+            showCursor: mode == .interactive,
+            contrastCorrection: replica?.contrastCorrection ?? false
+        )
+        var gridSize = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        if let replica, let renderState {
+            do {
+                try renderState.update(from: replica.terminal)
+                frame.build(renderState)
+                renderState.markClean()
+                let (cols, rows) = renderState.size
+                gridSize = SIMD2(Float(cols) * Float(metrics.cellWidth), Float(rows) * Float(metrics.cellHeight))
+            } catch {
+                NSLog("Den: render update for \(paneID) failed: \(error)")
+            }
+            if mode == .interactive { updateScroller(replica.terminal.scrollbar) }
+        }
+
+        let clear = frame.clear.map { $0.simd() } ?? .zero
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: Double(clear.x), green: Double(clear.y), blue: Double(clear.z), alpha: Double(clear.w))
+        pass.colorAttachments[0].loadAction = .clear
+        guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+
+        // Thumbnails map the whole grid into the drawable, preserving aspect.
+        var viewport = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        if mode == .thumbnail, gridSize.x > 0, gridSize.y > 0 {
+            let fit = min(viewport.x / gridSize.x, viewport.y / gridSize.y)
+            viewport /= fit
+        }
+        var uniforms = SIMD4<Float>(viewport.x, viewport.y, Float(atlas.texture.width), Float(atlas.texture.height))
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
+
+        func drawRects(_ rects: [RectInstance]) {
+            guard !rects.isEmpty, let b = pipelines.device.makeBuffer(bytes: rects, length: MemoryLayout<RectInstance>.stride * rects.count) else { return }
+            encoder.setRenderPipelineState(pipelines.rect)
+            encoder.setVertexBuffer(b, offset: 0, index: 1)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: rects.count)
+        }
+        drawRects(frame.backgrounds)
+        drawRects(frame.selections)
+        if !frame.glyphs.isEmpty, let b = pipelines.device.makeBuffer(bytes: frame.glyphs, length: MemoryLayout<GlyphInstance>.stride * frame.glyphs.count) {
+            encoder.setRenderPipelineState(pipelines.glyph)
+            encoder.setVertexBuffer(b, offset: 0, index: 1)
+            encoder.setFragmentTexture(atlas.texture, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: frame.glyphs.count)
+        }
+        drawRects(frame.decorations)
+        encoder.endEncoding()
+        buffer.present(drawable)
+        buffer.commit()
+    }
+
+    // MARK: Scrollbar
+
+    private var lastScrollbar: Scrollbar?
+
+    private func updateScroller(_ bar: Scrollbar) {
+        guard bar != lastScrollbar else { return }
+        let moved = lastScrollbar.map { $0.offset != bar.offset } ?? false
+        lastScrollbar = bar
+        let hidden = bar.total <= bar.length
+        scroller.isHidden = hidden
+        guard !hidden else { return }
+        let range = Double(bar.total - bar.length)
+        scroller.knobProportion = CGFloat(Double(bar.length) / Double(bar.total))
+        scroller.doubleValue = range > 0 ? Double(bar.offset) / range : 1
+        if moved { flashScroller() }
+    }
+
+    /// Native overlay behavior: show while scrolling, fade out after.
+    private func flashScroller() {
+        scrollerHide?.cancel()
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.1; scroller.animator().alphaValue = 1 }
+        let hide = DispatchWorkItem { [weak self] in
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.4; self?.scroller.animator().alphaValue = 0 }
+        }
+        scrollerHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: hide)
+    }
+
+    @objc private func scrollerMoved(_ sender: NSScroller) {
+        guard let replica, let bar = lastScrollbar else { return }
+        let range = Double(bar.total - bar.length)
+        switch sender.hitPart {
+        case .decrementPage: replica.scroll(.delta(-Int(bar.length)))
+        case .incrementPage: replica.scroll(.delta(Int(bar.length)))
+        default: replica.terminal.scrollViewport(toRow: UInt64((sender.doubleValue * range).rounded())); replica.touch()
+        }
+        flashScroller()
+    }
+
+    // MARK: Keyboard
+
+    override func keyDown(with event: NSEvent) {
+        guard mode == .interactive, let replica, let keyEncoder, let model else { return }
+        if event.keyCode == UInt16(kVK_Escape), model.overview != .none {
+            model.overview = .none
+            return
+        }
+        let bytes = keyEncoder.encode(keyInput(event, action: event.isARepeat ? .repeat : .press), terminal: replica.terminal, optionAsAlt: true)
+        guard !bytes.isEmpty else { return }
+        replica.terminal.clearSelection()
+        replica.scroll(.bottom)
+        model.input(paneID, bytes)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard mode == .interactive, let replica, let keyEncoder, let model else { return }
+        model.input(paneID, keyEncoder.encode(keyInput(event, action: .release), terminal: replica.terminal, optionAsAlt: true))
+    }
+
+    private func keyInput(_ event: NSEvent, action: KeyAction) -> KeyInput {
+        let flags = event.modifierFlags
+        var mods: KeyMods = []
+        if flags.contains(.shift) { mods.insert(.shift) }
+        if flags.contains(.control) { mods.insert(.ctrl) }
+        if flags.contains(.option) { mods.insert(.alt) }
+        if flags.contains(.command) { mods.insert(.super) }
+        if flags.contains(.capsLock) { mods.insert(.capsLock) }
+
+        // With option-as-alt the text is what the key types without option,
+        // and the encoder adds the ESC prefix.
+        let produced = event.type == .keyDown || event.type == .keyUp
+            ? (flags.contains(.option) ? event.characters(byApplyingModifiers: flags.subtracting(.option)) : event.characters)
+            : nil
+        let text = produced.flatMap { s -> String? in
+            guard let scalar = s.unicodeScalars.first else { return nil }
+            // Control characters and AppKit's function-key range are encoded
+            // from the physical key instead.
+            if scalar.value < 0x20 || scalar.value == 0x7F || (0xF700 ... 0xF8FF).contains(scalar.value) { return nil }
+            return s
+        }
+        let unshifted = (event.type == .keyDown || event.type == .keyUp)
+            ? event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
+            : 0
+        return KeyInput(macKeyCode: (event.type == .keyDown || event.type == .keyUp) ? event.keyCode : 0,
+                        action: action, mods: mods, text: text, unshifted: unshifted)
+    }
+
+    @objc func paste(_ sender: Any?) {
+        guard let replica, let text = NSPasteboard.general.string(forType: .string) else { return }
+        replica.scroll(.bottom)
+        model?.input(paneID, replica.terminal.encodePaste(text))
+    }
+
+    @objc func copy(_ sender: Any?) {
+        guard let text = replica?.terminal.selectedText() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc override func selectAll(_ sender: Any?) {
+        guard let replica, let selection else { return }
+        let rows = Int(replica.terminal.rows), cols = Int(replica.terminal.cols)
+        let now = DispatchTime.now().uptimeNanoseconds
+        let geometry = (columns: cols, cellWidth: Int(metrics.cellWidth), screenHeight: rows * Int(metrics.cellHeight))
+        selection.handle(.press, col: 0, row: 0, x: 0, y: 0, timeNs: now, columns: geometry.columns, cellWidth: geometry.cellWidth, screenHeight: geometry.screenHeight, terminal: replica.terminal)
+        selection.handle(.drag, col: cols - 1, row: rows - 1, x: Double(cols) * metrics.cellWidth, y: Double(rows) * metrics.cellHeight - 1,
+                         timeNs: now, columns: geometry.columns, cellWidth: geometry.cellWidth, screenHeight: geometry.screenHeight, terminal: replica.terminal)
+        selection.handle(.release, col: cols - 1, row: rows - 1, x: 0, y: 0, timeNs: now, columns: geometry.columns, cellWidth: geometry.cellWidth, screenHeight: geometry.screenHeight, terminal: replica.terminal)
+        replica.touch()
+    }
+
+    // MARK: Mouse
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        if wantsSelection(event) { return select(event, .press) }
+        mouseReport(event, .press, .left)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if selecting { return select(event, .release) }
+        mouseReport(event, .release, .left)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        if selecting { return select(event, .drag) }
+        mouseReport(event, .motion, .left)
+    }
+
+    override func rightMouseDown(with event: NSEvent) { mouseReport(event, .press, .right) }
+    override func rightMouseUp(with event: NSEvent) { mouseReport(event, .release, .right) }
+    override func otherMouseDown(with event: NSEvent) { mouseReport(event, .press, .middle) }
+    override func otherMouseUp(with event: NSEvent) { mouseReport(event, .release, .middle) }
+    override func mouseMoved(with event: NSEvent) { mouseReport(event, .motion, nil) }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        guard mode == .interactive else { return }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self))
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.iBeam.set()
+    }
+
+    /// Selection wins unless the program tracks the mouse; shift forces it.
+    private func wantsSelection(_ event: NSEvent) -> Bool {
+        guard let replica else { return false }
+        return !replica.terminal.isMouseTracking || event.modifierFlags.contains(.shift)
+    }
+
+    private func gridPoint(_ event: NSEvent) -> (Float, Float) {
+        let p = convert(event.locationInWindow, from: nil)
+        return (Float((p.x - Self.padding.width) * metrics.scale), Float((p.y - Self.padding.height) * metrics.scale))
+    }
+
+    private func select(_ event: NSEvent, _ phase: SelectionGesture.Phase) {
+        guard let replica, let selection else { return }
+        selecting = phase != .release
+        let (x, y) = gridPoint(event)
+        let col = Int(Float(x) / Float(metrics.cellWidth))
+        let row = Int(Float(y) / Float(metrics.cellHeight))
+        let rows = Int(replica.terminal.rows), cols = Int(replica.terminal.cols)
+        selection.handle(
+            phase, col: min(max(col, 0), cols - 1), row: min(max(row, 0), rows - 1),
+            x: Double(x), y: Double(y), timeNs: UInt64(event.timestamp * 1_000_000_000),
+            columns: cols, cellWidth: Int(metrics.cellWidth), screenHeight: rows * Int(metrics.cellHeight),
+            terminal: replica.terminal
+        )
+        replica.touch()
+        if phase == .release { autoCopy() }
+    }
+
+    /// Copy-on-select: a finished selection goes straight to the clipboard.
+    private func autoCopy() {
+        guard let replica, let text = replica.terminal.selectedText(), !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        // The copy is the confirmation; drop the highlight like a finished action.
+        replica.terminal.clearSelection()
+        selection?.reset(replica.terminal)
+        replica.touch()
+        model?.showToast("Copied to clipboard")
+    }
+
+    private func mouseReport(_ event: NSEvent, _ action: MouseAction, _ button: MouseButton?) {
+        if action == .press { pressedButtons += 1 }
+        if action == .release { pressedButtons = max(0, pressedButtons - 1) }
+        guard mode == .interactive, let replica, let mouseEncoder, let model, replica.terminal.isMouseTracking else { return }
+        let (x, y) = gridPoint(event)
+        let bytes = mouseEncoder.encode(
+            action: action, button: button, mods: keyInput(event, action: .press).mods, x: x, y: y,
+            cellWidth: UInt32(metrics.cellWidth), cellHeight: UInt32(metrics.cellHeight),
+            cols: replica.terminal.cols, rows: replica.terminal.rows,
+            anyButtonPressed: pressedButtons > 0, terminal: replica.terminal
+        )
+        model.input(paneID, bytes)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard mode == .interactive, let replica, let model else { return super.scrollWheel(with: event) }
+        var delta = event.scrollingDeltaY
+        if event.hasPreciseScrollingDeltas { delta /= metrics.cellHeight / metrics.scale }
+        scrollRemainder += delta
+        let lines = Int(scrollRemainder.rounded(.towardZero))
+        guard lines != 0 else { return }
+        scrollRemainder -= CGFloat(lines)
+
+        let terminal = replica.terminal
+        if terminal.isMouseTracking, let mouseEncoder {
+            let (x, y) = gridPoint(event)
+            var out = Data()
+            for _ in 0 ..< abs(lines) {
+                out.append(mouseEncoder.encode(
+                    action: .press, button: lines > 0 ? .wheelUp : .wheelDown, mods: [], x: x, y: y,
+                    cellWidth: UInt32(metrics.cellWidth), cellHeight: UInt32(metrics.cellHeight),
+                    cols: terminal.cols, rows: terminal.rows, anyButtonPressed: false, terminal: terminal
+                ))
+            }
+            model.input(paneID, out)
+        } else if terminal.isAlternateScreen, terminal.alternateScroll, let keyEncoder {
+            let key = KeyInput(macKeyCode: UInt16(lines > 0 ? kVK_UpArrow : kVK_DownArrow), action: .press, mods: [], text: nil, unshifted: 0)
+            let one = keyEncoder.encode(key, terminal: terminal, optionAsAlt: true)
+            model.input(paneID, (0 ..< abs(lines)).reduce(into: Data()) { acc, _ in acc.append(one) })
+        } else {
+            replica.scroll(.delta(-lines))
+        }
+    }
+}

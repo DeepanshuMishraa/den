@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Packages Den.app (app + bundled dend) into dist/.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+config="${1:-release}"
+
+[[ -d "$root/Frameworks/ghostty-vt.xcframework" ]] || "$root/scripts/build-libghostty-vt.sh"
+
+swift build --package-path "$root" -c "$config" --product Den
+swift build --package-path "$root" -c "$config" --product dend
+bin="$(swift build --package-path "$root" -c "$config" --show-bin-path)"
+
+app="$root/dist/Den.app"
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp "$bin/Den" "$bin/dend" "$app/Contents/MacOS/"
+# SwiftPM resources (bundled fonts); Bundle.module finds them in Resources.
+cp -R "$bin/Den_DenApp.bundle" "$app/Contents/Resources/"
+
+cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Den</string>
+  <key>CFBundleDisplayName</key><string>Den</string>
+  <key>CFBundleIdentifier</key><string>den.dipxsy.app</string>
+  <key>CFBundleExecutable</key><string>Den</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+
+codesign --force --sign - "$app/Contents/MacOS/dend" "$app" >/dev/null
+echo "Built $app"
