@@ -62,6 +62,9 @@ final class TerminalView: MTKView {
                 replica.touch()
             }
             addSubview(scroller)
+            // Files and images dropped or pasted onto the terminal become
+            // shell-quoted paths at the cursor, so TUI agents get the file.
+            registerForDraggedTypes([.fileURL, .png, .tiff, .string])
         }
         attach(model.replica(paneID))
     }
@@ -336,15 +339,121 @@ final class TerminalView: MTKView {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let replica, let text = NSPasteboard.general.string(forType: .string) else { return }
-        replica.scroll(.bottom)
-        model?.input(paneID, replica.terminal.encodePaste(text))
+        guard let replica else { return }
+        let board = NSPasteboard.general
+        // Plain text first: the common case, byte-for-byte as before.
+        if let text = board.string(forType: .string), !text.isEmpty {
+            replica.scroll(.bottom)
+            model?.input(paneID, replica.terminal.encodePaste(text))
+            return
+        }
+        // A copied file (Finder's ⌘C, a screenshot file) pastes as its path.
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            insertFileURLs(urls)
+            return
+        }
+        // A copied image with no file (screenshot to clipboard, browser
+        // image) is saved to a temp PNG and its path pasted, so TUI agents
+        // receive something they can read.
+        if let data = board.data(forType: .tiff) ?? board.data(forType: .png),
+           let image = NSImage(data: data),
+           let url = Self.writePastedImage(image) {
+            insertFileURLs([url])
+            return
+        }
     }
 
     @objc func copy(_ sender: Any?) {
         guard let text = replica?.terminal.selectedText() else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    // MARK: Drag and drop
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        mode == .interactive && canAcceptDrop(sender) ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        mode == .interactive && canAcceptDrop(sender) ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard mode == .interactive, let replica, let model else { return false }
+        let urls = urls(from: sender)
+        if !urls.isEmpty {
+            window?.makeFirstResponder(self)
+            insertFileURLs(urls)
+            return true
+        }
+        // Dragged text (e.g. from another app) types like a paste.
+        if let text = sender.draggingPasteboard.string(forType: .string), !text.isEmpty {
+            window?.makeFirstResponder(self)
+            replica.scroll(.bottom)
+            model.input(paneID, replica.terminal.encodePaste(text))
+            return true
+        }
+        return false
+    }
+
+    /// File URLs from a drag or pasteboard: real files plus images offered as
+    /// raw bitmaps (written to a temp PNG first).
+    private func urls(from sender: NSDraggingInfo) -> [URL] {
+        let board = sender.draggingPasteboard
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            return urls
+        }
+        if let data = board.data(forType: .tiff) ?? board.data(forType: .png),
+           let image = NSImage(data: data),
+           let url = Self.writePastedImage(image) {
+            return [url]
+        }
+        return []
+    }
+
+    /// Whether a drag carries something we can turn into paths, checked
+    /// without side effects (no temp files written while hovering).
+    private func canAcceptDrop(_ sender: NSDraggingInfo) -> Bool {
+        let board = sender.draggingPasteboard
+        if board.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
+            return true
+        }
+        return board.data(forType: .tiff) != nil || board.data(forType: .png) != nil
+            || board.string(forType: .string) != nil
+    }
+
+    /// Types file paths at the cursor, shell-quoted and relative like Insert
+    /// Path does, through bracketed paste when the program asked for it.
+    private func insertFileURLs(_ urls: [URL]) {
+        guard let replica, let model else { return }
+        let cwd = model.cwd(of: paneID)
+        let home = model.hostHomes[model.host(ofPane: paneID)]
+        let text = urls.map { PathQuery.insertion(for: $0.path, cwd: cwd, home: home) }.joined(separator: " ")
+        guard !text.isEmpty else { return }
+        replica.scroll(.bottom)
+        model.input(paneID, replica.terminal.encodePaste(text))
+    }
+
+    /// Saves a clipboard/dragged bitmap so it has a path agents can read.
+    private static func writePastedImage(_ image: NSImage) -> URL? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return nil }
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Caches/Den/pastes", directoryHint: .isDirectory)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let name = "pasted-image-\(Int(Date().timeIntervalSince1970))-\(Int.random(in: 1000 ... 9999)).png"
+            let url = dir.appending(path: name)
+            try png.write(to: url)
+            return url
+        } catch {
+            NSLog("Den: could not save pasted image: %@", error.localizedDescription)
+            return nil
+        }
     }
 
     @objc override func selectAll(_ sender: Any?) {

@@ -74,6 +74,13 @@ final class PaneReplica {
     /// For local-only changes such as selection.
     func touch() { changed() }
 
+    /// Drops any active selection highlight, e.g. one a swallowed
+    /// three-finger-drag mouse gesture started before the overview did.
+    func clearSelection() {
+        terminal.clearSelection()
+        changed()
+    }
+
     private func changed() {
         generation &+= 1
         for o in observers.values { o() }

@@ -79,7 +79,13 @@ final class AppModel {
     /// Panes whose replica exists; observed so views attach once snapshots land.
     private(set) var readyPanes: Set<PaneID> = []
 
-    var overview = Overview.none
+    var overview = Overview.none {
+        didSet {
+            // Leaving the overview hands the keyboard back to the terminal,
+            // so the cursor is a solid block again instead of a hollow one.
+            if oldValue != .none, overview == .none { terminalFocusRequest &+= 1 }
+        }
+    }
     /// Offset from `overview`, in levels, while a three-finger swipe is in
     /// progress; nil otherwise.
     private(set) var overviewDrag: CGFloat?
@@ -1006,6 +1012,11 @@ final class AppModel {
         activity.remove(pane)
     }
 
+    /// The window is key again (spaces, system gestures and other apps take
+    /// it away): the focused pane takes the keyboard back, restoring a solid
+    /// block cursor instead of a hollow one.
+    func windowBecameKey() { terminalFocusRequest &+= 1 }
+
     private func locate(_ pane: PaneID) -> (SessionID, TabLayout)? {
         for (sid, layout) in layouts {
             if let tab = layout.tabs.first(where: { $0.root.contains(pane) }) { return (sid, tab) }
@@ -1440,7 +1451,15 @@ final class AppModel {
         min(max(CGFloat(overview.rawValue) + (overviewDrag ?? 0), 0), 2)
     }
 
-    func dragOverview(_ progress: CGFloat) { overviewDrag = progress }
+    func dragOverview(_ progress: CGFloat) {
+        // The first movement of a swipe drops any selection a
+        // three-finger-drag gesture started before we began swallowing its
+        // mouse events, so the terminal never sits highlighted under the glance.
+        if overviewDrag == nil {
+            for replica in replicas.values { replica.clearSelection() }
+        }
+        overviewDrag = progress
+    }
 
     /// Settles a swipe on the nearest level, biased toward the direction of
     /// travel so a short swipe still commits.

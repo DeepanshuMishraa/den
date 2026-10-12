@@ -15,6 +15,10 @@ final class DenWindow: NSWindow {
     /// A mouse drag synthesized from three fingers ("three finger drag") over
     /// the terminal is being dropped until its mouse up.
     private var swallowingDrag = false
+    /// Set when a swipe starts mid-click-drag: the press already reached the
+    /// terminal, so the drag and release that follow it are dropped too, or
+    /// the half-started selection sticks around as a highlight.
+    private var swallowUntilMouseUp = false
 
     private enum Swipe {
         case idle
@@ -39,10 +43,14 @@ final class DenWindow: NSWindow {
         switch event.type {
         case .gesture, .beginGesture, .endGesture:
             track(event)
-        case .leftMouseDown where touchCount >= 3:
+        case .leftMouseDown where isSwipeTracking || touchCount >= 3:
             // "Three finger drag" turns the swipe into a mouse drag. Over the
             // title bar it should move the window like anywhere else in
             // macOS; over the terminal it is the overview swipe, so drop it.
+            // Only the swipe state and gesture-refresh counts here: querying
+            // the device's live touches on a click also sees resting
+            // palms/fingers and would swallow every normal click, breaking
+            // text selection entirely.
             if isTitleBar(event.locationInWindow) {
                 cancelSwipeForWindowMove()
             } else {
@@ -50,10 +58,14 @@ final class DenWindow: NSWindow {
                 return
             }
         case .leftMouseDragged:
-            if swallowingDrag { return }
+            if swallowingDrag || swallowUntilMouseUp { return }
         case .leftMouseUp:
             if swallowingDrag {
                 swallowingDrag = false
+                return
+            }
+            if swallowUntilMouseUp {
+                swallowUntilMouseUp = false
                 return
             }
         default:
@@ -71,7 +83,16 @@ final class DenWindow: NSWindow {
         case .movingWindow:
             if touches.isEmpty { swipe = .idle }
         case .idle:
-            if touches.count == 3 { swipe = .tracking(startY: y, progress: 0) }
+            // Exactly three fingers start a swipe. One or two fingers never
+            // do: two-finger scrolling over the title bar used to step into
+            // peek and felt like a mis-triggered glance.
+            if touches.count == 3 {
+                swipe = .tracking(startY: y, progress: 0)
+                // The press of a three-finger-drag click can reach the
+                // terminal before this gesture event does; drop the rest of
+                // that click so no half-started selection sticks.
+                swallowUntilMouseUp = true
+            }
         case .tracking(let startY, _) where touches.count == 3:
             let progress = (startY - y) / Self.levelDistance
             swipe = .tracking(startY: startY, progress: progress)
@@ -80,6 +101,12 @@ final class DenWindow: NSWindow {
             swipe = .idle
             onOverviewEnd?(progress)
         }
+    }
+
+    /// True while a three-finger swipe is in flight.
+    private var isSwipeTracking: Bool {
+        if case .tracking = swipe { return true }
+        return false
     }
 
     private func cancelSwipeForWindowMove() {
@@ -175,7 +202,10 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResize(_ notification: Notification) { positionTrafficLights() }
     func windowDidExitFullScreen(_ notification: Notification) { positionTrafficLights() }
-    func windowDidBecomeKey(_ notification: Notification) { positionTrafficLights() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        positionTrafficLights()
+        model.windowBecameKey()
+    }
 
     /// Keeps the window's appearance (traffic lights, materials, text
     /// fields) in step with the active theme.

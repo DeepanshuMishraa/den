@@ -34,14 +34,12 @@ struct TitleBar: View {
     }
 }
 
-/// Drags the window, double-click zooms, and a two-finger scroll down over
-/// the bar steps into peek and exposé.
+/// Drags the window and double-click zooms. The overview (peek/exposé) is
+/// a three-finger swipe handled by DenWindow, plus its keyboard shortcuts —
+/// two-finger scrolling over the bar deliberately does nothing, so a scroll
+/// aimed at the terminal never pops the glance view open.
 struct TitleBarBackground: NSViewRepresentable {
-    @Environment(AppModel.self) private var model
-
     final class View: NSView {
-        var onScroll: ((Int) -> Void)?
-        private var accumulated: CGFloat = 0
         override var mouseDownCanMoveWindow: Bool { true }
 
         override func mouseDown(with event: NSEvent) {
@@ -51,24 +49,11 @@ struct TitleBarBackground: NSViewRepresentable {
                 window?.performDrag(with: event)
             }
         }
-
-        override func scrollWheel(with event: NSEvent) {
-            guard event.hasPreciseScrollingDeltas, abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) else { return }
-            if event.phase == .began { accumulated = 0 }
-            accumulated += event.scrollingDeltaY
-            if event.phase == .ended || event.phase == .cancelled {
-                if accumulated < -40 { onScroll?(1) } else if accumulated > 40 { onScroll?(-1) }
-                accumulated = 0
-            }
-        }
     }
 
     func makeNSView(context: Context) -> View { View() }
 
-    func updateNSView(_ view: View, context: Context) {
-        let model = model
-        view.onScroll = { delta in withAnimation(.den) { model.stepOverview(delta) } }
-    }
+    func updateNSView(_ view: View, context: Context) {}
 }
 
 /// The session's icon and name. Left alone, the name folds away so the tabs

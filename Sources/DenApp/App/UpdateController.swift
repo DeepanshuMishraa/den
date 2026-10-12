@@ -46,6 +46,7 @@ final class UpdateController: NSObject {
             model?.showToast("Updates are only available in release builds")
             return
         }
+        NSLog("Den: manual update check from %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
         updater.checkForUpdates()
     }
 }
@@ -73,7 +74,10 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
     }
 
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
-        model?.showToast("Checking for updates…")
+        // Persistent: a plain toast vanishes after ~1.6s, leaving a gap with
+        // nothing on screen while the feed loads, which reads as "checking
+        // then nothing". The progress toast stays until the check resolves.
+        model?.showUpdateProgress("Checking for updates…", progress: nil)
     }
 
     func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState) async -> SPUUserUpdateChoice {
@@ -97,12 +101,16 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
 
     func showUpdateNotFoundWithError(_ error: Error) async {
-        let initiated = (error as NSError).userInfo[SPUNoUpdateFoundUserInitiatedKey] as? Bool ?? false
-        // Background checks stay silent; this only toasts after a manual check.
-        if initiated { model?.showToast("No updates available") }
+        // Automatic checks are off (`SUEnableAutomaticChecks = NO`), so any
+        // call here follows a manual check. Always toast: relying on
+        // `SPUNoUpdateFoundUserInitiatedKey` left users staring at a vanished
+        // "Checking…" toast when the flag was absent.
+        NSLog("Den: no update found (%@)", error.localizedDescription)
+        model?.showToast("No updates available")
     }
 
     func showUpdaterError(_ error: Error) async {
+        NSLog("Den: update failed: %@", error.localizedDescription)
         model?.showToast("Update failed: \(error.localizedDescription)")
     }
 

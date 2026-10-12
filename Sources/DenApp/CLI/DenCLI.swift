@@ -20,7 +20,7 @@ enum DenCLI {
         do throws(CLIError) {
             let context = CLIContext(socket: try args.option("--socket"), json: args.flag("--json"))
             if args.flag("--version", "-V") {
-                print("den \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (protocol \(protocolVersion))")
+                print("den \(cliVersion()) (protocol \(protocolVersion))")
                 return 0
             }
             guard let name = args.next(), name != "help" || !args.words.isEmpty else {
@@ -49,6 +49,53 @@ enum DenCLI {
             CLIOutput.error(error.message)
             return error.status
         }
+    }
+
+    /// The app's version even when invoked through the `den` link.
+    /// `Bundle.main` points at `…/Resources/bin/den` in that case (no
+    /// Info.plist there), so resolve symlinks back to `…/MacOS/Den` and read
+    /// the enclosing Den.app's Info.plist. Dev builds (`.build/…`) stay "dev".
+    static func cliVersion() -> String {
+        if let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+            return v
+        }
+        for raw in executableCandidates() {
+            let resolved = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+            // …/Den.app/Contents/MacOS/Den → …/Den.app/Contents/Info.plist
+            if let range = resolved.range(of: ".app/Contents/", options: .backwards) {
+                let info = String(resolved[..<range.upperBound]) + "Info.plist"
+                if let dict = NSDictionary(contentsOfFile: info),
+                   let v = dict["CFBundleShortVersionString"] as? String {
+                    return v
+                }
+            }
+        }
+        return "dev"
+    }
+
+    /// Paths that might lead back to the enclosing Den.app: the executable
+    /// as the loader sees it, argv[0], and a PATH lookup for a bare `den`.
+    /// The install-link fallbacks only apply when invoked as `den`; a direct
+    /// `…/MacOS/Den` (or `.build/…/Den`) launch reports its own bundle or
+    /// "dev", never another copy's version.
+    private static func executableCandidates() -> [String] {
+        var out: [String] = []
+        if let p = Bundle.main.executableURL?.path { out.append(p) }
+        let invokedAsDen = CommandLine.arguments.first.map { ($0 as NSString).lastPathComponent } == "den"
+        if let arg = CommandLine.arguments.first, invokedAsDen {
+            if arg.contains("/") {
+                out.append(arg)
+            } else {
+                // Bare `den`: search PATH (covers ~/.local/bin/den).
+                let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
+                for dir in path.split(separator: ":") {
+                    out.append((dir as NSString).appendingPathComponent(arg))
+                }
+            }
+        } else if let arg = CommandLine.arguments.first, arg.contains("/") {
+            out.append(arg)
+        }
+        return out
     }
 }
 
