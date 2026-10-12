@@ -26,7 +26,7 @@ public enum SplitAxis: UInt8, Sendable {
 }
 
 /// Binary tree of panes inside a tab ("deck").
-public indirect enum SplitNode: Equatable, Sendable {
+public indirect enum SplitNode: Equatable, Sendable, Codable {
     case pane(PaneID)
     case split(axis: SplitAxis, ratio: Float, first: SplitNode, second: SplitNode)
 

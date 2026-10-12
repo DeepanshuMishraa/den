@@ -15,6 +15,11 @@ app="$root/dist/Den.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/Den" "$bin/dend" "$app/Contents/MacOS/"
+# The den CLI is the Den executable run under the name `den`. A relative link
+# in its own folder (MacOS/den would clash with Den on case-insensitive disks).
+# Den links ~/.local/bin/den here on launch; dend puts this folder on panes' PATH.
+mkdir -p "$app/Contents/Resources/bin"
+ln -sf ../../MacOS/Den "$app/Contents/Resources/bin/den"
 # fsearch (vendor/fsearch, Rust) powers whole-disk path search. Without
 # cargo the app still builds; the path picker then only browses folders.
 if command -v cargo >/dev/null 2>&1 && [[ -f "$root/vendor/fsearch/Cargo.toml" ]]; then

@@ -24,10 +24,54 @@ import Testing
             .input(PaneID(), Data("ls -la\r".utf8)),
             .resize(PaneID(), size),
             .listDirectory(request: 7, path: "~/src"),
+            .control(request: 9, ControlCoding.encode(ControlRequest.state)),
         ]
         for m in messages {
             #expect(try ClientMessage.decode(m.encode()) == m)
         }
+    }
+
+    @Test func controlFramesRoundTrip() throws {
+        let messages: [ServerMessage] = [
+            .controlReply(request: 9, ControlCoding.encode(ControlReply.ok)),
+            .controlEvent(ControlCoding.encode(ControlEvent(kind: .paneBell(session: SessionID(), pane: PaneID())))),
+        ]
+        for m in messages {
+            #expect(try ServerMessage.decode(m.encode()) == m)
+        }
+    }
+
+    @Test func controlJSONRoundTrips() throws {
+        let a = PaneID(), b = PaneID()
+        let requests: [ControlRequest] = [
+            .state,
+            .launch(.session(name: "video"), PaneLaunch(label: "top", command: ["htop", "-d", "10"], cwd: "/tmp", keepOpen: true)),
+            .launch(.tab(session: SessionID()), .shell),
+            .launch(.split(pane: a, axis: .vertical, before: true), PaneLaunch(command: ["sleep", "5"])),
+            .setLabel(pane: a, label: nil),
+            .capture(pane: b, format: .html),
+            .watchEvents,
+        ]
+        for r in requests {
+            #expect(try ControlCoding.decode(ControlRequest.self, from: ControlCoding.encode(r)).get() == r)
+        }
+        // Dates go through ISO 8601, which keeps whole seconds.
+        let created = Date(timeIntervalSince1970: 1_800_000_000)
+        let pane = PaneState(id: a, label: "nvim", command: ["nvim"], keepOpen: false, process: "nvim", cwd: "/src", title: nil,
+                             cols: 80, rows: 24, createdAt: created, child: ProcessState(pid: 42, name: "nvim", path: nil, cwd: "/src"),
+                             foreground: nil, exit: .signal(9))
+        let tree = SplitNode.split(axis: .horizontal, ratio: 0.5, first: .pane(a), second: .pane(b))
+        let state = DenState(host: "Mac", protocolVersion: protocolVersion, sessions: [
+            SessionState(id: SessionID(), name: "video", tabs: [TabState(id: TabID(), title: nil, layout: tree, panes: [pane])]),
+        ], clients: [ClientState(id: 1, name: "den-cli", connectedAt: created, subscribed: false, watchingEvents: true)])
+        #expect(try ControlCoding.decode(ControlReply.self, from: ControlCoding.encode(ControlReply.state(state))).get() == .state(state))
+    }
+
+    @Test func exitStateDecodesWaitStatus() {
+        #expect(ExitState(waitStatus: 3 << 8) == .code(3))
+        #expect(ExitState(waitStatus: 0) == .code(0))
+        #expect(ExitState(waitStatus: 9) == .signal(9))
+        #expect(ExitState(waitStatus: 9).shellStatus == 137)
     }
 
     @Test func serverMessagesRoundTrip() throws {

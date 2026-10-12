@@ -20,7 +20,8 @@ enum DendLauncher {
         throw LaunchError(description: "dend did not start listening on \(path) within 3 seconds. See \(DenPaths.log.path) for its output.")
     }
 
-    private static func spawn() throws(LaunchError) {
+    /// Also used by the `den` CLI, which polls the socket itself.
+    static func spawn() throws(LaunchError) {
         guard let executable = Bundle.main.executableURL?.deletingLastPathComponent().appending(path: "dend"),
               FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw LaunchError(description: "dend is missing next to the Den executable. Rebuild with `swift build` or reinstall Den.")

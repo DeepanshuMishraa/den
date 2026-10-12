@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FontRegistry.registerBundled()
+        // Keep ~/.local/bin/den pointing at this copy of the app.
+        DispatchQueue.global(qos: .utility).async {
+            if case .failed(let message) = CLIInstaller.install() { NSLog("%@", message) }
+        }
         let model = AppModel(systemIsDark: Self.isDark(NSApp.effectiveAppearance))
         self.model = model
         NSApp.mainMenu = buildMenu(model)

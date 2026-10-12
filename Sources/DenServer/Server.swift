@@ -32,7 +32,10 @@ final class ClientConnection {
     var readSource: DispatchSourceRead?
     /// Set by `.subscribe`; subscribed clients receive every session's state.
     var subscribed = false
+    /// Set by the `watchEvents` control request.
+    var watchingEvents = false
     var name = "unknown"
+    let connectedAt = Date()
 
     init(id: Int, fd: Int32, queue: DispatchQueue) {
         self.id = id
@@ -141,6 +144,15 @@ public actor DenServer {
         log("client \(conn.name)#\(cid) disconnected: \(reason)")
         conn.writer.cancel()
         conn.readSource?.cancel()
+        emit(.clientDisconnected(client: cid, name: conn.name))
+    }
+
+    /// Sends an event to every connection that asked for them.
+    private func emit(_ kind: ControlEvent.Kind) {
+        let watchers = connections.values.filter(\.watchingEvents)
+        guard !watchers.isEmpty else { return }
+        let message = ServerMessage.controlEvent(ControlCoding.encode(ControlEvent(kind: kind)))
+        for conn in watchers { send(message, to: conn) }
     }
 
     private func send(_ message: ServerMessage, to conn: ClientConnection) {
@@ -186,19 +198,14 @@ public actor DenServer {
             log("client \(client)#\(conn.id) connected")
             send(.welcome(version: protocolVersion, host: hostName), to: conn)
             send(.sessions(sessions.map(\.summary)), to: conn)
+            emit(.clientConnected(client: conn.id, name: client))
 
         case .listSessions:
             send(.sessions(sessions.map(\.summary)), to: conn)
 
         case .createSession(let id, let name, let size):
-            let session = Session(id: id, name: name.isEmpty ? SessionNames.random(excluding: Set(sessions.map(\.name))) : name)
             do {
-                let pane = try spawnPane(PaneID(), in: session, size: size, cwd: nil)
-                session.tabs.append(TabLayout(id: TabID(), root: .pane(pane.id)))
-                sessions.append(session)
-                broadcastSessions()
-                broadcastLayout(session)
-                broadcastSnapshot(pane)
+                _ = try startSession(id: id, name: name, size: size, launch: .shell)
             } catch {
                 send(.error("\(error)"), to: conn)
             }
@@ -218,6 +225,7 @@ public actor DenServer {
             session.name = name
             broadcastSessions()
             broadcastLayout(session)
+            emit(.sessionRenamed(session: id, name: name))
 
         case .renameTab(let tabID, let title):
             guard let session = sessions.first(where: { $0.tabs.contains { $0.id == tabID } }),
@@ -225,6 +233,7 @@ public actor DenServer {
             let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
             session.tabs[i].title = trimmed?.isEmpty == false ? trimmed : nil
             broadcastLayout(session)
+            emit(.tabRenamed(session: session.id, tab: tabID, title: session.tabs[i].title))
 
         case .moveTab(let tabID, let index):
             guard let session = sessions.first(where: { $0.tabs.contains { $0.id == tabID } }),
@@ -232,6 +241,7 @@ public actor DenServer {
             let tab = session.tabs.remove(at: from)
             session.tabs.insert(tab, at: min(Int(index), session.tabs.count))
             broadcastLayout(session)
+            emit(.layoutChanged(session: session.id))
 
         case .killSession(let id):
             guard let session = session(id) else { return }
@@ -242,23 +252,14 @@ public actor DenServer {
         case .newTab(let sid, let tab, let paneID, let size, let cwd):
             guard let session = session(sid) else { return }
             do {
-                let pane = try spawnPane(paneID, in: session, size: size, cwd: cwd)
-                session.tabs.append(TabLayout(id: tab, root: .pane(pane.id)))
-                broadcastLayout(session)
-                broadcastSnapshot(pane)
-                broadcastSessions()
+                _ = try startTab(tab, pane: paneID, in: session, size: size, launch: PaneLaunch(cwd: cwd))
             } catch {
                 send(.error("\(error)"), to: conn)
             }
 
         case .splitPane(let target, let newID, let axis, let size):
-            guard let sid = paneSession[target], let session = session(sid),
-                  let tabIndex = session.tabs.firstIndex(where: { $0.root.contains(target) }) else { return }
             do {
-                let pane = try spawnPane(newID, in: session, size: size, cwd: panes[target]?.meta.cwd)
-                session.tabs[tabIndex].root = session.tabs[tabIndex].root.splitting(target, with: pane.id, axis: axis)
-                broadcastLayout(session)
-                broadcastSnapshot(pane)
+                _ = try split(target, new: newID, axis: axis, before: false, size: size, launch: PaneLaunch(cwd: panes[target]?.meta.cwd))
             } catch {
                 send(.error("\(error)"), to: conn)
             }
@@ -268,6 +269,7 @@ public actor DenServer {
                 guard let i = session.tabs.firstIndex(where: { $0.id == tabID }) else { continue }
                 session.tabs[i].root = session.tabs[i].root.settingRatio(at: path[...], to: min(max(ratio, 0.1), 0.9))
                 broadcastLayout(session)
+                emit(.layoutChanged(session: session.id))
             }
 
         case .movePane(let pane, let target, let placement):
@@ -276,21 +278,27 @@ public actor DenServer {
                   let moved = session.tabs[i].root.moving(pane, to: target, placement: placement) else { return }
             session.tabs[i].root = moved
             broadcastLayout(session)
+            emit(.layoutChanged(session: sid))
 
         case .closePane(let id):
             log("client \(conn.name)#\(conn.id) closed \(id)")
+            if let sid = paneSession[id] { emit(.paneClosed(session: sid, pane: id)) }
             retire(id)
             detach(id, status: 0)
 
         case .input(let id, let bytes):
-            panes[id]?.lastInput = Date()
-            panes[id]?.ptyWriter.write(bytes)
+            // A keep-open pane whose program exited has no PTY to write to.
+            guard let pane = panes[id], !pane.stopped else { return }
+            pane.lastInput = Date()
+            pane.ptyWriter.write(bytes)
 
         case .resize(let id, let size):
             guard let pane = panes[id] else { return }
             do {
+                let changed = pane.size != size
                 try pane.resize(size)
                 broadcast(.paneResized(id, size))
+                if changed, let sid = paneSession[id] { emit(.paneResized(session: sid, pane: id, cols: size.cols, rows: size.rows)) }
             } catch {
                 send(.error("Resizing \(id) to \(size.cols)x\(size.rows) failed: \(error)"), to: conn)
             }
@@ -298,7 +306,148 @@ public actor DenServer {
         case .listDirectory(let request, let path):
             let (resolved, entries) = Self.listDirectory(path)
             send(.directoryListing(request: request, path: resolved, entries: entries), to: conn)
+
+        case .control(let request, let json):
+            let reply: ControlReply = switch ControlCoding.decode(ControlRequest.self, from: json) {
+            case .success(let control): handle(control, from: conn)
+            case .failure(let error): .failed("dend could not read the request (\(error)). Update den and dend to the same version.")
+            }
+            send(.controlReply(request: request, ControlCoding.encode(reply)), to: conn)
         }
+    }
+
+    // MARK: Control (den CLI)
+
+    private func handle(_ request: ControlRequest, from conn: ClientConnection) -> ControlReply {
+        switch request {
+        case .state:
+            return .state(state())
+
+        case .launch(let target, let launch):
+            do {
+                switch target {
+                case .session(let name):
+                    if !name.isEmpty, sessions.contains(where: { $0.name == name }) {
+                        return .failed("A session named “\(name)” already exists. Pick another name, or add to it with `den run -s \(name)`.")
+                    }
+                    let (session, tab, pane) = try startSession(id: SessionID(), name: name, size: defaultSize(), launch: launch)
+                    return .launched(session: session, tab: tab, pane: pane)
+                case .tab(let sid):
+                    guard let session = session(sid) else { return .failed("No session \(sid); it may have just closed.") }
+                    let tab = TabID()
+                    let size = session.tabs.flatMap(\.root.panes).compactMap { panes[$0]?.size }.first ?? defaultSize()
+                    let pane = try startTab(tab, pane: PaneID(), in: session, size: size, launch: launch)
+                    return .launched(session: sid, tab: tab, pane: pane)
+                case .split(let target, let axis, let before):
+                    guard let base = panes[target] else { return .failed("No pane \(target); it may have just closed.") }
+                    var size = base.size
+                    if axis == .horizontal { size.cols = max(size.cols / 2, 2) } else { size.rows = max(size.rows / 2, 2) }
+                    var launch = launch
+                    if launch.cwd == nil { launch.cwd = base.meta.cwd }
+                    let new = PaneID()
+                    guard let (sid, tab) = try split(target, new: new, axis: axis, before: before, size: size, launch: launch) else {
+                        return .failed("Pane \(target) is not in any tab.")
+                    }
+                    return .launched(session: sid, tab: tab, pane: new)
+                }
+            } catch {
+                return .failed("\(error)")
+            }
+
+        case .setLabel(let id, let label):
+            guard let pane = panes[id], let sid = paneSession[id] else { return .failed("No pane \(id); it may have just closed.") }
+            let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+            pane.label = trimmed?.isEmpty == false ? trimmed : nil
+            emit(.paneLabelChanged(session: sid, pane: id, label: pane.label))
+            return .ok
+
+        case .capture(let id, let format):
+            guard let pane = panes[id] else { return .failed("No pane \(id); it may have just closed.") }
+            do {
+                let vtFormat: VTFormat = switch format {
+                case .text: .plain
+                case .vt: .vt
+                case .html: .html
+                }
+                return .text(try pane.terminal.format(vtFormat))
+            } catch {
+                return .failed("Formatting \(id) failed: \(error). The pane is unaffected.")
+            }
+
+        case .watchEvents:
+            conn.watchingEvents = true
+            return .ok
+        }
+    }
+
+    private func state() -> DenState {
+        let sessionStates = sessions.map { session in
+            SessionState(id: session.id, name: session.name, tabs: session.tabs.map { tab in
+                TabState(id: tab.id, title: tab.title, layout: tab.root, panes: tab.root.panes.compactMap { id in
+                    guard let pane = panes[id] else { return nil }
+                    let (child, foreground) = pane.processes()
+                    return PaneState(
+                        id: id, label: pane.label, command: pane.command, keepOpen: pane.keepOpen,
+                        process: pane.meta.process, cwd: pane.meta.cwd, title: pane.terminal.title,
+                        cols: pane.size.cols, rows: pane.size.rows, createdAt: pane.createdAt,
+                        child: child, foreground: foreground, exit: pane.exit
+                    )
+                })
+            })
+        }
+        let clients = connections.values.sorted { $0.id < $1.id }.map {
+            ClientState(id: $0.id, name: $0.name, connectedAt: $0.connectedAt, subscribed: $0.subscribed, watchingEvents: $0.watchingEvents)
+        }
+        return DenState(host: hostName, protocolVersion: protocolVersion, sessions: sessionStates, clients: clients)
+    }
+
+    /// For panes no client sized yet: any live pane's size (a client sized
+    /// it to its window), else 80x24.
+    private func defaultSize() -> GridSize {
+        panes.values.first(where: { !$0.stopped })?.size ?? GridSize(cols: 80, rows: 24, cellWidthPx: 8, cellHeightPx: 16)
+    }
+
+    // MARK: Layout changes shared by the GUI and control paths
+
+    private func startSession(id: SessionID, name: String, size: GridSize, launch: PaneLaunch) throws -> (SessionID, TabID, PaneID) {
+        let session = Session(id: id, name: name.isEmpty ? SessionNames.random(excluding: Set(sessions.map(\.name))) : name)
+        let tab = TabID()
+        let pane = try spawnPane(PaneID(), in: session, size: size, launch: launch)
+        session.tabs.append(TabLayout(id: tab, root: .pane(pane.id)))
+        sessions.append(session)
+        broadcastSessions()
+        broadcastLayout(session)
+        broadcastSnapshot(pane)
+        emit(.sessionCreated(session: id, name: session.name))
+        emit(.tabCreated(session: id, tab: tab))
+        emit(.paneCreated(session: id, tab: tab, pane: pane.id, label: pane.label))
+        return (id, tab, pane.id)
+    }
+
+    private func startTab(_ tab: TabID, pane paneID: PaneID, in session: Session, size: GridSize, launch: PaneLaunch) throws -> PaneID {
+        let pane = try spawnPane(paneID, in: session, size: size, launch: launch)
+        session.tabs.append(TabLayout(id: tab, root: .pane(pane.id)))
+        broadcastLayout(session)
+        broadcastSnapshot(pane)
+        broadcastSessions()
+        emit(.tabCreated(session: session.id, tab: tab))
+        emit(.paneCreated(session: session.id, tab: tab, pane: pane.id, label: pane.label))
+        return pane.id
+    }
+
+    /// Nil when `target` isn't in a tab.
+    private func split(_ target: PaneID, new: PaneID, axis: SplitAxis, before: Bool, size: GridSize,
+                       launch: PaneLaunch) throws -> (SessionID, TabID)? {
+        guard let sid = paneSession[target], let session = session(sid),
+              let tabIndex = session.tabs.firstIndex(where: { $0.root.contains(target) }) else { return nil }
+        let pane = try spawnPane(new, in: session, size: size, launch: launch)
+        session.tabs[tabIndex].root = session.tabs[tabIndex].root.splitting(target, with: pane.id, axis: axis, newFirst: before)
+        broadcastLayout(session)
+        broadcastSnapshot(pane)
+        let tab = session.tabs[tabIndex].id
+        emit(.paneCreated(session: sid, tab: tab, pane: pane.id, label: pane.label))
+        emit(.layoutChanged(session: sid))
+        return (sid, tab)
     }
 
     /// `~` expanded to this user's home; symlinked folders count as folders.
@@ -330,10 +479,12 @@ public actor DenServer {
 
     // MARK: Panes
 
-    private func spawnPane(_ id: PaneID, in session: Session, size: GridSize, cwd: String?) throws -> Pane {
-        let pane = try Pane(id: id, size: size, cwd: cwd, queue: queue)
+    private func spawnPane(_ id: PaneID, in session: Session, size: GridSize, launch: PaneLaunch) throws -> Pane {
+        let pane = try Pane(id: id, session: session.id, size: size, launch: launch, socketPath: socketPath, queue: queue)
         panes[id] = pane
         paneSession[id] = session.id
+        let sid = session.id
+        pane.terminal.effects.bell = { [self] in assumeIsolated { $0.emit(.paneBell(session: sid, pane: id)) } }
 
         let master = pane.master
         let read = DispatchSource.makeReadSource(fileDescriptor: master, queue: queue)
@@ -393,14 +544,37 @@ public actor DenServer {
         var status: Int32 = reaped ?? 0
         if reaped == nil { waitpid(pid, &status, WNOHANG) }
         log("\(id) process \(pid) exited with status \(status)")
-        if panes[id] != nil { paneReadable(id) }
-        retire(id)
-        detach(id, status: status)
+        guard let pane = panes[id], !pane.stopped else { return }
+        paneReadable(id)
+        let exit = ExitState(waitStatus: status)
+        if let sid = paneSession[id] { emit(.paneExited(session: sid, pane: id, exit: exit)) }
+        guard pane.keepOpen else {
+            retire(id)
+            detach(id, status: status)
+            return
+        }
+        // Keep the pane and its screen; say how it ended, in-stream so every
+        // replica shows the same line.
+        pane.terminate()
+        pane.exit = exit
+        let note = switch exit {
+        case .code(let code): "\r\n[process exited with code \(code)]\r\n"
+        case .signal(let signal): "\r\n[process killed by signal \(signal)]\r\n"
+        }
+        let bytes = Data(note.utf8)
+        pane.terminal.write(bytes)
+        broadcast(.paneOutput(id, bytes))
+        DispatchQueue.global().async {
+            var status: Int32 = 0
+            waitpid(pid, &status, 0)
+        }
     }
 
     /// Stops a pane's process and IO. Safe to call more than once.
     private func retire(_ id: PaneID) {
         guard let pane = panes.removeValue(forKey: id) else { return }
+        // A keep-open pane that exited was already signalled and reaped.
+        guard !pane.stopped else { return }
         pane.terminate()
         let pid = pane.pid
         // Reap in the background so the child does not linger as a zombie.
@@ -415,9 +589,13 @@ public actor DenServer {
         guard let sid = paneSession.removeValue(forKey: id), let session = session(sid) else { return }
         broadcast(.paneExited(id, status: status))
         session.tabs = session.tabs.compactMap { tab in
-            guard let root = tab.root.removing(id) else { return nil }
+            guard let root = tab.root.removing(id) else {
+                if tab.root.contains(id) { emit(.tabClosed(session: sid, tab: tab.id)) }
+                return nil
+            }
             return TabLayout(id: tab.id, root: root, title: tab.title)
         }
+        emit(.layoutChanged(session: sid))
         if session.tabs.isEmpty {
             endSession(session)
         } else {
@@ -431,10 +609,11 @@ public actor DenServer {
         for (paneID, sid) in paneSession where sid == session.id { paneSession.removeValue(forKey: paneID) }
         broadcast(.sessionClosed(session.id))
         broadcastSessions()
+        emit(.sessionClosed(session: session.id))
     }
 
     private func refreshMeta() {
-        for (id, pane) in panes where pane.exitSource == nil {
+        for (id, pane) in panes where pane.exitSource == nil && !pane.stopped {
             var status: Int32 = 0
             if waitpid(pane.pid, &status, WNOHANG) == pane.pid { paneProcessExited(id, pid: pane.pid, reaped: status) }
         }
@@ -444,6 +623,12 @@ public actor DenServer {
             if meta != pane.meta {
                 pane.meta = meta
                 broadcast(.paneMeta(id, meta))
+                if let sid = paneSession[id] { emit(.paneProcessChanged(session: sid, pane: id, process: meta.process, cwd: meta.cwd)) }
+            }
+            let title = pane.terminal.title
+            if title != pane.lastTitle {
+                pane.lastTitle = title
+                if let sid = paneSession[id] { emit(.paneTitleChanged(session: sid, pane: id, title: title)) }
             }
             inferAgentStatus(of: pane)
         }

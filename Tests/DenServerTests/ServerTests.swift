@@ -14,6 +14,8 @@ final class TestClient {
     var metas: [PaneID: PaneMeta] = [:]
     var exited: Set<PaneID> = []
     var status: [PaneID: [StatusRecord]] = [:]
+    var replies: [UInt32: ControlReply] = [:]
+    var events: [ControlEvent.Kind] = []
 
     init(path: String) throws {
         fd = try UnixSocket.connect(path)
@@ -52,8 +54,21 @@ final class TestClient {
         case .paneMeta(let id, let meta): metas[id] = meta
         case .paneExited(let id, _): exited.insert(id)
         case .programStatus(let id, let records): status[id] = records
+        case .controlReply(let id, let json): replies[id] = try ControlCoding.decode(ControlReply.self, from: json).get()
+        case .controlEvent(let json): events.append(try ControlCoding.decode(ControlEvent.self, from: json).get().kind)
         case .welcome, .sessionClosed, .directoryListing, .error: break
         }
+    }
+
+    private var nextRequest: UInt32 = 1
+
+    /// Sends a control request and pumps until its reply arrives.
+    func control(_ request: ControlRequest) throws -> ControlReply? {
+        let id = nextRequest
+        nextRequest += 1
+        send(.control(request: id, ControlCoding.encode(request)))
+        _ = try pump { replies[id] != nil }
+        return replies[id]
     }
 
     func text(_ pane: PaneID) throws -> String {

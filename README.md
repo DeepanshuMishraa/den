@@ -87,6 +87,30 @@ the whole setup against a real SSH server (key login with Den's key, after
 `scripts/build-dend-linux.sh`): probe, upload, `dend --stdio`, a shell on the
 host's PTY, and pane exit.
 
+## CLI
+
+`den` controls dend from a shell, and every change shows up at once in Den.
+It's the Den executable run under the name `den`: the bundle links it at
+`Contents/Resources/bin/den`, Den links `~/.local/bin/den` to that on launch,
+and every pane has the folder on `PATH`. It talks JSON over dend's socket
+(protocol 6, `DenProtocol/Control.swift`).
+
+```sh
+den new video -- htop                      # session running htop
+den split -s video --label nvim -- nvim    # split it
+den move -s video nvim below htop
+den split --keep-open --label build -- make && den wait -p build   # exits with make's status
+den events -s video                        # live event stream (--json for scripts)
+den pane inspect build                     # child + foreground process, exit status
+den send -p nvim --enter ':w'; den send-key -p nvim esc
+den capture -p build --lines 20            # text, vt or html
+den keybinds                               # every shortcut, including unset ones
+den config help                            # the config manual
+```
+
+Inside a Den pane, `-s` and `-p` default to that pane (`DEN_PANE_ID`).
+`den help` lists every command.
+
 ## Shortcuts
 
 | | |

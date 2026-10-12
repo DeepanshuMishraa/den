@@ -305,7 +305,7 @@ final class AppModel {
             host(ofTab: tab)
         case .splitPane(let pane, _, _, _), .closePane(let pane), .movePane(let pane, _, _), .input(let pane, _), .resize(let pane, _):
             paneHosts[pane] ?? .local
-        case .hello, .listSessions, .subscribe, .createSession, .listDirectory:
+        case .hello, .listSessions, .subscribe, .createSession, .listDirectory, .control:
             .local
         }
     }
@@ -473,6 +473,10 @@ final class AppModel {
                 currentSession = nil
                 pickSession(excluding: id)
             }
+
+        case .controlReply, .controlEvent:
+            // Only the den CLI asks for these.
+            break
 
         case .error(let message):
             lastError = host == .local ? message : "\(hostLabel(host)): \(message)"

@@ -298,6 +298,13 @@ enum Trigger: Equatable {
     case chord(KeyChord)
     case leader(KeyChord)
 
+    var configText: String {
+        switch self {
+        case .chord(let chord): chord.configText
+        case .leader(let chord): "leader+" + chord.configText
+        }
+    }
+
     static func parse(_ text: String) -> Result<Trigger, ConfigError> {
         let lower = text.lowercased()
         guard lower.hasPrefix("leader+") else { return KeyChord.parse(text).map(Trigger.chord) }
@@ -408,6 +415,26 @@ struct KeyChord: Equatable {
 
     /// "⌥⇧⌘[" in Apple's modifier order.
     var label: String { keycaps.joined() }
+
+    /// How config.toml writes it: "ctrl+opt+shift+cmd+left".
+    var configText: String {
+        let names: [(Modifier, String)] = [(.control, "ctrl"), (.option, "opt"), (.shift, "shift"), (.command, "cmd")]
+        let keyName: String = switch key {
+        case .character(let c): c
+        case .digit: "digit"
+        case .code(let code): Self.canonicalKeyNames[code] ?? "?"
+        }
+        return (names.filter { modifiers.contains($0.0) }.map(\.1) + [keyName]).joined(separator: "+")
+    }
+
+    /// One spelling per keycode, preferring the first alias listed.
+    private static let canonicalKeyNames: [UInt16: String] = {
+        let preferred = ["enter", "tab", "space", "escape", "backspace", "delete", "up", "down", "left", "right",
+                         "home", "end", "page_up", "page_down"] + (1 ... 12).map { "f\($0)" }
+        var names: [UInt16: String] = [:]
+        for name in preferred { if let code = namedKeys[name], names[code] == nil { names[code] = name } }
+        return names
+    }()
 
     /// One label per key, for tooltip keycaps: ["⇧", "⌘", "P"].
     var keycaps: [String] { keycaps(number: nil) }
