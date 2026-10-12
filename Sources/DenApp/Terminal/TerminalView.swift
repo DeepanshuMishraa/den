@@ -353,7 +353,7 @@ final class TerminalView: MTKView {
         let now = DispatchTime.now().uptimeNanoseconds
         let geometry = (columns: cols, cellWidth: Int(metrics.cellWidth), screenHeight: rows * Int(metrics.cellHeight))
         selection.handle(.press, col: 0, row: 0, x: 0, y: 0, timeNs: now, columns: geometry.columns, cellWidth: geometry.cellWidth, screenHeight: geometry.screenHeight, terminal: replica.terminal)
-        selection.handle(.drag, col: cols - 1, row: rows - 1, x: Double(cols) * metrics.cellWidth, y: Double(rows) * metrics.cellHeight - 1,
+        selection.handle(.drag, col: cols - 1, row: rows - 1, x: Double(cols) * Double(metrics.cellWidth), y: Double(rows) * Double(metrics.cellHeight) - 1,
                          timeNs: now, columns: geometry.columns, cellWidth: geometry.cellWidth, screenHeight: geometry.screenHeight, terminal: replica.terminal)
         selection.handle(.release, col: cols - 1, row: rows - 1, x: 0, y: 0, timeNs: now, columns: geometry.columns, cellWidth: geometry.cellWidth, screenHeight: geometry.screenHeight, terminal: replica.terminal)
         replica.touch()
