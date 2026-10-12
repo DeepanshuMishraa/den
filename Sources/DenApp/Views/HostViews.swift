@@ -58,10 +58,10 @@ struct LoginForm: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "lock.fill").foregroundStyle(theme.tertiaryText)
-                Text("Log in to \(address)").font(.system(size: 14, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                Text("Log in to \(address)").uiFont(size: 14, weight: .semibold).lineLimit(1).truncationMode(.middle)
             }
             if let message = request.message {
-                Text(message).font(.system(size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(message).uiFont(size: 12).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
             VStack(spacing: 8) {
                 field("User", text: $user, secure: false).focused($focus, equals: .user)
@@ -69,10 +69,10 @@ struct LoginForm: View {
             }
             Toggle("Install a key so the password isn't needed next time", isOn: $installKey)
                 .toggleStyle(.checkbox)
-                .font(.system(size: 12))
+                .uiFont(size: 12)
                 .foregroundStyle(theme.secondaryText)
             Text("The password is saved in your login Keychain.")
-                .font(.system(size: 11))
+                .uiFont(size: 11)
                 .foregroundStyle(theme.tertiaryText)
             HStack {
                 Spacer()
@@ -102,7 +102,7 @@ struct LoginForm: View {
             }
         }
         .textFieldStyle(.plain)
-        .font(.system(size: 13))
+        .uiFont(size: 13)
         .padding(.horizontal, 9)
         .frame(height: 30)
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(model.theme.hover))
@@ -133,7 +133,7 @@ struct HostActions: View {
             if confirming {
                 Button { model.removeRemoteHost(host) } label: {
                     Text("Remove")
-                        .font(.system(size: 11, weight: .semibold))
+                        .uiFont(size: 11, weight: .semibold)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 7)
                         .frame(height: 20)

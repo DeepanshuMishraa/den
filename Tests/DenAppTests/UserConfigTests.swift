@@ -72,6 +72,27 @@ import DenVT
         #expect(try UserConfig.parse(UserConfig.template).get() == UserConfig())
     }
 
+    @Test func fontKeysParse() throws {
+        let config = try UserConfig.parse("""
+            terminal_font = "JetBrainsMono Nerd Font"
+            terminal_font_size = 13
+            ui_font = "SF Mono"
+            ui_font_size = 12.5
+            """).get()
+        #expect(config.terminalFont == "JetBrainsMono Nerd Font")
+        #expect(config.terminalFontSize == 13)
+        #expect(config.uiFont == "SF Mono")
+        #expect(config.uiFontSize == 12.5)
+    }
+
+    @Test func fontSizesOutsideRangeFail() {
+        for key in ["terminal_font_size", "ui_font_size"] {
+            guard case .failure(let e) = UserConfig.parse("\(key) = 50") else { Issue.record("\(key) parsed"); return }
+            #expect(e.message.contains("8–32"))
+            guard case .failure = UserConfig.parse("\(key) = \"big\"") else { Issue.record("\(key) parsed"); return }
+        }
+    }
+
     @Test func optionAsAltAcceptsGhosttyValues() throws {
         #expect(try UserConfig.parse("macos_option_as_alt = \"left\"").get().optionAsAlt == .left)
         #expect(try UserConfig.parse("macos_option_as_alt = \"right\"").get().optionAsAlt == .right)

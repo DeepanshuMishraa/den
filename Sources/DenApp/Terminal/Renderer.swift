@@ -196,6 +196,8 @@ struct FrameBuilder {
         var selectionRow = -1
         var selectionStart = 0
         var selectionEnd = 0
+        // Local so the cell closure below doesn't overlap `self.selections`.
+        var selectionRects: [RectInstance] = []
         func flushSelection(_ rects: inout [RectInstance]) {
             guard selectionRow >= 0 else { return }
             let x = origin.x + Float(selectionStart) * cw
@@ -210,7 +212,7 @@ struct FrameBuilder {
                 if selectionRow == cell.row, cell.col == selectionEnd + 1 {
                     selectionEnd = cell.col + (cell.width == .wide ? 1 : 0)
                 } else {
-                    flushSelection(&selections)
+                    flushSelection(&selectionRects)
                     selectionRow = cell.row
                     selectionStart = cell.col
                     selectionEnd = cell.col + (cell.width == .wide ? 1 : 0)
@@ -268,7 +270,8 @@ struct FrameBuilder {
                 flags: SIMD4(glyph.isColor ? 1 : 0, 0, 0, 0)
             ))
         }
-        flushSelection(&selections)
+        flushSelection(&selectionRects)
+        selections = selectionRects
 
         if let cursor {
             let x = origin.x + Float(cursor.x) * cw

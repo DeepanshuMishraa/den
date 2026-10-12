@@ -75,6 +75,11 @@ enum ConfigManual {
             \(DenPaths.themes.path)
                 Themes you imported, one Ghostty-format .conf file each.
 
+            \(UserConfig.themesDirectory.path)
+                Hand-written *.json themes, one file per theme with dark
+                and/or light variants. Reloaded on save. See THEMES.
+                examples/ holds every built-in theme in the same format.
+
             \(DenPaths.socket.path)
                 dend's socket. Den, den and remote Dens all talk to dend here.
 
@@ -91,6 +96,17 @@ enum ConfigManual {
                 Whether Option sends Alt (ESC-prefixed keys, what shells and
                 editors expect for M-x) or types symbols like å. "left"/"right"
                 use only that Option key as Alt. Default: true.
+
+            terminal_font = "JetBrainsMono Nerd Font"
+            terminal_font_size = 13
+            ui_font = "SF Mono"
+            ui_font_size = 13
+                Faces and sizes, split by surface: terminals vs Den's own
+                text (toasts, pickers). Sizes are 8–32. When set, these win
+                over Change Font and ⌘=/⌘- on every reload; when absent, the
+                palette's persisted choices apply and the UI follows the
+                terminal. show_sidebar / hide_sidebar take no value on their
+                own — bind them under [keys] like any command.
 
             Changes apply when Den comes back to the front, or at once with
             "Reload Config" (⇧⌘,). A mistake is reported in Den and the last
@@ -212,16 +228,68 @@ enum ConfigManual {
             unless `appearance` says otherwise. "Change Theme…" previews as you
             move through the list.
 
-            Import: any Ghostty theme file, or an Omarchy theme folder that has a
-            ghostty.conf. Den copies it to \(DenPaths.themes.path), so it
-            survives restarts. Writing a .conf file there by hand works too:
+            \(CLIOutput.bold("Writing your own"))
+                Save a JSON file as \(UserConfig.themesDirectory.path)/<name>.json
+                (honors $XDG_CONFIG_HOME). It reloads on save and appears in
+                "Change Theme…" under its name; selecting it previews live.
+                One file can hold both variants:
 
-                background = #1e1e2e
-                foreground = #cdd6f4
-                cursor-color = #f5e0dc
-                palette = 0=#45475a
-                ...
-                palette = 15=#a6adc8
+                    {
+                      "name": "Harbor",
+                      "dark": {
+                        "background": "#0b1622",
+                        "foreground": "#c9d7e3",
+                        "cursor": "#7aa2f7",
+                        "selection": "#1e3a5f",
+                        "accent": "#7aa2f7",
+                        "ansi": ["#000000", … 16 colors]
+                      },
+                      "light": { "background": "#f4f1ea", "foreground": "#2c3a42" }
+                    }
+
+                A flat file (the tokens at the top level, optional
+                "appearance": "dark" | "light") defines one theme. "Open
+                Themes Folder…" in the palette opens the folder, and
+                themes/examples/ contains every built-in theme in this same
+                format to copy from. A file that fails to parse is listed in
+                the theme picker with its error.
+
+            \(CLIOutput.bold("Tokens"))
+                background      terminal background and card fill (required)
+                foreground      default text and chrome text (required)
+                cursor          block cursor; defaults to accent
+                selection       selected-text background; defaults to the
+                                background tinted with accent
+                accent          focus rings, active states, chrome gradients;
+                                defaults to ANSI blue
+                ansi            16 terminal colors, black red green yellow blue
+                                magenta cyan white then their bright versions;
+                                gaps fall back to generated colors
+                name            shown in the picker; defaults to the file name
+                appearance      flat files only; guessed from the background
+                                when missing
+
+                Colors are "#rrggbb" (or "rrggbb"). Only background and
+                foreground are required; everything else has a sensible
+                default, so { "dark": { "background": …, "foreground": … } }
+                is already a complete theme.
+
+                A hand-written theme replaces a built-in of the same name;
+                deleting the file brings the built-in back.
+
+            \(CLIOutput.bold("Ghostty imports"))
+                "Import Theme File…" also takes Den JSON themes (copied to
+                \(UserConfig.themesDirectory.path)) and Ghostty files:
+                any Ghostty theme file, or a theme folder that has a
+                ghostty.conf. Den copies it to \(DenPaths.themes.path), so it
+                survives restarts. Writing a .conf file there by hand works too:
+
+                    background = #1e1e2e
+                    foreground = #cdd6f4
+                    cursor-color = #f5e0dc
+                    palette = 0=#45475a
+                    ...
+                    palette = 15=#a6adc8
             """
         },
         Topic(name: "ghostty", heading: "MIGRATING FROM GHOSTTY") {

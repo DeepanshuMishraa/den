@@ -2,8 +2,8 @@ import Foundation
 import DenProtocol
 import DenVT
 
-/// Imports themes written in Ghostty's config format, which is also what
-/// Omarchy theme folders ship as `ghostty.conf`.
+/// Imports themes written in Ghostty's config format, including theme
+/// folders that ship one as `ghostty.conf`.
 enum ThemeImport {
     struct ImportError: Error, CustomStringConvertible {
         let description: String
@@ -13,14 +13,14 @@ enum ThemeImport {
         DenPaths.themes
     }
 
-    /// Accepts a Ghostty theme file or an Omarchy theme folder.
+    /// Accepts a Ghostty theme file or a theme folder.
     static func load(from url: URL) throws(ImportError) -> Theme {
         var file = url
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
             let candidates = ["ghostty.conf", "ghostty", "ghostty.theme"]
             guard let found = candidates.map({ url.appending(path: $0) }).first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
-                throw ImportError(description: "\(url.lastPathComponent) has no ghostty.conf. Pick a Ghostty theme file or an Omarchy theme folder that includes one.")
+                throw ImportError(description: "\(url.lastPathComponent) has no ghostty.conf. Pick a Ghostty theme file or a theme folder that includes one.")
             }
             file = found
         }
@@ -33,7 +33,9 @@ enum ThemeImport {
         let name = (isDir.boolValue ? url.lastPathComponent : file.deletingPathExtension().lastPathComponent)
             .replacingOccurrences(of: "-", with: " ")
             .capitalized
-        return try parse(text, name: name)
+        var theme = try parse(text, name: name)
+        theme.fileURL = file
+        return theme
     }
 
     static func parse(_ text: String, name: String) throws(ImportError) -> Theme {
@@ -79,24 +81,67 @@ enum ThemeImport {
 
     /// Copies an imported theme into Den's themes folder so it survives restarts.
     static func install(_ url: URL) throws(ImportError) -> Theme {
-        let theme = try load(from: url)
+        var theme = try load(from: url)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try serialize(theme).write(to: directory.appending(path: "\(theme.name).conf"), atomically: true, encoding: .utf8)
+            let saved = directory.appending(path: "\(theme.name).conf")
+            try serialize(theme).write(to: saved, atomically: true, encoding: .utf8)
+            theme.fileURL = saved
         } catch {
             throw ImportError(description: "Imported \(theme.name) but could not save it to \(directory.path): \(error.localizedDescription). It will be gone after restart.")
         }
         return theme
     }
 
+    /// Copies a hand-written JSON theme into `~/.config/den/themes/`, so it
+    /// loads (and hot-reloads) with the rest. One file can hold two variants.
+    static func installJSON(from url: URL) throws(ThemeJSON.FileError) -> [Theme] {
+        var themes = try ThemeJSON.load(from: url)
+        let dir = UserConfig.themesDirectory
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let saved = dir.appending(path: url.lastPathComponent)
+            if saved != url {
+                if FileManager.default.fileExists(atPath: saved.path) {
+                    try FileManager.default.removeItem(at: saved)
+                }
+                try FileManager.default.copyItem(at: url, to: saved)
+            }
+            for i in themes.indices { themes[i].fileURL = saved }
+        } catch {
+            throw ThemeJSON.FileError(file: url.lastPathComponent, message: "Loaded but could not save a copy to \(dir.path): \(error.localizedDescription).")
+        }
+        return themes
+    }
+
     static func installed() -> [Theme] {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return [] }
-        return files.filter { $0.pathExtension == "conf" }.compactMap { try? load(from: $0) }
-            .sorted { $0.name < $1.name }
+        installedWithErrors().themes
+    }
+
+    /// Ghostty-format `.conf` imports plus hand-written `.json` themes, with
+    /// per-file errors for the picker to surface.
+    static func installedWithErrors() -> (themes: [Theme], errors: [ThemeJSON.FileError]) {
+        var conf: [Theme] = []
+        var errors: [ThemeJSON.FileError] = []
+        if let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+            for file in files.filter({ $0.pathExtension.lowercased() == "conf" }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                do {
+                    conf.append(try load(from: file))
+                } catch {
+                    errors.append(ThemeJSON.FileError(file: file.lastPathComponent, message: error.description))
+                }
+            }
+        }
+        let json = ThemeJSON.installed(in: UserConfig.themesDirectory)
+        return (conf + json.themes, errors + json.errors)
     }
 
     static func remove(_ theme: Theme) {
-        try? FileManager.default.removeItem(at: directory.appending(path: "\(theme.name).conf"))
+        if let url = theme.fileURL {
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            try? FileManager.default.removeItem(at: directory.appending(path: "\(theme.name).conf"))
+        }
     }
 
     private static func serialize(_ t: Theme) -> String {

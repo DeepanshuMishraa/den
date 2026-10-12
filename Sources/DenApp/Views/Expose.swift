@@ -16,7 +16,7 @@ struct ExposeView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 6) {
                             Text(session.name)
-                                .font(.system(size: 13, weight: .semibold))
+                                .uiFont(size: 13, weight: .semibold)
                                 .foregroundStyle(session.id == model.currentSession ? theme.chromeText : theme.secondaryText)
                             if session.id == model.currentSession {
                                 Circle().fill(theme.accent).frame(width: 5, height: 5)
@@ -50,7 +50,7 @@ struct ExposeCard: View {
             HStack(spacing: 8) {
                 DeckIcon(deck: model.deck(for: tab), height: 15, badge: model.hasActivity(tab))
                 Text(model.tabTitle(tab))
-                    .font(.system(size: 13, weight: .medium))
+                    .uiFont(size: 13, weight: .medium)
                     .foregroundStyle(theme.chromeText)
                     .lineLimit(1)
                 Spacer(minLength: 4)

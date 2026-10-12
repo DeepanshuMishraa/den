@@ -33,6 +33,7 @@ struct RootView: View {
             PaneDragGhost()
         }
         .coordinateSpace(.named(Self.space))
+        .environment(\.uiFontFamily, model.uiFontFamily)
         .overlayPreferenceValue(TooltipKey.self) { TooltipLayer(requests: $0, theme: theme) }
         .ignoresSafeArea()
         .preferredColorScheme(theme.isDark ? .dark : .light)
@@ -130,8 +131,8 @@ struct RootView: View {
             .overlay {
                 if let problem = model.currentHostProblem {
                     VStack(spacing: 10) {
-                        Text(model.hostLabel(.remote(problem.host))).font(.system(size: 13, weight: .semibold))
-                        Text(problem.message).font(.system(size: 12)).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
+                        Text(model.hostLabel(.remote(problem.host))).uiFont(size: 13, weight: .semibold)
+                        Text(problem.message).uiFont(size: 12).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
                         HStack {
                             if model.remoteStates[problem.host] == .needsLogin {
                                 Button("Log In…") { model.requestLogin(problem.host) }
@@ -156,8 +157,8 @@ struct RootView: View {
             ProgressView().controlSize(.small)
         case .disconnected(let reason):
             VStack(spacing: 10) {
-                Text("Not connected to dend").font(.system(size: 13, weight: .semibold))
-                Text(reason).font(.system(size: 12)).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
+                Text("Not connected to dend").uiFont(size: 13, weight: .semibold)
+                Text(reason).uiFont(size: 12).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
                 Button("Reconnect") { Task { await model.connect() } }
             }
             .padding(24)
@@ -220,7 +221,7 @@ struct RootView: View {
         if let toast = model.toast {
             VStack {
                 Spacer()
-                ToastView(toast: toast, theme: model.theme, fontFamily: model.fontFamily, fontSize: model.fontSize - 1,
+                ToastView(toast: toast, theme: model.theme, fontFamily: model.uiFontFamily, fontSize: model.uiFontSize - 1,
                           onAction: { model.performToastAction($0) })
                     .padding(.bottom, 24)
             }
@@ -237,7 +238,7 @@ struct RootView: View {
                 Spacer()
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-                    Text(error).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Text(error).uiFont(size: 12).fixedSize(horizontal: false, vertical: true)
                     Button { model.dismissError() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
                 }
                 .padding(12)

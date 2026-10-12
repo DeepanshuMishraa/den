@@ -117,7 +117,7 @@ struct CommandPalette: View {
             field(theme)
             if items.isEmpty {
                 Text(emptyHint)
-                    .font(.system(size: 13))
+                    .uiFont(size: 13)
                     .foregroundStyle(theme.tertiaryText)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -190,7 +190,7 @@ struct CommandPalette: View {
         HStack(spacing: 7) {
             if let chip = route.chip {
                 Text(chip)
-                    .font(.system(size: 12, weight: .semibold))
+                    .uiFont(size: 12, weight: .semibold)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2.5)
                     .background(RoundedRectangle(cornerRadius: 5).fill(theme.isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.07)))
@@ -200,7 +200,7 @@ struct CommandPalette: View {
             }
             TextField(route.placeholder, text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13.5))
+                .uiFont(size: 13.5)
                 .focused($focused)
                 .onSubmit {
                     let items = visibleItems
@@ -241,14 +241,14 @@ struct CommandPalette: View {
                     .frame(width: 16)
             }
             Fuzzy.highlighted(item.title, hits: hits, base: fg, accent: highlighted ? fg : theme.accent)
-                .font(.system(size: 13.5))
+                .uiFont(size: 13.5)
                 .lineLimit(1)
             Spacer(minLength: 10)
             if let detail = item.detail {
-                Text(detail).font(.system(size: 12.5)).foregroundStyle(dim).lineLimit(1).truncationMode(.head)
+                Text(detail).uiFont(size: 12.5).foregroundStyle(dim).lineLimit(1).truncationMode(.head)
             }
             if let shortcut = item.shortcut {
-                Text(shortcut).font(.system(size: 12)).foregroundStyle(dim)
+                Text(shortcut).uiFont(size: 12).foregroundStyle(dim)
             }
             if item.checked {
                 Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(dim)
@@ -374,9 +374,18 @@ struct CommandPalette: View {
     private func items(for route: PaletteRoute) -> [PaletteItem] {
         switch route {
         case .theme:
-            return model.themesForCurrentAppearance.map { t in
-                PaletteItem(id: "theme-\(t.name)", title: t.name, checked: t.name == model.selectedThemeName, theme: t, action: .run { model.selectTheme(t) })
+            var items = model.themesForCurrentAppearance.map { t in
+                PaletteItem(id: "theme-\(t.name)", title: t.name, detail: t.isCustom ? "Custom" : nil,
+                            checked: t.name == model.selectedThemeName, theme: t, action: .run { model.selectTheme(t) })
             }
+            items.append(PaletteItem(id: "open-themes-folder", icon: "folder", title: "Open Themes Folder…",
+                                     detail: PathQuery.abbreviate(UserConfig.themesDirectory.path),
+                                     action: .run { NSWorkspace.shared.open(UserConfig.themesDirectory) }))
+            for (i, error) in model.themeFileErrors.enumerated() {
+                items.append(PaletteItem(id: "theme-error-\(i)", icon: "exclamationmark.triangle", title: error.file,
+                                         detail: error.message, action: .run { model.report(error.description) }))
+            }
+            return items
         case .font:
             var families = FontRegistry.monospacedFamilies()
             if !families.contains(FontRegistry.bundledFamily) { families.insert(FontRegistry.bundledFamily, at: 0) }
@@ -405,8 +414,11 @@ struct CommandPalette: View {
                             action: .run { model.switchSession(s.id) })
             }
         case .deleteTheme:
-            return model.customThemes.map { t in
-                PaletteItem(id: "delete-\(t.name)", icon: "trash", title: t.name, action: .run { model.deleteCustomTheme(t) })
+            // Dual-variant files appear once: both variants share one file.
+            var seen: Set<String> = []
+            return model.customThemes.compactMap { t in
+                guard seen.insert(t.name).inserted else { return nil }
+                return PaletteItem(id: "delete-\(t.name)", icon: "trash", title: t.name, action: .run { model.deleteCustomTheme(t) })
             }
         default:
             return rootItems
@@ -568,9 +580,10 @@ struct CommandPalette: View {
 
     private func importTheme() {
         let panel = NSOpenPanel()
-        panel.message = "Choose a Ghostty theme file or an Omarchy theme folder"
+        panel.message = "Choose a Den JSON theme, a Ghostty theme file, or a theme folder"
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json, .init(filenameExtension: "conf")].compactMap { $0 } + [.plainText]
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url { model.importTheme(from: url) }
     }
@@ -585,7 +598,7 @@ private struct SectionHeader: View {
     var body: some View {
         HStack(spacing: 5) {
             if let icon { Image(systemName: icon).font(.system(size: 10.5)) }
-            Text(title).font(.system(size: 11.5, weight: .medium))
+            Text(title).uiFont(size: 11.5, weight: .medium)
         }
         .foregroundStyle(theme.tertiaryText)
         .padding(.horizontal, 9)

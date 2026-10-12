@@ -80,10 +80,10 @@ struct SessionButton: View {
                 if showsName {
                     VStack(alignment: .leading, spacing: -1) {
                         Text(model.currentSummary?.name ?? "Connecting…")
-                            .font(.system(size: 12.5, weight: .semibold))
+                            .uiFont(size: 12.5, weight: .semibold)
                             .foregroundStyle(theme.chromeText)
                         Text(hostLabel)
-                            .font(.system(size: 10.5))
+                            .uiFont(size: 10.5)
                             .foregroundStyle(theme.tertiaryText)
                     }
                     .lineLimit(1)
@@ -233,7 +233,7 @@ struct TabItem: View {
                     }
                 if !compact {
                     Text(model.tabTitle(tab))
-                        .font(.system(size: 13, weight: active ? .medium : .regular))
+                        .uiFont(size: 13, weight: active ? .medium : .regular)
                         .foregroundStyle(active ? theme.chromeText : theme.secondaryText)
                         .lineLimit(1)
                         .truncationMode(.tail)

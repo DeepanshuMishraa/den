@@ -20,6 +20,8 @@ struct Theme: Identifiable, Equatable, Sendable {
     let accentRGB: RGB
     /// Imported themes are user files and can be deleted.
     var isCustom = false
+    /// The file a custom theme was loaded from, for deleting it.
+    var fileURL: URL? = nil
 
     var id: String { name }
     var isDark: Bool { appearance == .dark }

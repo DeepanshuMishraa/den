@@ -44,7 +44,7 @@ struct PaneCard: View {
                 HStack(spacing: 7) {
                     HeaderGlyph(kind: kind, color: focused ? theme.chromeText : theme.secondaryText)
                     Text(model.title(for: pane))
-                        .font(.system(size: 13, weight: .semibold))
+                        .uiFont(size: 13, weight: .semibold)
                         .foregroundStyle(focused || !multiple ? theme.chromeText : theme.secondaryText)
                         .lineLimit(1)
                         .truncationMode(.middle)

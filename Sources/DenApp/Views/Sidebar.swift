@@ -26,7 +26,7 @@ struct Sidebar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 9) {
                         Image(systemName: "laptopcomputer").font(.system(size: 13.5))
-                        Text("This Mac").font(.system(size: 13.5, weight: .semibold))
+                        Text("This Mac").uiFont(size: 13.5, weight: .semibold)
                     }
                     .foregroundStyle(theme.chromeText)
                     .padding(.horizontal, 10)
@@ -80,7 +80,7 @@ private struct SessionHeader: View {
 
     var body: some View {
         Text(session.name)
-            .font(.system(size: 12, weight: .medium))
+            .uiFont(size: 12, weight: .medium)
             .foregroundStyle(model.theme.tertiaryText)
             .overlay(alignment: .trailing) {
                 if session.id != model.currentSession, model.sessionWantsAttention(session.id) {
@@ -243,7 +243,7 @@ struct ActivityRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(model.tabTitle(tab))
-                        .font(.system(size: 13))
+                        .uiFont(size: 13)
                         .foregroundStyle(selected ? theme.chromeText : theme.chromeText.opacity(0.88))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -252,7 +252,7 @@ struct ActivityRow: View {
                 }
                 HStack(spacing: 6) {
                     Text(activity.detail)
-                        .font(.system(size: 11.5))
+                        .uiFont(size: 11.5)
                         .foregroundStyle(theme.tertiaryText)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -298,7 +298,7 @@ struct StatusPill: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .uiFont(size: 11, weight: .semibold)
             .foregroundStyle(tint.opacity(0.9))
             .padding(.horizontal, 7)
             .frame(height: 18)
@@ -323,7 +323,7 @@ struct SidebarTitle: View {
                 Text(title).foregroundStyle(theme.chromeText)
             }
         }
-        .font(.system(size: 13))
+        .uiFont(size: 13)
         .lineLimit(1)
         .truncationMode(.tail)
     }

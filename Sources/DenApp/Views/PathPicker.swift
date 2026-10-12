@@ -67,7 +67,7 @@ struct PathPickerOverlay: View {
     @ViewBuilder private var ghost: some View {
         if entries.indices.contains(selection) {
             Text(PathQuery.insertion(for: entries[selection].path, cwd: request.cwd, home: home))
-                .font(.custom(model.fontFamily, size: model.fontSize))
+                .font(.custom(model.uiFontFamily, size: model.uiFontSize))
                 .foregroundStyle(model.theme.tertiaryText)
                 .lineLimit(1)
                 .fixedSize()
@@ -81,7 +81,7 @@ struct PathPickerOverlay: View {
         return VStack(spacing: 4) {
             if !above { field(theme) }
             if let note, entries.isEmpty {
-                Text(note).font(.system(size: 12)).foregroundStyle(theme.tertiaryText)
+                Text(note).uiFont(size: 12).foregroundStyle(theme.tertiaryText)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.vertical, 6)
             } else if !entries.isEmpty {
                 ScrollViewReader { proxy in
@@ -113,7 +113,7 @@ struct PathPickerOverlay: View {
             Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(theme.tertiaryText)
             TextField("Path or name", text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .uiFont(size: 12.5)
                 .focused($focused)
                 .onSubmit(submit)
         }
@@ -130,7 +130,7 @@ struct PathPickerOverlay: View {
                 .foregroundStyle(highlighted ? theme.onAccent : (entry.isDirectory ? Color.accentColor : theme.secondaryText))
                 .frame(width: 14)
             Text(label(for: entry))
-                .font(.system(size: 12.5))
+                .uiFont(size: 12.5)
                 .foregroundStyle(fg)
                 .lineLimit(1)
                 .truncationMode(.middle)

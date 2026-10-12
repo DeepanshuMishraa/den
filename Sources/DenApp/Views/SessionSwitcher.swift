@@ -77,7 +77,7 @@ struct SessionMenu: View {
                 Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(theme.tertiaryText)
                 TextField("Filter or create…", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .uiFont(size: 13)
                     .focused($filterFocused)
                     .onSubmit { activate(selection) }
             }
@@ -134,43 +134,43 @@ struct SessionMenu: View {
                     .opacity(s.id == model.currentSession ? 1 : 0)
                     .frame(width: 12)
                 Fuzzy.highlighted(s.name, hits: Fuzzy.match(query, in: s.name) ?? [], base: fg, accent: highlighted ? fg : theme.accent)
-                    .font(.system(size: 13))
+                    .uiFont(size: 13)
                 if s.id != model.currentSession, model.sessionWantsAttention(s.id) {
                     // Something there finished or is waiting on you.
                     Circle().fill(highlighted ? fg : theme.accent).frame(width: 6, height: 6)
                 }
                 Spacer()
                 if let label = shortcut.flatMap({ model.config.shortcutLabel(.goToSession, number: $0) }) {
-                    Text(label).font(.system(size: 11.5)).foregroundStyle(dim)
+                    Text(label).uiFont(size: 11.5).foregroundStyle(dim)
                 }
             case .create(let name):
                 Image(systemName: "plus").font(.system(size: 10, weight: .bold)).frame(width: 12)
-                Text("Create “\(name)”").font(.system(size: 13))
+                Text("Create “\(name)”").uiFont(size: 13)
                 Spacer()
             case .newSession:
                 Image(systemName: "rectangle.stack.badge.plus").font(.system(size: 11)).frame(width: 12)
-                Text("New Session").font(.system(size: 13))
+                Text("New Session").uiFont(size: 13)
                 Spacer()
-                if let label = model.config.shortcutLabel(.newSession) { Text(label).font(.system(size: 11.5)).foregroundStyle(dim) }
+                if let label = model.config.shortcutLabel(.newSession) { Text(label).uiFont(size: 11.5).foregroundStyle(dim) }
             case .addHost:
                 Image(systemName: "network").font(.system(size: 11)).frame(width: 12)
-                Text("Add Remote Host…").font(.system(size: 13))
+                Text("Add Remote Host…").uiFont(size: 13)
                 Spacer()
             case .logIn:
                 Image(systemName: "key").font(.system(size: 10.5)).frame(width: 12)
-                Text("Log In…").font(.system(size: 13))
+                Text("Log In…").uiFont(size: 13)
                 Spacer()
             case .reconnect:
                 Image(systemName: "arrow.clockwise").font(.system(size: 10.5, weight: .semibold)).frame(width: 12)
-                Text("Reconnect Now").font(.system(size: 13))
+                Text("Reconnect Now").uiFont(size: 13)
                 Spacer()
             case .newSessionOn:
                 Image(systemName: "plus").font(.system(size: 10, weight: .bold)).frame(width: 12)
-                Text("New Session Here").font(.system(size: 13))
+                Text("New Session Here").uiFont(size: 13)
                 Spacer()
             case .disconnect:
                 Image(systemName: "power").font(.system(size: 10.5, weight: .semibold)).frame(width: 12)
-                Text("Disconnect").font(.system(size: 13))
+                Text("Disconnect").uiFont(size: 13)
                 Spacer()
             case .header:
                 EmptyView()
@@ -190,11 +190,11 @@ struct SessionMenu: View {
             switch host {
             case .local:
                 Image(systemName: "laptopcomputer").font(.system(size: 10.5))
-                Text("This Mac").font(.system(size: 11, weight: .medium))
+                Text("This Mac").uiFont(size: 11, weight: .medium)
             case .remote(let id):
                 let state = model.remoteStates[id]
                 Circle().fill(HostStatus.color(state, theme: theme)).frame(width: 6, height: 6)
-                Text(model.hostLabel(host)).font(.system(size: 11, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                Text(model.hostLabel(host)).uiFont(size: 11, weight: .medium).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 6)
                 if hoveredHost == id {
                     HostActions(host: id, color: theme.secondaryText) {
@@ -203,7 +203,7 @@ struct SessionMenu: View {
                     }
                     .transition(.opacity)
                 } else if let state, !state.isConnected {
-                    Text(HostStatus.short(state)).font(.system(size: 10.5))
+                    Text(HostStatus.short(state)).uiFont(size: 10.5)
                 }
             }
         }

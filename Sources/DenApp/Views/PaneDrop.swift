@@ -119,7 +119,7 @@ struct PaneDragGhost: View {
                 ProgramGlyph(kind: model.program(for: drag.source), size: 13, color: theme.chromeText)
                     .frame(width: 16, height: 14)
                 Text(model.title(for: drag.source))
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .uiFont(size: 12.5, weight: .semibold)
                     .foregroundStyle(theme.chromeText)
                     .lineLimit(1)
             }

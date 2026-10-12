@@ -1,4 +1,36 @@
+import DenVT
 import SwiftUI
+
+/// The UI chrome typeface from `ui_font` (falls back to the terminal font).
+/// Set once at the root; SF symbols are unaffected (they keep .system).
+private struct UiFontFamilyKey: EnvironmentKey {
+    static let defaultValue = FontMetrics.defaultFamily
+}
+
+extension EnvironmentValues {
+    var uiFontFamily: String {
+        get { self[UiFontFamilyKey.self] }
+        set { self[UiFontFamilyKey.self] = newValue }
+    }
+}
+
+private struct UiFontModifier: ViewModifier {
+    @Environment(\.uiFontFamily) private var family
+    let size: CGFloat
+    let weight: Font.Weight
+    func body(content: Content) -> some View {
+        content.font(.custom(family, size: size).weight(weight))
+    }
+}
+
+extension View {
+    /// Chrome text in the configured UI face. Sizes stay per-site; only the
+    /// family is centralized. Terminals, icon monograms and SF symbols keep
+    /// their own fonts.
+    func uiFont(size: CGFloat, weight: Font.Weight = .regular) -> some View {
+        modifier(UiFontModifier(size: size, weight: weight))
+    }
+}
 
 /// Den's tooltip: a small label with keycaps, shown below the view after a
 /// short hover (e.g. "Change Session ⌥ Space then S"). The view only
@@ -100,10 +132,10 @@ struct TooltipBubble: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(text).font(.system(size: 11.5, weight: .medium))
+            Text(text).uiFont(size: 11.5, weight: .medium)
             ForEach(Array(keys.enumerated()), id: \.offset) { index, group in
                 if index > 0 {
-                    Text("then").font(.system(size: 10.5)).foregroundStyle(theme.tertiaryText)
+                    Text("then").uiFont(size: 10.5).foregroundStyle(theme.tertiaryText)
                 }
                 HStack(spacing: 3) {
                     ForEach(Array(group.enumerated()), id: \.offset) { Keycap(label: $0.element, theme: theme) }
@@ -125,7 +157,7 @@ struct Keycap: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 10.5, weight: .semibold))
+            .uiFont(size: 10.5, weight: .semibold)
             .frame(minWidth: 15, minHeight: 15)
             .padding(.horizontal, 2)
             .background(RoundedRectangle(cornerRadius: 3.5).fill(theme.isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.07)))

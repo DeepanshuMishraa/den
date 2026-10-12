@@ -28,6 +28,8 @@ enum DenCommand: String, CaseIterable {
     case fontReset = "font_reset"
     case toggleVerticalTabs = "toggle_vertical_tabs"
     case toggleSidebar = "toggle_sidebar"
+    case showSidebar = "show_sidebar"
+    case hideSidebar = "hide_sidebar"
     case toggleActivityMode = "toggle_activity_mode"
     case togglePaneHeaders = "toggle_pane_headers"
     case toggleContrastCorrection = "toggle_contrast_correction"
@@ -101,6 +103,8 @@ enum DenCommand: String, CaseIterable {
         case .fontReset: "Actual Size"
         case .toggleVerticalTabs: "Toggle Vertical Tabs"
         case .toggleSidebar: "Toggle Sidebar"
+        case .showSidebar: "Show Sidebar"
+        case .hideSidebar: "Hide Sidebar"
         case .toggleActivityMode: "Toggle Activity Mode"
         case .togglePaneHeaders: "Toggle Pane Headers"
         case .toggleContrastCorrection: "Toggle Automatic Contrast Correction"
@@ -202,7 +206,7 @@ enum DenCommand: String, CaseIterable {
         case .goToTab: "cmd+digit"
         case .lastTab: nil
         case .minimize: "cmd+m"
-        case .changeTheme, .changeFont, .togglePaneHeaders, .toggleContrastCorrection, .tidyTabTitle, .closeSession, .checkForUpdates: nil
+        case .changeTheme, .changeFont, .showSidebar, .hideSidebar, .togglePaneHeaders, .toggleContrastCorrection, .tidyTabTitle, .closeSession, .checkForUpdates: nil
         }
     }
 
@@ -245,6 +249,8 @@ enum DenCommand: String, CaseIterable {
         case .fontReset: model.resetFontSize()
         case .toggleVerticalTabs: animated { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal }
         case .toggleSidebar: animated { model.toggleSidebar() }
+        case .showSidebar: animated { model.showSidebar() }
+        case .hideSidebar: animated { model.hideSidebar() }
         case .toggleActivityMode: animated { model.toggleActivityMode() }
         case .togglePaneHeaders: animated { model.showPaneHeaders.toggle() }
         case .toggleContrastCorrection: model.contrastCorrection.toggle()

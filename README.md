@@ -151,8 +151,12 @@ Inside a Den pane, `-s` and `-p` default to that pane (`DEN_PANE_ID`).
   alive, since working/blocked end with their process):
   `sh -c 'sleep 3; printf "\033]7501;state=blocked:kind=question:msg=Q29udGludWU/\007"; sleep 60'`
 - **Themes**: 41 built-ins (27 dark, 14 light) that tint the chrome too,
-  System/Light/Dark appearance, import of Ghostty theme files and Omarchy
-  theme folders, migration from your Ghostty config.
+  System/Light/Dark appearance, import of Ghostty theme files and theme
+  folders, migration from your Ghostty config. Write your own in
+  `~/.config/den/themes/<name>.json` (dark and/or light variants, reloaded
+  on save with live preview in Change Theme); `themes/examples/` holds all
+  41 built-ins in the same format, and `den config help themes` documents
+  every token.
 - **Automatic Contrast Correction**: low-contrast colors are corrected in
   OKLab toward the theme's foreground until they meet WCAG AA, memoized.
 - **Fonts**: ships JetBrains Mono Nerd Font (OFL, the same default Ghostty

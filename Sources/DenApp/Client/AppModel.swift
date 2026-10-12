@@ -241,6 +241,17 @@ final class AppModel {
         if tabStyle == .vertical { sidebarCollapsed.toggle() } else { tabStyle = .vertical }
     }
 
+    /// Shows the sidebar, switching to vertical tabs first if needed.
+    func showSidebar() {
+        if tabStyle != .vertical { tabStyle = .vertical }
+        sidebarCollapsed = false
+    }
+
+    /// Folds the sidebar away, leaving the terminal the full width.
+    func hideSidebar() {
+        if tabStyle == .vertical { sidebarCollapsed = true }
+    }
+
     /// Activity Mode lives in the sidebar, so turning it on shows that.
     func toggleActivityMode() {
         activityMode.toggle()
@@ -262,6 +273,10 @@ final class AppModel {
     var surfaces: Surfaces { Surfaces(theme: theme, style: effectiveInterfaceStyle) }
     var fontFamily: String { didSet { defaults.set(fontFamily, forKey: "fontFamily") } }
     var fontSize: CGFloat { didSet { defaults.set(Double(fontSize), forKey: "fontSize") } }
+    /// Den's own text (toasts, pickers). The config can split it from the
+    /// terminal font; otherwise it follows the terminal.
+    var uiFontFamily: String { config.uiFont ?? fontFamily }
+    var uiFontSize: CGFloat { config.uiFontSize.map { CGFloat($0) } ?? fontSize }
 
     func adjustFontSize(_ delta: CGFloat) { fontSize = min(max(fontSize + delta, 8), 32) }
     func resetFontSize() { fontSize = FontMetrics.defaultSize }
@@ -271,7 +286,7 @@ final class AppModel {
     var appearanceMode: AppearanceMode { didSet { defaults.set(appearanceMode.rawValue, forKey: "appearance"); applyTheme() } }
     private var lightThemeName: String { didSet { defaults.set(lightThemeName, forKey: "lightTheme") } }
     private var darkThemeName: String { didSet { defaults.set(darkThemeName, forKey: "darkTheme") } }
-    private(set) var customThemes: [Theme] = ThemeImport.installed()
+    private(set) var customThemes: [Theme] = []
     private var systemIsDark: Bool
     /// Set while hovering a theme in the palette; reverted on dismiss.
     var previewTheme: Theme? { didSet { applyTheme() } }
@@ -325,8 +340,13 @@ final class AppModel {
         lightThemeName = d.string(forKey: "lightTheme") ?? ThemeCatalog.defaultLight
         darkThemeName = d.string(forKey: "darkTheme") ?? ThemeCatalog.defaultDark
         theme = ThemeCatalog.named(ThemeCatalog.defaultDark) ?? ThemeCatalog.dark[0]
+        ThemeJSON.exportExamples(to: UserConfig.themesDirectory.appending(path: "examples"))
+        reloadCustomThemes()
         applyTheme()
         reloadConfig()
+        themeWatcher = ThemeWatcher(directory: UserConfig.themesDirectory) { [weak self] in
+            Task { @MainActor in self?.reloadCustomThemes() }
+        }
         updateController = UpdateController(model: self)
     }
 
@@ -1041,6 +1061,7 @@ final class AppModel {
     func appBecameActive() {
         clearActivity()
         reloadConfig()
+        reloadCustomThemes()
     }
 
     func newTab(cwd: String? = nil) {
@@ -1241,11 +1262,19 @@ final class AppModel {
         switch UserConfig.load(from: url) {
         case .success(let loaded):
             config = loaded
+            applyConfigFonts()
             configDidChange?()
             if force { showToast("Config reloaded") }
         case .failure(let error):
             report("Den's config at \(url.path) has an error, so the previous settings stay in use: \(error.message) Fix it and run Reload Config.")
         }
+    }
+
+    /// Terminal font keys from the config win over the persisted palette
+    /// choices (and are persisted themselves).
+    private func applyConfigFonts() {
+        if let family = config.terminalFont { fontFamily = family }
+        if let size = config.terminalFontSize { fontSize = CGFloat(size) }
     }
 
     /// Set by the leader key until the next keypress, which picks the command.
@@ -1481,8 +1510,16 @@ final class AppModel {
 
     var themesForCurrentAppearance: [Theme] {
         let builtIn = effectiveAppearance == .dark ? ThemeCatalog.dark : ThemeCatalog.light
-        return builtIn + customThemes.filter { $0.appearance == effectiveAppearance }
+        // A hand-written theme with a built-in's name replaces it.
+        let shadowed = Set(customThemes.map(\.name))
+        return builtIn.filter { !shadowed.contains($0.name) }
+            + customThemes.filter { $0.appearance == effectiveAppearance }
     }
+
+    /// Files in `~/.config/den/themes/` that failed to parse, for the
+    /// theme picker to surface.
+    private(set) var themeFileErrors: [ThemeJSON.FileError] = []
+    @ObservationIgnored private var themeWatcher: ThemeWatcher?
 
     var selectedThemeName: String { effectiveAppearance == .dark ? darkThemeName : lightThemeName }
 
@@ -1500,11 +1537,24 @@ final class AppModel {
     }
 
     func importTheme(from url: URL) {
+        var isDir: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        if !isDir.boolValue, url.pathExtension.lowercased() == "json" {
+            do {
+                let themes = try ThemeImport.installJSON(from: url)
+                reloadCustomThemes()
+                // Select the matching variant for the current appearance.
+                let pick = themes.first { $0.appearance == effectiveAppearance } ?? themes[0]
+                selectTheme(customThemes.first { $0.name == pick.name && $0.appearance == pick.appearance } ?? pick)
+            } catch {
+                lastError = error.description
+            }
+            return
+        }
         do {
             let theme = try ThemeImport.install(url)
-            customThemes.removeAll { $0.name == theme.name }
-            customThemes.append(theme)
-            selectTheme(theme)
+            reloadCustomThemes()
+            selectTheme(customThemes.first { $0.name == theme.name && $0.appearance == theme.appearance } ?? theme)
         } catch {
             lastError = error.description
         }
@@ -1512,12 +1562,33 @@ final class AppModel {
 
     func deleteCustomTheme(_ theme: Theme) {
         ThemeImport.remove(theme)
-        customThemes.removeAll { $0.name == theme.name }
+        reloadCustomThemes()
         applyTheme()
     }
 
+    /// Re-reads hand-written JSON themes (and Ghostty imports). Saved edits
+    /// to the selected theme apply at once; a deleted one falls back.
+    func reloadCustomThemes() {
+        let loaded = ThemeImport.installedWithErrors()
+        customThemes = loaded.themes
+        themeFileErrors = loaded.errors
+        guard previewTheme == nil else { return }
+        let name = selectedThemeName
+        if let current = customThemes.first(where: { $0.name == name && $0.appearance == effectiveAppearance }) {
+            if current != theme {
+                theme = current
+                refreshReplicas()
+            }
+        } else if theme.isCustom, !customThemes.contains(where: { $0.name == theme.name && $0.appearance == theme.appearance }) {
+            applyTheme()
+        }
+    }
+
     private func resolve(_ name: String, _ appearance: Appearance) -> Theme {
-        ThemeCatalog.named(name) ?? customThemes.first { $0.name == name }
+        // Hand-written themes win over built-ins of the same name.
+        customThemes.first { $0.name == name && $0.appearance == appearance }
+            ?? customThemes.first { $0.name == name }
+            ?? ThemeCatalog.named(name)
             ?? ThemeCatalog.named(appearance == .dark ? ThemeCatalog.defaultDark : ThemeCatalog.defaultLight)
             ?? ThemeCatalog.dark[0]
     }

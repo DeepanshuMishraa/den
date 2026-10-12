@@ -37,6 +37,6 @@ let package = Package(
         .testTarget(name: "DenProtocolTests", dependencies: ["DenProtocol"]),
         .testTarget(name: "DenVTTests", dependencies: ["DenVT"]),
         .testTarget(name: "DenServerTests", dependencies: ["DenServer", "DenProtocol", "DenVT"]),
-        .testTarget(name: "DenAppTests", dependencies: ["DenApp"]),
+        .testTarget(name: "DenAppTests", dependencies: ["DenApp", "DenVT"]),
     ]
 )

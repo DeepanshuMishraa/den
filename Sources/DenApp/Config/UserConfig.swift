@@ -13,6 +13,13 @@ struct UserConfig: Equatable {
     static let defaultLeader = KeyChord(modifiers: [.option], key: .code(UInt16(kVK_Space)))
 
     var optionAsAlt: OptionAsAlt = .both
+    /// Terminal typeface and size. When set, they win over Change Font and
+    /// ⌘=/⌘- on every config reload.
+    var terminalFont: String?
+    var terminalFontSize: Double?
+    /// Den's own text (toasts, pickers). Defaults to the terminal font.
+    var uiFont: String?
+    var uiFontSize: Double?
     var keybinds: [Keybind] = []
     /// `[keys] leader`: pressed before a `leader+…` shortcut.
     var leader = UserConfig.defaultLeader
@@ -86,10 +93,19 @@ struct UserConfig: Equatable {
     }
 
     static var url: URL {
+        directory.appending(path: "config.toml")
+    }
+
+    /// `~/.config/den` (honors `$XDG_CONFIG_HOME`).
+    static var directory: URL {
         let base = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].map { URL(filePath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".config")
-        return base.appending(path: "den/config.toml")
+        return base.appending(path: "den")
     }
+
+    /// Hand-written `*.json` themes live here; `examples/` holds every
+    /// built-in theme in the same format for reference.
+    static var themesDirectory: URL { directory.appending(path: "themes") }
 
     /// The direct (non-leader) keybind for a keypress. The last one for a
     /// chord wins, so later lines override earlier ones.
@@ -131,6 +147,39 @@ struct UserConfig: Equatable {
                 return .failure(ConfigError(message: "macos_option_as_alt is \(describe(other)); use true, false, \"left\" or \"right\"."))
             }
             config.optionAsAlt = mode
+        }
+
+        func checkSize(_ key: String, _ size: Double) -> Result<Double?, ConfigError> {
+            guard (8 ... 32).contains(size) else {
+                return .failure(ConfigError(message: "\(key) is \(size); use a size 8–32."))
+            }
+            return .success(size)
+        }
+        func fontSize(_ key: String) -> Result<Double?, ConfigError> {
+            switch root[key] {
+            case nil: return .success(nil)
+            case .integer(let i)?: return checkSize(key, Double(i))
+            case .float(let f)?: return checkSize(key, f)
+            case let other?: return .failure(ConfigError(message: "\(key) is \(describe(other)); use a size 8–32, e.g. \(key) = 13."))
+            }
+        }
+        switch root["terminal_font"] {
+        case nil: break
+        case .string(let s)?: config.terminalFont = s
+        case let other?: return .failure(ConfigError(message: "terminal_font is \(describe(other)); use a family like \"JetBrainsMono Nerd Font\"."))
+        }
+        switch fontSize("terminal_font_size") {
+        case .success(let size): config.terminalFontSize = size
+        case .failure(let e): return .failure(e)
+        }
+        switch root["ui_font"] {
+        case nil: break
+        case .string(let s)?: config.uiFont = s
+        case let other?: return .failure(ConfigError(message: "ui_font is \(describe(other)); use a family like \"SF Mono\"."))
+        }
+        switch fontSize("ui_font_size") {
+        case .success(let size): config.uiFontSize = size
+        case .failure(let e): return .failure(e)
         }
 
         guard case .table(let keys) = root["keys"] ?? .table([:]) else {
@@ -202,6 +251,14 @@ struct UserConfig: Equatable {
         # Option sends ESC-prefixed keys (alt) instead of typing symbols like å.
         # true | false | "left" | "right"
         macos_option_as_alt = true
+
+        # Fonts, split by surface. When set, these win over Change Font and
+        # ⌘=/⌘- on every reload; when commented out, the palette's choices
+        # (persisted) apply. Sizes are 8–32.
+        # terminal_font = "JetBrainsMono Nerd Font"
+        # terminal_font_size = 13
+        # ui_font = "SF Mono"
+        # ui_font_size = 13
 
         # Shortcuts for Den's commands. Uncomment a line to change one; "" removes
         # it. Keys are modifiers (cmd, ctrl, opt, shift) and a key, e.g. "cmd+t",

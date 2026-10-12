@@ -24,7 +24,7 @@ struct StatusGlyph: View {
                     .foregroundStyle(.green)
             }
         }
-        .font(.system(size: size * 0.9, weight: .semibold))
+        .uiFont(size: size * 0.9, weight: .semibold)
         .frame(width: size + 4, height: size + 4)
         .transition(.scale(scale: 0.6).combined(with: .opacity))
     }

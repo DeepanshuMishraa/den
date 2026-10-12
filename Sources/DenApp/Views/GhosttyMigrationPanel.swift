@@ -34,12 +34,12 @@ struct GhosttyMigrationPanel: View {
                 case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(theme.tertiaryText)
                 }
             }
-            .font(.system(size: 14))
+            .uiFont(size: 14)
             .frame(width: 16, height: 16)
             .transition(.scale(scale: 0.6).combined(with: .opacity))
             .id(phaseKey)
             Text(title)
-                .font(.system(size: 13.5, weight: .medium))
+                .uiFont(size: 13.5, weight: .medium)
                 .foregroundStyle(theme.chromeText)
                 .contentTransition(.opacity)
             Spacer()
@@ -74,12 +74,12 @@ struct GhosttyMigrationPanel: View {
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
                 .id(glyphKey(step.status))
             Text(step.id.title)
-                .font(.system(size: 13.5))
+                .uiFont(size: 13.5)
                 .foregroundStyle(pending ? dim : theme.chromeText)
             Spacer(minLength: 10)
             if let detail = detail(step.status) {
                 Text(detail)
-                    .font(.system(size: 12.5))
+                    .uiFont(size: 12.5)
                     .foregroundStyle(dim)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -122,7 +122,7 @@ struct GhosttyMigrationPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             if let message {
                 Text(message)
-                    .font(.system(size: 12.5))
+                    .uiFont(size: 12.5)
                     .foregroundStyle(theme.tertiaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 9)
@@ -149,8 +149,8 @@ private struct PanelButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text(title).font(.system(size: 12.5, weight: .medium))
-                Text(shortcut).font(.system(size: 11.5)).opacity(0.7)
+                Text(title).uiFont(size: 12.5, weight: .medium)
+                Text(shortcut).uiFont(size: 11.5).opacity(0.7)
             }
             .foregroundStyle(prominent ? theme.onAccent : theme.chromeText)
             .padding(.horizontal, 10)
