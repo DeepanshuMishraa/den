@@ -18,6 +18,12 @@ enum ProgramName {
     ]
 
     static func resolve(process: String, arguments: [String]) -> String {
+        // Binaries named for their version (Claude Code runs
+        // …/claude/versions/2.1.296) say nothing; the command typed does.
+        if isVersion(process), let first = arguments.first?.split(separator: " ").first {
+            let name = String(first.split(separator: "/").last ?? first)
+            return isVersion(name) ? process : name
+        }
         let bare = String(process.prefix { !$0.isNumber && $0 != "." })
         guard interpreters.contains(bare) else { return process }
         // A program that set its own title (node's process.title) has
@@ -57,6 +63,11 @@ enum ProgramName {
             return process
         }
         return process
+    }
+
+    /// "2.1.296": digits and dots, with at least one dot.
+    static func isVersion(_ name: String) -> Bool {
+        name.contains(".") && name.allSatisfy { $0.isNumber || $0 == "." }
     }
 
     #if os(Linux)

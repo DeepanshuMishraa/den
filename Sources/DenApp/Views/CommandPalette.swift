@@ -361,7 +361,7 @@ struct CommandPalette: View {
             let saved = model.remoteHosts.map { host in
                 PaletteItem(id: "host-\(host.id)", section: "Saved Hosts", sectionIcon: "server.rack", icon: "server.rack", title: host.label,
                             detail: model.remoteStates[host.id].map(HostStatus.short), host: host.id,
-                            action: .run { model.connectRemote(host.id, reveal: true) })
+                            action: .run { model.toggleHost(host.id) })
             }
             guard !q.isEmpty else { return saved }
             let connect = PaletteItem(id: "connect", icon: "network", title: "Connect to “\(q)”", shortcut: "↩", action: .run { model.addRemoteHost(q) })

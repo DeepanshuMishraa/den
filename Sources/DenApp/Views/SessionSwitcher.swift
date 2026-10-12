@@ -16,6 +16,7 @@ struct SessionMenu: View {
         case logIn(RemoteHost.ID)
         case reconnect(RemoteHost.ID)
         case newSessionOn(RemoteHost.ID)
+        case disconnect(RemoteHost.ID)
         case create(String)
         case newSession
         case addHost
@@ -40,8 +41,8 @@ struct SessionMenu: View {
                 rows += sessionRows(numbered.filter { model.sessionHosts[$0.element.id] == id })
                 switch model.remoteStates[host.id] {
                 case .needsLogin: rows.append(.logIn(host.id))
-                case .failed, .reconnecting: rows.append(.reconnect(host.id))
-                case .connected: rows.append(.newSessionOn(host.id))
+                case .failed, .reconnecting, .disconnected: rows.append(.reconnect(host.id))
+                case .connected: rows += [.newSessionOn(host.id), .disconnect(host.id)]
                 case .connecting, .uploading, nil: break
                 }
             }
@@ -167,6 +168,10 @@ struct SessionMenu: View {
                 Image(systemName: "plus").font(.system(size: 10, weight: .bold)).frame(width: 12)
                 Text("New Session Here").font(.system(size: 13))
                 Spacer()
+            case .disconnect:
+                Image(systemName: "power").font(.system(size: 10.5, weight: .semibold)).frame(width: 12)
+                Text("Disconnect").font(.system(size: 13))
+                Spacer()
             case .header:
                 EmptyView()
             }
@@ -215,7 +220,11 @@ struct SessionMenu: View {
         .help(helpText(host))
         .contextMenu {
             if case .remote(let id) = host {
-                Button("Reconnect") { model.connectRemote(id, reveal: false) }
+                if model.remoteStates[id]?.isConnected == true {
+                    Button("Disconnect") { model.disconnectHost(id) }
+                } else {
+                    Button("Reconnect") { model.connectRemote(id, reveal: false) }
+                }
                 Button("Rename Host…") {
                     model.showSessionMenu = false
                     model.palette = .renameHost(id)
@@ -244,6 +253,7 @@ struct SessionMenu: View {
         case .logIn(let id): model.requestLogin(id)
         case .reconnect(let id): model.connectRemote(id, reveal: true)
         case .newSessionOn(let id): model.createSession(name: "", on: .remote(id))
+        case .disconnect(let id): model.disconnectHost(id)
         }
         model.showSessionMenu = false
     }

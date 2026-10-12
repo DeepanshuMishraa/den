@@ -641,6 +641,23 @@ final class AppModel {
         }
     }
 
+    /// Ends a host's connection and stops retrying. Its sessions keep
+    /// running on the host for the next connect.
+    func disconnectHost(_ id: RemoteHost.ID) {
+        revealOnConnect.remove(id)
+        disconnectRemote(id)
+        retryDelays[id] = nil
+        remoteStates[id] = .disconnected
+        if let current = currentSession, sessionHosts[current] == .remote(id) {
+            if let next = orderedSessions.first(where: { sessionHosts[$0.id] != .remote(id) }) { switchSession(next.id) }
+        }
+    }
+
+    /// Connected hosts disconnect, others connect (clicking a saved host).
+    func toggleHost(_ id: RemoteHost.ID) {
+        if remoteStates[id]?.isConnected == true { disconnectHost(id) } else { connectRemote(id, reveal: true) }
+    }
+
     /// Each host's connection attempt in flight; cancelling it ends its ssh.
     @ObservationIgnored private var setups: [RemoteHost.ID: Task<Void, Never>] = [:]
 
@@ -828,6 +845,7 @@ final class AppModel {
         case .needsLogin: "\(name) needs you to log in."
         case .reconnecting(let reason, let retryIn): "Lost \(name): \(reason) Retrying in \(retryIn)s; your sessions keep running there."
         case .failed(let reason): reason
+        case .disconnected: "Disconnected from \(name). Your sessions keep running there; reconnect from the session menu."
         case .connected, nil: "Reattaching to \(name)…"
         }
         return (id, message)
@@ -1012,6 +1030,22 @@ final class AppModel {
 
     /// Swaps the focused pane with its neighbor in `direction`; focus
     /// travels with the pane.
+    /// Focuses the pane beside the focused one (leader+h/j/k/l).
+    func focusPane(_ direction: PaneDirection) {
+        guard let tab = activeLayout, let pane = focused, let neighbor = tab.root.neighbor(of: pane, toward: direction) else { return }
+        focus(neighbor)
+    }
+
+    /// Moves the focused pane's nearest edge toward `direction` by 5% of
+    /// its split (leader+shift+h/j/k/l). dend keeps ratios within 10–90%.
+    func resizePane(_ direction: PaneDirection) {
+        guard let tab = activeLayout, let pane = focused else { return }
+        let axis: SplitAxis = direction == .left || direction == .right ? .horizontal : .vertical
+        guard let (path, ratio) = tab.root.enclosingSplit(of: pane, axis: axis) else { return }
+        let step: Float = direction == .right || direction == .down ? 0.05 : -0.05
+        setRatio(tab: tab.id, path: path, ratio: min(max(ratio + step, 0.1), 0.9))
+    }
+
     func moveFocusedPane(_ direction: PaneDirection) {
         guard let tab = activeLayout, let pane = focused, let neighbor = tab.root.neighbor(of: pane, toward: direction) else { return }
         movePane(pane, to: neighbor, placement: .swap)

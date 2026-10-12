@@ -157,6 +157,22 @@ extension SplitNode {
 
     /// The pane across `pane`'s edge in `direction`: the nearest one that
     /// overlaps it sideways, the first in tree order on ties.
+    /// The innermost split along `axis` holding `pane`: its path (0 first
+    /// child, 1 second) and ratio. Moving its ratio moves the edge nearest
+    /// the pane along that axis, like tmux's resize-pane.
+    public func enclosingSplit(of pane: PaneID, axis: SplitAxis) -> (path: [UInt8], ratio: Float)? {
+        enclosingSplit(of: pane, axis: axis, prefix: [])
+    }
+
+    private func enclosingSplit(of pane: PaneID, axis: SplitAxis, prefix: [UInt8]) -> (path: [UInt8], ratio: Float)? {
+        guard case .split(let a, let ratio, let first, let second) = self else { return nil }
+        let index: UInt8
+        let child: SplitNode
+        if first.contains(pane) { (index, child) = (0, first) } else if second.contains(pane) { (index, child) = (1, second) } else { return nil }
+        if let inner = child.enclosingSplit(of: pane, axis: axis, prefix: prefix + [index]) { return inner }
+        return a == axis ? (prefix, ratio) : nil
+    }
+
     public func neighbor(of pane: PaneID, toward direction: PaneDirection) -> PaneID? {
         let frames = self.frames(Frame(x: 0, y: 0, w: 1, h: 1))
         guard let from = frames.first(where: { $0.pane == pane })?.frame else { return nil }

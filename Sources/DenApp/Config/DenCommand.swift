@@ -40,6 +40,14 @@ enum DenCommand: String, CaseIterable {
     case zoomPane = "zoom_pane"
     case nextPane = "next_pane"
     case previousPane = "previous_pane"
+    case focusPaneLeft = "focus_pane_left"
+    case focusPaneDown = "focus_pane_down"
+    case focusPaneUp = "focus_pane_up"
+    case focusPaneRight = "focus_pane_right"
+    case resizePaneLeft = "resize_pane_left"
+    case resizePaneDown = "resize_pane_down"
+    case resizePaneUp = "resize_pane_up"
+    case resizePaneRight = "resize_pane_right"
     case movePaneLeft = "move_pane_left"
     case movePaneRight = "move_pane_right"
     case movePaneUp = "move_pane_up"
@@ -103,6 +111,14 @@ enum DenCommand: String, CaseIterable {
         case .zoomPane: "Zoom Pane"
         case .nextPane: "Next Pane"
         case .previousPane: "Previous Pane"
+        case .focusPaneLeft: "Focus Pane Left"
+        case .focusPaneDown: "Focus Pane Below"
+        case .focusPaneUp: "Focus Pane Above"
+        case .focusPaneRight: "Focus Pane Right"
+        case .resizePaneLeft: "Move Pane Edge Left"
+        case .resizePaneDown: "Move Pane Edge Down"
+        case .resizePaneUp: "Move Pane Edge Up"
+        case .resizePaneRight: "Move Pane Edge Right"
         case .movePaneLeft: "Move Pane Left"
         case .movePaneRight: "Move Pane Right"
         case .movePaneUp: "Move Pane Up"
@@ -153,11 +169,19 @@ enum DenCommand: String, CaseIterable {
         case .leavePeek: "ctrl+cmd+up"
         case .showAllSessions: "ctrl+cmd+e"
         case .toggleFullScreen: "ctrl+cmd+f"
-        case .splitRight: "leader+h"
+        case .splitRight: "leader+\\"
         case .splitDown: "leader+v"
         case .zoomPane: "leader+z"
         case .nextPane: "cmd+]"
         case .previousPane: "cmd+["
+        case .focusPaneLeft: "leader+h"
+        case .focusPaneDown: "leader+j"
+        case .focusPaneUp: "leader+k"
+        case .focusPaneRight: "leader+l"
+        case .resizePaneLeft: "leader+shift+h"
+        case .resizePaneDown: "leader+shift+j"
+        case .resizePaneUp: "leader+shift+k"
+        case .resizePaneRight: "leader+shift+l"
         case .movePaneLeft: "opt+cmd+left"
         case .movePaneRight: "opt+cmd+right"
         case .movePaneUp: "opt+cmd+up"
@@ -230,6 +254,14 @@ enum DenCommand: String, CaseIterable {
         case .zoomPane: model.toggleZoom()
         case .nextPane: model.cyclePane(1)
         case .previousPane: model.cyclePane(-1)
+        case .focusPaneLeft: model.focusPane(.left)
+        case .focusPaneDown: model.focusPane(.down)
+        case .focusPaneUp: model.focusPane(.up)
+        case .focusPaneRight: model.focusPane(.right)
+        case .resizePaneLeft: model.resizePane(.left)
+        case .resizePaneDown: model.resizePane(.down)
+        case .resizePaneUp: model.resizePane(.up)
+        case .resizePaneRight: model.resizePane(.right)
         case .movePaneLeft: animated { model.moveFocusedPane(.left) }
         case .movePaneRight: animated { model.moveFocusedPane(.right) }
         case .movePaneUp: animated { model.moveFocusedPane(.up) }

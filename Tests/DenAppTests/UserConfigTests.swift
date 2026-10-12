@@ -155,7 +155,7 @@ import DenVT
         """).get()
         #expect(config.shortcut(for: .newTab) == .chord(KeyChord(modifiers: [.command, .shift], key: .character("t"))))
         #expect(config.shortcut(for: .selectAll) == nil)
-        #expect(config.shortcutLabel(.splitRight) == "⌥Space H")
+        #expect(config.shortcutLabel(.splitRight) == "⌥Space \\")
         #expect(config.shortcutLabel(.newTab) == "⇧⌘T")
     }
 
@@ -169,7 +169,11 @@ import DenVT
         let opt = NSEvent.ModifierFlags.option
         #expect(config.leader.matches(keyCode: 0x31, unmodified: " ", flags: opt))
         #expect(config.afterLeader(keyCode: 0x2D, unmodified: "n", flags: []) == .command(.newTab))
-        #expect(config.afterLeader(keyCode: 0x04, unmodified: "h", flags: []) == .command(.splitRight))
+        #expect(config.afterLeader(keyCode: 0x04, unmodified: "h", flags: []) == .command(.focusPaneLeft))
+        #expect(config.afterLeader(keyCode: 0x26, unmodified: "j", flags: []) == .command(.focusPaneDown))
+        #expect(config.afterLeader(keyCode: 0x25, unmodified: "l", flags: .shift) == .command(.resizePaneRight))
+        #expect(config.afterLeader(keyCode: 0x04, unmodified: "h", flags: .shift) == .command(.resizePaneLeft))
+        #expect(config.afterLeader(keyCode: 0x2A, unmodified: "\\", flags: []) == .command(.splitRight))
         #expect(config.afterLeader(keyCode: 0x09, unmodified: "v", flags: []) == .command(.splitDown))
         #expect(config.afterLeader(keyCode: 0x0F, unmodified: "r", flags: []) == .command(.renameTab))
         #expect(config.afterLeader(keyCode: 0x0F, unmodified: "r", flags: .shift) == .command(.renameSession))

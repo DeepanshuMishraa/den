@@ -12,6 +12,7 @@ enum HostStatus {
         case .connected: "Connected"
         case .reconnecting(_, let retryIn): "Retrying in \(retryIn)s"
         case .failed: "Failed"
+        case .disconnected: "Disconnected"
         }
     }
 
@@ -25,6 +26,7 @@ enum HostStatus {
         case .connected(let hostName): "Connected to \(hostName)"
         case .reconnecting(let reason, let retryIn): "\(reason) Retrying in \(retryIn)s."
         case .failed(let reason): reason
+        case .disconnected: "Disconnected. Sessions keep running on the host; connect again to pick them up."
         }
     }
 
@@ -33,7 +35,7 @@ enum HostStatus {
         case .connected: .green
         case .connecting, .uploading, .reconnecting: .orange
         case .needsLogin, .failed: .red
-        case nil: theme.tertiaryText
+        case .disconnected, nil: theme.tertiaryText
         }
     }
 }
@@ -140,6 +142,10 @@ struct HostActions: View {
                 .buttonStyle(.plain)
                 .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
             } else {
+                if model.remoteStates[host]?.isConnected == true {
+                    HostActionButton(symbol: "power", color: color, theme: theme) { model.disconnectHost(host) }
+                        .denTooltip("Disconnect")
+                }
                 HostActionButton(symbol: "pencil", color: color, theme: theme, action: rename)
                     .denTooltip("Rename Host")
                 HostActionButton(symbol: "trash", color: color, theme: theme) { confirming = true }

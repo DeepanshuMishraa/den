@@ -18,6 +18,15 @@ import Testing
         ]) == "pi-coding-agent")
     }
 
+    /// Claude Code's binary is named for its version
+    /// (~/.local/share/claude/versions/2.1.296); argv[0] is the command.
+    @Test func versionNamedBinariesResolveToTheirCommand() {
+        #expect(ProgramName.resolve(process: "2.1.296", arguments: ["claude"]) == "claude")
+        #expect(ProgramName.resolve(process: "2.1.296", arguments: ["/Users/me/.local/bin/claude", "--resume"]) == "claude")
+        #expect(ProgramName.resolve(process: "2.1.296", arguments: []) == "2.1.296")
+        #expect(ProgramName.resolve(process: "1.2.3", arguments: ["4.5.6"]) == "1.2.3")
+    }
+
     /// Node programs that set `process.title` overwrite argv; the kernel then
     /// reports just the title (pi leaves "pi " with padding).
     @Test func selfSetTitlesNameTheProgram() {

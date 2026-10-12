@@ -10,6 +10,17 @@ import Testing
         .split(axis: .horizontal, ratio: 0.5, first: .pane(a), second: .split(axis: .vertical, ratio: 0.5, first: .pane(b), second: .pane(c)))
     }
 
+    /// Resizing finds the innermost split on the axis: c's left/right edge is
+    /// the root divider, its up/down edge the divider between b and c.
+    @Test func enclosingSplitPicksTheInnermostOnTheAxis() {
+        let side = tree.enclosingSplit(of: c, axis: .horizontal)
+        #expect(side?.path == [] && side?.ratio == 0.5)
+        let stacked = tree.enclosingSplit(of: c, axis: .vertical)
+        #expect(stacked?.path == [1] && stacked?.ratio == 0.5)
+        #expect(tree.enclosingSplit(of: a, axis: .vertical) == nil)
+        #expect(SplitNode.pane(a).enclosingSplit(of: a, axis: .horizontal) == nil)
+    }
+
     @Test func swapKeepsTheShape() {
         #expect(tree.moving(a, to: c, placement: .swap)
             == .split(axis: .horizontal, ratio: 0.5, first: .pane(c), second: .split(axis: .vertical, ratio: 0.5, first: .pane(b), second: .pane(a))))

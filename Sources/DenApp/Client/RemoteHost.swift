@@ -100,6 +100,8 @@ enum RemoteState: Equatable {
     /// The connection dropped; another attempt follows in `retryIn` seconds.
     case reconnecting(reason: String, retryIn: Int)
     case failed(String)
+    /// You disconnected it; no retries until you connect again.
+    case disconnected
 
     var isConnected: Bool { if case .connected = self { true } else { false } }
 }
