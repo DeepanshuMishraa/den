@@ -2,9 +2,11 @@ name: Release
 
 # Publishing a GitHub release builds the Apple Silicon app and attaches it to
 # that same release. The app version comes from the tag (via DEN_VERSION into
-# scripts/bundle.sh), so there is nothing to bump.
+# scripts/bundle.sh), so there is nothing to bump. Pull requests run the same
+# build and DMG packaging but upload nothing.
 
 on:
+  pull_request:
   release:
     types: [published]
   workflow_dispatch:
@@ -19,8 +21,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-macos:
@@ -35,6 +37,10 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            echo "version=0.0.0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Tag must use the vX.Y.Z format, got $TAG"
             exit 1
@@ -72,15 +78,25 @@ jobs:
       # The app is ad-hoc signed, not notarized. Gatekeeper treats it as
       # unsigned on other Macs (right-click > Open on first launch).
       # The DMG is named after its version; the website links to a fixed name.
-      - name: Package DMG and attach to the release
+      # It holds Den.app next to an Applications link to drag it onto.
+      - name: Package DMG
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          test -d dist/Den.app
+          rm -rf dist/dmg && mkdir dist/dmg
+          ditto dist/Den.app dist/dmg/Den.app
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "Den" -srcfolder dist/dmg -ov -format UDZO "dist/Den-$VERSION-macos-arm64.dmg"
+          cp "dist/Den-$VERSION-macos-arm64.dmg" dist/Den-macos-arm64.dmg
+
+      - name: Attach DMG to the release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          test -d dist/Den.app
-          hdiutil create -volname "Den" -srcfolder dist/Den.app -ov -format UDZO "dist/Den-$VERSION-macos-arm64.dmg"
-          cp "dist/Den-$VERSION-macos-arm64.dmg" dist/Den-macos-arm64.dmg
           gh release upload "$TAG" "dist/Den-$VERSION-macos-arm64.dmg" dist/Den-macos-arm64.dmg --clobber --repo "${{ github.repository }}"
 
       # The updater's feed: one entry for this version, signed with the EdDSA
@@ -92,6 +108,7 @@ jobs:
       # SPARKLE_PUBLIC_KEY variable. The private key can't rotate later on
       # ad-hoc-signed builds, so keep it somewhere safe.
       - name: Sign update and attach appcast
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
