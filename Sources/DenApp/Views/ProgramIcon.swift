@@ -32,7 +32,7 @@ struct BrandIcon: View {
 
     static func image(named asset: String, template: Bool) -> NSImage? {
         if let hit = cache[asset] { return hit }
-        guard let url = Bundle.module.url(
+        guard let url = Bundle.denResources.url(
             forResource: asset, withExtension: "svg", subdirectory: "ProgramIcons"
         ) else {
             NSLog("Den: missing program icon %@", asset)

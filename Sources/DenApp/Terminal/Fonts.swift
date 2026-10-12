@@ -13,7 +13,7 @@ enum FontRegistry {
     static func registerBundled() {
         guard !registered else { return }
         registered = true
-        guard let dir = Bundle.module.url(forResource: "Fonts", withExtension: nil),
+        guard let dir = Bundle.denResources.url(forResource: "Fonts", withExtension: nil),
               let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
             NSLog("Den: bundled fonts are missing from the app's resources; falling back to system fonts. Nerd Font icons may not render.")
             return
