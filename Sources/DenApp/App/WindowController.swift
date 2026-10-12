@@ -129,6 +129,11 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
         window.setFrameAutosaveName("DenMainWindow")
         let host = NSHostingView(rootView: RootView().environment(model))
         host.allowedTouchTypes = [.indirect]
+        // The window owns its size (minSize, autosave, user resizing). By
+        // default the hosting view turns SwiftUI's min/ideal/max size into
+        // Auto Layout constraints, so once the content loads the window snaps
+        // to its height and that edge stops resizing.
+        host.sizingOptions = []
         // Backdrop (glass or blur) sits under the SwiftUI content; which one
         // shows depends on the interface style.
         let container = NSView()
