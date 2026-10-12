@@ -8,6 +8,7 @@ enum DenCommand: String, CaseIterable {
     case commandPalette = "command_palette"
     case openConfig = "open_config"
     case reloadConfig = "reload_config"
+    case checkForUpdates = "check_for_updates"
     case hide, quit
 
     case newTab = "new_tab"
@@ -81,6 +82,7 @@ enum DenCommand: String, CaseIterable {
         case .commandPalette: "Command Palette…"
         case .openConfig: "Open Config File…"
         case .reloadConfig: "Reload Config"
+        case .checkForUpdates: "Check for Updates…"
         case .hide: "Hide Den"
         case .quit: "Quit Den"
         case .newTab: "New Tab"
@@ -200,7 +202,7 @@ enum DenCommand: String, CaseIterable {
         case .goToTab: "cmd+digit"
         case .lastTab: nil
         case .minimize: "cmd+m"
-        case .changeTheme, .changeFont, .togglePaneHeaders, .toggleContrastCorrection, .tidyTabTitle, .closeSession: nil
+        case .changeTheme, .changeFont, .togglePaneHeaders, .toggleContrastCorrection, .tidyTabTitle, .closeSession, .checkForUpdates: nil
         }
     }
 
@@ -224,6 +226,7 @@ enum DenCommand: String, CaseIterable {
         case .commandPalette: model.palette = .root
         case .openConfig: model.openConfigFile()
         case .reloadConfig: model.reloadConfig(force: true)
+        case .checkForUpdates: model.checkForUpdates()
         case .hide: NSApp.hide(nil)
         case .quit: NSApp.terminate(nil)
         case .newTab: model.newTab()

@@ -112,21 +112,86 @@ final class AppModel {
     /// focus back so typing goes to the shell again.
     private(set) var terminalFocusRequest = 0
 
+    struct ToastAction: Equatable {
+        let id = UUID()
+        let label: String
+    }
+
     struct Toast: Equatable {
         let id = UUID()
-        let message: String
+        var message: String
+        /// Download/install fraction 0…1, if one is in flight.
+        var progress: Double?
+        /// Buttons the toast offers; empty for plain confirmations.
+        var actions: [ToastAction] = []
+        /// Plain confirmations vanish on their own; progress and action
+        /// toasts stay until replaced or dismissed.
+        var isPersistent: Bool { progress != nil || !actions.isEmpty }
     }
 
     /// Brief confirmation shown at the bottom of the window ("Copied").
     private(set) var toast: Toast?
+    /// Handlers for the current toast's buttons, by action id.
+    @ObservationIgnored private var toastHandlers: [UUID: () -> Void] = [:]
 
     func showToast(_ message: String) {
+        toastHandlers = [:]
         let next = Toast(message: message)
         toast = next
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1600))
             if self?.toast?.id == next.id { self?.toast = nil }
         }
+    }
+
+    /// Creates or refreshes the update progress toast. A nil message keeps
+    /// the current text; a nil progress shows an indeterminate state.
+    func showUpdateProgress(_ message: String?, progress: Double?) {
+        if var current = toast, current.isPersistent, current.actions.isEmpty {
+            if let message { current.message = message }
+            current.progress = progress
+            toast = current
+        } else {
+            toastHandlers = [:]
+            toast = Toast(message: message ?? "Working…", progress: progress)
+        }
+    }
+
+    /// A toast that stays until one of its buttons is tapped.
+    func showActionToast(_ message: String, actions: [(label: String, handler: () -> Void)]) {
+        toastHandlers = [:]
+        var toastActions: [ToastAction] = []
+        for (label, handler) in actions {
+            let action = ToastAction(label: label)
+            toastActions.append(action)
+            toastHandlers[action.id] = handler
+        }
+        toast = Toast(message: message, actions: toastActions)
+    }
+
+    func performToastAction(_ id: UUID) {
+        guard let handler = toastHandlers[id] else { return }
+        dismissToast()
+        handler()
+    }
+
+    func dismissToast() {
+        toastHandlers = [:]
+        toast = nil
+    }
+
+    // MARK: Updates
+
+    /// Sparkle updater, nil for dev builds (a raw binary has no bundle to
+    /// update). Created last in init: starting it is safe once self exists.
+    private(set) var updateController: UpdateController?
+
+    func checkForUpdates() {
+        guard let updates = updateController, updates.isAvailable else {
+            showToast("Updates are only available in release builds")
+            return
+        }
+        updates.checkForUpdates()
     }
 
     // MARK: Shell
@@ -256,6 +321,7 @@ final class AppModel {
         theme = ThemeCatalog.named(ThemeCatalog.defaultDark) ?? ThemeCatalog.dark[0]
         applyTheme()
         reloadConfig()
+        updateController = UpdateController(model: self)
     }
 
     // MARK: Connection

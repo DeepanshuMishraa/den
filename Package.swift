@@ -17,6 +17,9 @@ let package = Package(
         .executable(name: "Den", targets: ["DenApp"]),
         .executable(name: "dend", targets: ["dend"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
+    ],
     targets: [
         ghosttyVt,
         .target(name: "CDenPTY"),
@@ -26,7 +29,7 @@ let package = Package(
         .executableTarget(name: "dend", dependencies: ["DenServer", "DenProtocol", "CDenPTY"]),
         .executableTarget(
             name: "DenApp",
-            dependencies: ["DenVT", "DenProtocol"],
+            dependencies: ["DenVT", "DenProtocol", "Sparkle"],
             resources: [.copy("Resources/Fonts"), .copy("Resources/ProgramIcons")],
             swiftSettings: [.define("DEBUG", .when(configuration: .debug))],
             linkerSettings: [.linkedFramework("Metal"), .linkedFramework("MetalKit")]

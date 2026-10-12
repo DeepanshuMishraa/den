@@ -173,12 +173,39 @@ struct ToastView: View {
     let theme: Theme
     let fontFamily: String
     let fontSize: CGFloat
+    let onAction: (UUID) -> Void
 
     var body: some View {
         let font = Font.custom(fontFamily, size: fontSize)
-        HStack(spacing: fontSize * 0.6) {
-            Text("✓").font(font.weight(.bold)).foregroundStyle(theme.accent)
-            Text(toast.message).font(font).foregroundStyle(theme.foreground.color.opacity(0.88))
+        VStack(alignment: .leading, spacing: fontSize * 0.4) {
+            HStack(spacing: fontSize * 0.6) {
+                Text("✓").font(font.weight(.bold)).foregroundStyle(theme.accent)
+                Text(toast.message).font(font).foregroundStyle(theme.foreground.color.opacity(0.88))
+                if !toast.actions.isEmpty {
+                    HStack(spacing: fontSize * 0.5) {
+                        ForEach(toast.actions, id: \.id) { action in
+                            Button { onAction(action.id) } label: {
+                                Text(action.label).font(font.weight(.semibold))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(theme.accent)
+                            .padding(.horizontal, fontSize * 0.55)
+                            .padding(.vertical, fontSize * 0.2)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(theme.accent.opacity(0.5), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.leading, fontSize * 0.3)
+                }
+            }
+            if let progress = toast.progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(theme.accent)
+                    .frame(width: 200)
+            }
         }
         .padding(.horizontal, fontSize * 0.9)
         .padding(.vertical, fontSize * 0.45)

@@ -172,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(menu("Den", [
             NSMenuItem(title: "About Den", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""),
             .separator(),
-        ] + items([.commandPalette, .openConfig, .reloadConfig, nil, .hide, .quit])))
+        ] + items([.commandPalette, .openConfig, .reloadConfig, .checkForUpdates, nil, .hide, .quit])))
 
         main.addItem(menu("File", items([.newTab, .newSession, .goToDirectory, .insertPath, nil, .closePane, .closeTab])))
         main.addItem(menu("Edit", items([.copy, .paste, .selectAll])))

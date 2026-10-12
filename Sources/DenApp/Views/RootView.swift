@@ -220,11 +220,14 @@ struct RootView: View {
         if let toast = model.toast {
             VStack {
                 Spacer()
-                ToastView(toast: toast, theme: model.theme, fontFamily: model.fontFamily, fontSize: model.fontSize - 1)
+                ToastView(toast: toast, theme: model.theme, fontFamily: model.fontFamily, fontSize: model.fontSize - 1,
+                          onAction: { model.performToastAction($0) })
                     .padding(.bottom, 24)
             }
             .frame(maxWidth: .infinity)
-            .allowsHitTesting(false)
+            // Plain confirmations let clicks pass through to the terminal;
+            // button toasts need to receive them.
+            .allowsHitTesting(!toast.actions.isEmpty)
             .id(toast.id)
             .transition(.opacity.combined(with: .offset(y: 6)))
         }

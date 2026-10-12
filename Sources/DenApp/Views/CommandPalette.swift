@@ -494,6 +494,8 @@ struct CommandPalette: View {
                         shortcut: key(.openConfig), action: .run { model.openConfigFile() }),
             PaletteItem(id: "reload-config", icon: "arrow.clockwise", title: "Reload Config", shortcut: key(.reloadConfig),
                         action: .run { model.reloadConfig(force: true) }),
+            PaletteItem(id: "check-updates", icon: "arrow.down.circle", title: "Check for Updates…",
+                        action: .run { model.checkForUpdates() }),
         ]
         if !model.customThemes.isEmpty {
             view.append(PaletteItem(id: "delete-theme", title: "Delete Custom Theme…", submenu: true, action: .push(.deleteTheme)))
