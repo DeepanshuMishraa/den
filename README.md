@@ -137,6 +137,14 @@ host's PTY, and pane exit.
 - **Shell**: new panes use your account's login shell, or the one picked
   with Change Default Shell (stored as `shell = …` in
   `~/Library/Application Support/Den/config`).
+- **Config file**: `~/.config/den/config.toml` (Open Config File, ⌘,)
+  sets `macos_option_as_alt` (`true`, `false`, `"left"`, `"right"`), every
+  command's shortcut under `[keys]` (`new_tab = "cmd+shift+t"`, `""` to
+  unbind; the starter file lists all names), and `[[keys.bind]]` entries
+  (`key = "cmd+a"`, `action` a command name, `'text:\x1ba'`,
+  `'passthrough'` or `'ignore'`) that run before the shortcuts. It reloads
+  when Den comes to the front, or with Reload Config (⇧⌘,). Migrate from
+  Ghostty Config brings over the theme, `macos-option-as-alt` and keybinds.
 - **Copy on select**: finishing a selection copies it and shows a toast.
 - Selection with Ghostty's gesture rules (rounded highlight), ⌘C/⌘V, native
   overlay scrollbar, keycap tooltips.

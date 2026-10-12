@@ -55,20 +55,20 @@ struct PaneCard: View {
                         IconButton(symbol: "rectangle.split.2x1", size: 12.5, frame: CGSize(width: 24, height: 22)) {
                             model.focus(pane); model.split(.horizontal)
                         }
-                        .denTooltip("Split Right", keys: ["⌘", "D"])
+                        .denTooltip("Split Right", command: .splitRight)
                         IconButton(symbol: "rectangle.split.1x2", size: 12.5, frame: CGSize(width: 24, height: 22)) {
                             model.focus(pane); model.split(.vertical)
                         }
-                        .denTooltip("Split Down", keys: ["⇧", "⌘", "D"])
+                        .denTooltip("Split Down", command: .splitDown)
                         IconButton(symbol: model.zoomedPane == pane ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                    size: 11.5, frame: CGSize(width: 24, height: 22), enabled: multiple) {
                             model.focus(pane); model.toggleZoom()
                         }
-                        .denTooltip("Zoom", keys: ["⇧", "⌘", "↩"])
+                        .denTooltip("Zoom", command: .zoomPane)
                         IconButton(symbol: "xmark", size: 11.5, frame: CGSize(width: 24, height: 22), enabled: multiple) {
                             model.close(pane)
                         }
-                        .denTooltip("Close", keys: ["⌘", "W"])
+                        .denTooltip("Close", command: .closePane)
                     }
                     .opacity(focused || hovering ? 1 : 0.55)
                     }

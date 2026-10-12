@@ -1,10 +1,13 @@
 import SwiftUI
 
-/// Den's tooltip: a small dark label with keycaps, shown below the view
-/// after a short hover (e.g. "Change Session ⌘ K").
+/// Den's tooltip: a small label with keycaps, shown below the view after a
+/// short hover (e.g. "Change Session ⌥ Space then S"). The view only
+/// publishes where it is; `TooltipLayer` draws it above everything and keeps
+/// it inside the window.
 struct DenTooltip: ViewModifier {
     let text: String
-    let keys: [String]
+    let command: DenCommand?
+    let number: Int?
     @Environment(AppModel.self) private var model
     @State private var visible = false
     @State private var task: Task<Void, Never>?
@@ -23,30 +26,88 @@ struct DenTooltip: ViewModifier {
                     visible = false
                 }
             }
-            .simultaneousGesture(TapGesture().onEnded { visible = false })
-            .overlay(alignment: .bottom) {
-                if visible {
-                    TooltipBubble(text: text, keys: keys, theme: model.theme)
-                        .fixedSize()
-                        .alignmentGuide(.bottom) { $0[.top] - 6 }
-                        .transition(.opacity.combined(with: .offset(y: -2)))
-                        .allowsHitTesting(false)
-                }
+            .onDisappear { task?.cancel(); visible = false }
+            .simultaneousGesture(TapGesture().onEnded { task?.cancel(); visible = false })
+            .anchorPreference(key: TooltipKey.self, value: .bounds) { anchor in
+                guard visible, !text.isEmpty else { return [] }
+                let keys = command.map { model.config.keycaps($0, number: number) } ?? []
+                return [TooltipRequest(text: text, keys: keys, anchor: anchor)]
             }
-            .animation(.easeOut(duration: 0.12), value: visible)
+    }
+}
+
+struct TooltipRequest {
+    let text: String
+    let keys: [[String]]
+    let anchor: Anchor<CGRect>
+}
+
+struct TooltipKey: PreferenceKey {
+    static let defaultValue: [TooltipRequest] = []
+    static func reduce(value: inout [TooltipRequest], nextValue: () -> [TooltipRequest]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// Draws the hovered view's tooltip at the top of the window's view tree.
+struct TooltipLayer: View {
+    let requests: [TooltipRequest]
+    let theme: Theme
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let request = requests.last {
+                TooltipPlacement(target: proxy[request.anchor]) {
+                    TooltipBubble(text: request.text, keys: request.keys, theme: theme)
+                        .fixedSize()
+                }
+                .id(request.text)
+                .transition(.opacity.combined(with: .offset(y: -2)))
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.12), value: requests.last?.text)
+    }
+}
+
+/// Centers the bubble under its target, flips it above near the bottom
+/// edge, and keeps it clear of the window's edges.
+private struct TooltipPlacement: Layout {
+    let target: CGRect
+    let gap: CGFloat = 6
+    let margin: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let bubble = subviews.first else { return }
+        let size = bubble.sizeThatFits(.unspecified)
+        let maxX = max(bounds.minX + margin, bounds.maxX - margin - size.width)
+        let x = min(max(target.midX - size.width / 2, bounds.minX + margin), maxX)
+        var y = target.maxY + gap
+        if y + size.height > bounds.maxY - margin { y = target.minY - gap - size.height }
+        bubble.place(at: CGPoint(x: x, y: max(y, bounds.minY + margin)), proposal: .unspecified)
     }
 }
 
 struct TooltipBubble: View {
     let text: String
-    let keys: [String]
+    /// One group per keypress; leader shortcuts have two.
+    let keys: [[String]]
     let theme: Theme
 
     var body: some View {
         HStack(spacing: 6) {
             Text(text).font(.system(size: 11.5, weight: .medium))
-            HStack(spacing: 3) {
-                ForEach(keys, id: \.self) { Keycap(label: $0, theme: theme) }
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, group in
+                if index > 0 {
+                    Text("then").font(.system(size: 10.5)).foregroundStyle(theme.tertiaryText)
+                }
+                HStack(spacing: 3) {
+                    ForEach(Array(group.enumerated()), id: \.offset) { Keycap(label: $0.element, theme: theme) }
+                }
             }
         }
         .foregroundStyle(theme.chromeText)
@@ -72,8 +133,9 @@ struct Keycap: View {
 }
 
 extension View {
-    func denTooltip(_ text: String, keys: [String] = []) -> some View {
-        modifier(DenTooltip(text: text, keys: keys))
+    /// Keycaps come from the command's shortcut in the config.
+    func denTooltip(_ text: String, command: DenCommand? = nil, number: Int? = nil) -> some View {
+        modifier(DenTooltip(text: text, command: command, number: number))
     }
 }
 

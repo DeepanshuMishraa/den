@@ -22,9 +22,9 @@ struct TitleBar: View {
             Spacer(minLength: 0)
             HStack(spacing: 2) {
                 IconButton(symbol: "command", size: 13) { model.palette = .root }
-                    .denTooltip("Command Palette", keys: ["⇧", "⌘", "P"])
+                    .denTooltip("Command Palette", command: .commandPalette)
                 IconButton(symbol: "plus", size: 14) { model.newTab() }
-                    .denTooltip("New Tab", keys: ["⌘", "T"])
+                    .denTooltip("New Tab", command: .newTab)
             }
             .frame(height: Self.height)
             .padding(.trailing, 8)
@@ -114,7 +114,7 @@ struct SessionButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .denTooltip("Change Session", keys: ["⌘", "K"])
+        .denTooltip("Change Session", command: .changeSession)
         .animation(.denFast, value: model.currentSession)
         .onChange(of: model.currentSession) { withAnimation(.den) { expanded = true } }
         // Restarts whenever any of these change; collapses only once all is quiet.
@@ -310,7 +310,7 @@ struct TabItem: View {
         .padding(.top, 5)
         .contentShape(Rectangle())
         .onTapGesture { model.selectTab(tab.id) }
-        .denTooltip([model.tabTitle(tab), status?.message].compactMap { $0 }.joined(separator: " — "), keys: index < 9 ? ["⌘", "\(index + 1)"] : [])
+        .denTooltip([model.tabTitle(tab), status?.message].compactMap { $0 }.joined(separator: " — "), command: .goToTab, number: index + 1)
         .animation(.denFast, value: status)
     }
 }

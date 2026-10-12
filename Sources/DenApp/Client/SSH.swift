@@ -87,7 +87,10 @@ struct SSH: Sendable {
 
     /// Runs `command` on the host, feeding it `input`, and waits for it.
     /// `compress` is for big uploads (dend is ~55 MB, ~22 MB compressed).
-    func run(_ command: String, input: Data? = nil, compress: Bool = false) async -> Result<Output, Failure> {
+    /// `progress` gets the bytes of `input` handed to ssh so far. Cancelling
+    /// the calling task ends ssh, so a replaced attempt stops uploading.
+    func run(_ command: String, input: Data? = nil, compress: Bool = false,
+             progress: (@Sendable (Int) -> Void)? = nil) async -> Result<Output, Failure> {
         let process = process(command, compress: compress)
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         process.standardInput = stdin
@@ -100,18 +103,31 @@ struct SSH: Sendable {
         }
         let writer = stdin.fileHandleForWriting
         Self.background {
-            if let input { try? writer.write(contentsOf: input) }
+            if let input {
+                let chunk = 1 << 20
+                var offset = 0
+                while offset < input.count {
+                    let end = min(offset + chunk, input.count)
+                    do { try writer.write(contentsOf: input[offset ..< end]) } catch { break }
+                    offset = end
+                    progress?(offset)
+                }
+            }
             try? writer.close()
         }
-        // Drain both pipes at once so neither fills up and stalls ssh.
-        async let out = Self.readAll(stdout.fileHandleForReading)
-        async let err = Self.readAll(stderr.fileHandleForReading)
-        let (outData, errData) = await (out, err)
-        let status = await Self.exitStatus(process)
-        let message = String(decoding: errData, as: UTF8.self)
-        return status == 0
-            ? .success(Output(stdout: outData, stderr: message))
-            : .failure(Self.classify(status: status, stderr: message))
+        return await withTaskCancellationHandler {
+            // Drain both pipes at once so neither fills up and stalls ssh.
+            async let out = Self.readAll(stdout.fileHandleForReading)
+            async let err = Self.readAll(stderr.fileHandleForReading)
+            let (outData, errData) = await (out, err)
+            let status = await Self.exitStatus(process)
+            let message = String(decoding: errData, as: UTF8.self)
+            return status == 0
+                ? .success(Output(stdout: outData, stderr: message))
+                : .failure(Self.classify(status: status, stderr: message))
+        } onCancel: {
+            process.terminate()
+        }
     }
 
     private static func background(_ work: @escaping @Sendable () -> Void) {

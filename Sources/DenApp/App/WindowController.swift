@@ -183,8 +183,27 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
             // Match the blur's light/dark rendering to the theme, not the system.
             backdropGlass.appearance = model.theme.nsAppearance
             backdropBlur.appearance = model.theme.nsAppearance
+            // Read so a layout switch also re-places the traffic lights.
+            _ = model.tabStyle
+            _ = model.density
         } onChange: { [weak self] in
-            Task { @MainActor in self?.followTheme() }
+            Task { @MainActor in
+                self?.followTheme()
+                self?.refreshChrome()
+            }
+        }
+    }
+
+    /// An appearance or layout change makes AppKit lay out the title bar
+    /// again, which puts the traffic lights back at its default spot, and a
+    /// clear window keeps the shadow of its old contents. Once now, and once
+    /// after the change has animated in.
+    private func refreshChrome() {
+        for delay in [0.0, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.positionTrafficLights()
+                self?.window?.invalidateShadow()
+            }
         }
     }
 

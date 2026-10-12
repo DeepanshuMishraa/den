@@ -219,8 +219,6 @@ final class AppModel {
     @ObservationIgnored private var attempts: [RemoteHost.ID: Int] = [:]
     /// Hosts whose sessions should come to the front once they arrive.
     @ObservationIgnored private var revealOnConnect: Set<RemoteHost.ID> = []
-    /// After a password login, install Den's key on these hosts.
-    @ObservationIgnored private var installKeyAfterLogin: Set<RemoteHost.ID> = []
     @ObservationIgnored private var listings: [UInt32: (host: HostID, reply: CheckedContinuation<(String, [DirectoryEntry])?, Never>)] = [:]
     @ObservationIgnored private var nextListing: UInt32 = 1
     @ObservationIgnored private var sentSizes: [PaneID: GridSize] = [:]
@@ -257,6 +255,7 @@ final class AppModel {
         darkThemeName = d.string(forKey: "darkTheme") ?? ThemeCatalog.defaultDark
         theme = ThemeCatalog.named(ThemeCatalog.defaultDark) ?? ThemeCatalog.dark[0]
         applyTheme()
+        reloadConfig()
     }
 
     // MARK: Connection
@@ -378,7 +377,7 @@ final class AppModel {
                         if let (home, _) = await self?.listDirectory("~", on: host) { self?.hostHomes[host] = home }
                     }
                 }
-                if installKeyAfterLogin.remove(id) != nil { installKey(on: id) }
+                installKeyIfNeeded(on: id)
             }
 
         case .sessions(let list):
@@ -480,8 +479,16 @@ final class AppModel {
         }
     }
 
+    /// What takes over from the item that was at `closedAt`: the one before
+    /// it, or the first when it was first (or unknown).
+    nonisolated static func neighbor<T>(of closedAt: Int?, in items: [T]) -> T? {
+        guard let closedAt, !items.isEmpty else { return items.first }
+        return items[min(max(closedAt - 1, 0), items.count - 1)]
+    }
+
     private func apply(_ layout: SessionLayout) {
         let sid = layout.session.id
+        let previous = layouts[sid]
         layouts[sid] = layout
 
         let live = Set(layouts.values.flatMap { $0.tabs.flatMap(\.root.panes) })
@@ -497,10 +504,14 @@ final class AppModel {
             if currentSession != sid { switchSession(sid) }
         }
         if activeTabs[sid].map({ id in layout.tabs.contains { $0.id == id } }) != true {
-            activeTabs[sid] = layout.tabs.first?.id
+            // A closed tab hands over to the one before it, like a browser.
+            let closedAt = previous?.tabs.firstIndex { $0.id == activeTabs[sid] }
+            activeTabs[sid] = Self.neighbor(of: closedAt, in: layout.tabs)?.id
         }
         for tab in layout.tabs where !(focusedPanes[tab.id].map(tab.root.contains) ?? false) {
-            focusedPanes[tab.id] = tab.root.panes.first
+            let oldPanes = previous?.tabs.first { $0.id == tab.id }?.root.panes ?? []
+            let closedAt = focusedPanes[tab.id].flatMap(oldPanes.firstIndex)
+            focusedPanes[tab.id] = Self.neighbor(of: closedAt, in: tab.root.panes)
         }
         if let z = zoomedPane, !live.contains(z) { zoomedPane = nil }
 
@@ -584,6 +595,14 @@ final class AppModel {
 
     /// Forgets a host and its saved password. Its sessions keep running on
     /// the host; adding it again reattaches them.
+    /// Names a saved host; an empty name goes back to its address.
+    func renameRemoteHost(_ id: RemoteHost.ID, to name: String?) {
+        guard let i = remoteHosts.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        remoteHosts[i].name = trimmed?.isEmpty == false ? trimmed : nil
+        RemoteHostStore.save(remoteHosts)
+    }
+
     func removeRemoteHost(_ id: RemoteHost.ID) {
         guard let host = remoteHost(id) else { return }
         disconnectRemote(id)
@@ -606,16 +625,29 @@ final class AppModel {
     /// `reveal` brings the host's session on screen once it's up.
     func connectRemote(_ id: RemoteHost.ID, reveal: Bool) {
         guard let host = remoteHost(id) else { return }
-        disconnectRemote(id)
         if reveal { revealOnConnect.insert(id) }
+        // Already on its way (maybe mid-upload): starting over would only
+        // throw that work away.
+        switch remoteStates[id] {
+        case .connecting?, .uploading?: if setups[id] != nil { return }
+        default: break
+        }
+        disconnectRemote(id)
         remoteStates[id] = .connecting(step: "Connecting to \(host.address)…")
         let attempt = attempts[id, default: 0]
-        Task { await establish(host, attempt: attempt) }
+        setups[id] = Task { [weak self] in
+            await self?.establish(host, attempt: attempt)
+            if self?.attempts[id] == attempt { self?.setups[id] = nil }
+        }
     }
+
+    /// Each host's connection attempt in flight; cancelling it ends its ssh.
+    @ObservationIgnored private var setups: [RemoteHost.ID: Task<Void, Never>] = [:]
 
     /// Ends the connection and invalidates attempts and retries in flight.
     private func disconnectRemote(_ id: RemoteHost.ID) {
         attempts[id, default: 0] += 1
+        setups.removeValue(forKey: id)?.cancel()
         channels.removeValue(forKey: id)?.terminate()
         if connections[.remote(id)] != nil { connectionClosed(.remote(id), "disconnected") }
     }
@@ -643,11 +675,17 @@ final class AppModel {
         case .success(let url): binary = url
         }
         if RemoteSetup.sha256(of: binary) != probe.installedHash {
-            remoteStates[id] = .connecting(step: probe.installedHash == nil ? "Installing dend on \(host.address)…" : "Updating dend on \(host.address)…")
             guard let data = try? Data(contentsOf: binary) else {
                 return setupFailed(host, .launch("Den could not read its dend build at \(binary.path). Nothing was installed."))
             }
-            let installed = await ssh.run(RemoteSetup.installCommand, input: data, compress: true)
+            let total = data.count, isUpdate = probe.installedHash != nil
+            remoteStates[id] = .uploading(sent: 0, total: total, isUpdate: isUpdate)
+            let installed = await ssh.run(RemoteSetup.installCommand, input: data, compress: true) { [weak self] sent in
+                Task { @MainActor in
+                    guard let self, self.attempts[id] == attempt else { return }
+                    self.remoteStates[id] = .uploading(sent: sent, total: total, isUpdate: isUpdate)
+                }
+            }
             guard attempts[id] == attempt else { return }
             if case .failure(let failure) = installed { return setupFailed(host, failure) }
         }
@@ -673,7 +711,7 @@ final class AppModel {
             // Only interrupt with a form when you asked for this host;
             // background reconnects wait in the session menu instead.
             guard revealOnConnect.contains(id) else { return }
-            let triedPassword = SSHPasswords.password(for: host.account) != nil
+            let triedPassword = SSHPasswords.exists(for: host.account)
             loginRequest = LoginRequest(
                 host: id, user: host.user ?? NSUserName(),
                 message: triedPassword ? "That user name and password didn't work. Nothing was changed on the host; check them and try again." : nil
@@ -722,7 +760,9 @@ final class AppModel {
             return
         }
         loginRequest = nil
-        if installKey { installKeyAfterLogin.insert(host.id) } else { installKeyAfterLogin.remove(host.id) }
+        host.keyLogin = installKey ? .wanted : .declined
+        if let i = remoteHosts.firstIndex(where: { $0.id == host.id }) { remoteHosts[i] = host }
+        RemoteHostStore.save(remoteHosts)
         connectRemote(host.id, reveal: true)
     }
 
@@ -739,17 +779,25 @@ final class AppModel {
         loginRequest = LoginRequest(host: id, user: host.user ?? NSUserName(), message: nil)
     }
 
-    /// Adds Den's public key to the host's authorized_keys, so later logins
-    /// don't need the password (which stays saved as a fallback).
-    private func installKey(on id: RemoteHost.ID) {
-        guard let host = remoteHost(id) else { return }
+    /// After a login that may have used the saved password, adds Den's
+    /// public key to the host's authorized_keys so later logins don't read
+    /// the password (and don't prompt for Keychain access). The password
+    /// stays saved as a fallback. Survives restarts: the choice and the
+    /// result live on the saved host.
+    private func installKeyIfNeeded(on id: RemoteHost.ID) {
+        guard let host = remoteHost(id), host.keyLogin != .declined, host.keyLogin != .installed,
+              SSHPasswords.exists(for: host.account) else { return }
         Task { [weak self] in
             switch await RemoteSetup.publicKey() {
             case .failure(let failure):
                 self?.lastError = "\(host.label): \(failure.description)"
             case .success(let key):
                 switch await SSH(host: host).run(RemoteSetup.authorizeCommand(publicKey: key)) {
-                case .success: self?.showToast("Installed Den's SSH key on \(host.address)")
+                case .success:
+                    guard let self, let i = self.remoteHosts.firstIndex(where: { $0.id == id }) else { return }
+                    self.remoteHosts[i].keyLogin = .installed
+                    RemoteHostStore.save(self.remoteHosts)
+                    self.showToast("Installed Den's SSH key on \(host.address)")
                 case .failure(let failure):
                     self?.lastError = "Den couldn't add its SSH key on \(host.address): \(failure.description) Logins keep using the saved password."
                 }
@@ -776,6 +824,7 @@ final class AppModel {
         let name = remoteHost(id)?.address ?? "the host"
         let message = switch remoteStates[id] {
         case .connecting(let step): step
+        case .uploading(let sent, let total, let isUpdate): HostStatus.detail(.uploading(sent: sent, total: total, isUpdate: isUpdate))
         case .needsLogin: "\(name) needs you to log in."
         case .reconnecting(let reason, let retryIn): "Lost \(name): \(reason) Retrying in \(retryIn)s; your sessions keep running there."
         case .failed(let reason): reason
@@ -847,6 +896,9 @@ final class AppModel {
         if currentSession != sid { switchSession(sid) }
         zoomedPane = nil
         clearActivity()
+        // The tab's focused pane takes the keyboard back from whatever was
+        // clicked to get here.
+        terminalFocusRequest &+= 1
     }
 
     func focus(_ pane: PaneID) {
@@ -855,6 +907,7 @@ final class AppModel {
         focusedPanes[tab.id] = pane
         if currentSession != sid { switchSession(sid) }
         activity.remove(pane)
+        terminalFocusRequest &+= 1
     }
 
     /// Keyboard focus moved to a pane's view. Only updates which pane is
@@ -886,7 +939,10 @@ final class AppModel {
 
     @ObservationIgnored private var lastVisiblePanes: [PaneID] = []
 
-    func appBecameActive() { clearActivity() }
+    func appBecameActive() {
+        clearActivity()
+        reloadConfig()
+    }
 
     func newTab(cwd: String? = nil) {
         guard let session = currentSession else { return }
@@ -1050,6 +1106,221 @@ final class AppModel {
     func dismissError() { lastError = nil }
 
     func report(_ message: String) { lastError = message }
+
+    // MARK: Config
+
+    /// `~/.config/den/config.toml`, read on launch and when Den comes back
+    /// to the front; a broken file keeps the previous config.
+    @ObservationIgnored private(set) var config = UserConfig()
+    @ObservationIgnored private var configStamp: Date?
+    /// Called after a new config loads, so the menu picks up its shortcuts.
+    @ObservationIgnored var configDidChange: (() -> Void)?
+
+    /// Re-reads the config. Unless `force`, does nothing when the file
+    /// hasn't changed since the last read.
+    func reloadConfig(force: Bool = false) {
+        let url = UserConfig.url
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        guard force || stamp != configStamp else { return }
+        configStamp = stamp
+        switch UserConfig.load(from: url) {
+        case .success(let loaded):
+            config = loaded
+            configDidChange?()
+            if force { showToast("Config reloaded") }
+        case .failure(let error):
+            report("Den's config at \(url.path) has an error, so the previous settings stay in use: \(error.message) Fix it and run Reload Config.")
+        }
+    }
+
+    /// Set by the leader key until the next keypress, which picks the command.
+    private(set) var leaderPending = false
+
+    /// Digits typed for go_to_tab/go_to_session, while more could follow.
+    private struct NumberEntry {
+        let command: DenCommand
+        let modifiers: Set<KeyChord.Modifier>
+        var digits: String
+    }
+    @ObservationIgnored private var numberEntry: NumberEntry?
+    @ObservationIgnored private var numberCommit: Task<Void, Never>?
+
+    /// App-wide key filter for leader shortcuts and digit shortcuts. True
+    /// when it used the key. The leader pressed twice goes through to the
+    /// program.
+    func handleKey(keyCode: UInt16, unmodified: String?, flags: NSEvent.ModifierFlags) -> Bool {
+        let digit = KeyChord.digit(unmodified)
+        if let entry = numberEntry {
+            let held = KeyChord.modifiers(of: flags)
+            if let digit, held == entry.modifiers || held.isEmpty {
+                enterDigit(digit, entry)
+                return true
+            }
+            commitNumber()
+        }
+
+        let isLeader = config.leader.matches(keyCode: keyCode, unmodified: unmodified, flags: flags)
+        if leaderPending {
+            leaderPending = false
+            if isLeader { return false }
+            switch config.afterLeader(keyCode: keyCode, unmodified: unmodified, flags: flags) {
+            case .command(let command)? where command.takesNumber:
+                if let digit { enterDigit(digit, NumberEntry(command: command, modifiers: KeyChord.modifiers(of: flags), digits: "")) }
+            case .command(let command)?: command.perform(self)
+            case .text(let bytes)?: if let pane = focused { input(pane, bytes) }
+            case .passthrough?: return false
+            case .ignore?, nil: break
+            }
+            return true
+        }
+        if isLeader {
+            leaderPending = true
+            return true
+        }
+        if let digit, let command = config.numberCommand(keyCode: keyCode, unmodified: unmodified, flags: flags) {
+            enterDigit(digit, NumberEntry(command: command, modifiers: KeyChord.modifiers(of: flags), digits: ""))
+            return true
+        }
+        return false
+    }
+
+    /// Acts at once unless another digit could still name a target (1 with
+    /// 12 tabs might become 12); then waits briefly for it.
+    private func enterDigit(_ digit: Int, _ entry: NumberEntry) {
+        var entry = entry
+        entry.digits += String(digit)
+        numberCommit?.cancel()
+        let number = Int(entry.digits) ?? 0
+        let count = entry.command == .goToTab ? tabs.count : orderedSessions.count
+        guard number * 10 <= count else {
+            numberEntry = nil
+            entry.command.perform(self, number: number)
+            return
+        }
+        numberEntry = entry
+        numberCommit = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            self?.commitNumber()
+        }
+    }
+
+    private func commitNumber() {
+        numberCommit?.cancel()
+        guard let entry = numberEntry else { return }
+        numberEntry = nil
+        entry.command.perform(self, number: Int(entry.digits) ?? 0)
+    }
+
+    /// The Ghostty migration the palette is showing.
+    private(set) var ghosttyMigration: GhosttyMigrationRun?
+
+    /// Carries Ghostty's theme, option key and keybinds into Den, step by
+    /// step so the palette can show progress.
+    func migrateFromGhostty() {
+        ghosttyMigration = GhosttyMigrationRun()
+        palette = .migrateGhostty
+        Task {
+            var run = GhosttyMigrationRun()
+            // Short beats between steps so each one registers.
+            @MainActor func advance(_ step: GhosttyMigrationRun.StepID, _ status: GhosttyMigrationRun.Status) async {
+                run.set(step, .running)
+                ghosttyMigration = run
+                try? await Task.sleep(for: .milliseconds(260))
+                run.set(step, status)
+                ghosttyMigration = run
+            }
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let candidates = [home.appending(path: ".config/ghostty/config"),
+                              home.appending(path: "Library/Application Support/com.mitchellh.ghostty/config")]
+            guard let source = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+                  let ghostty = try? String(contentsOf: source, encoding: .utf8) else {
+                await advance(.source, .failed("Not found"))
+                run.phase = .failed("No Ghostty config at ~/.config/ghostty/config. Nothing changed.")
+                ghosttyMigration = run
+                return
+            }
+            await advance(.source, .done(PathQuery.abbreviate(source.path)))
+
+            let target = UserConfig.url
+            let existing = FileManager.default.fileExists(atPath: target.path)
+                ? (try? String(contentsOf: target, encoding: .utf8)) ?? ""
+                : UserConfig.template
+            let outcome: GhosttyMigration.Outcome
+            switch GhosttyMigration.migrate(ghostty: ghostty, into: existing) {
+            case .success(let o): outcome = o
+            case .failure(let e):
+                await advance(.option, .failed("Config has an error"))
+                run.phase = .failed(e.message)
+                ghosttyMigration = run
+                return
+            }
+            if outcome.config != existing {
+                do {
+                    try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try outcome.config.write(to: target, atomically: true, encoding: .utf8)
+                } catch {
+                    await advance(.option, .failed("Could not save"))
+                    run.phase = .failed("Could not write \(target.path): \(error.localizedDescription). Your config is unchanged.")
+                    ghosttyMigration = run
+                    return
+                }
+                configStamp = nil
+                reloadConfig()
+            }
+            await advance(.option, outcome.optionAsAlt.map { .done(Self.optionLabel($0)) } ?? .skipped("Not set"))
+            let skipped = outcome.skipped.isEmpty ? "" : " · \(outcome.skipped.count) unsupported"
+            await advance(.keybinds, outcome.keybinds.isEmpty && outcome.skipped.isEmpty
+                ? .skipped("None") : .done("\(outcome.keybinds.count) added\(skipped)"))
+
+            let themeStatus: GhosttyMigrationRun.Status
+            do {
+                let theme = try ThemeImport.install(source)
+                customThemes.removeAll { $0.name == theme.name }
+                customThemes.append(theme)
+                selectTheme(theme)
+                themeStatus = .done(theme.name)
+            } catch {
+                themeStatus = .skipped("No colors set")
+            }
+            await advance(.theme, themeStatus)
+            run.phase = .finished
+            ghosttyMigration = run
+        }
+    }
+
+    private static func optionLabel(_ value: String) -> String {
+        switch value {
+        case "left": "Left option is Alt"
+        case "right": "Right option is Alt"
+        case "true": "Option is Alt"
+        default: "Option types symbols"
+        }
+    }
+
+    /// Opens the config in TextEdit, writing a commented starter file first
+    /// if there isn't one.
+    func openConfigFile() {
+        let url = UserConfig.url
+        if !FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try UserConfig.template.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                return report("Could not create \(url.path): \(error.localizedDescription). Create it by hand to configure Den.")
+            }
+        }
+        guard let textEdit = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.TextEdit") else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        NSWorkspace.shared.open([url], withApplicationAt: textEdit, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
+            guard let error else { return }
+            Task { @MainActor in
+                self?.report("TextEdit could not open \(url.path): \(error.localizedDescription). The file is there to edit with any editor.")
+            }
+        }
+    }
 
     // MARK: Overview
 

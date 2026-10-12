@@ -15,8 +15,20 @@ struct RemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// nil lets ssh decide (its config, else the local user name).
     var user: String?
     var port: UInt16?
+    /// A name you gave it; shown instead of the address.
+    var name: String?
+    /// Whether Den's own SSH key should go on the host after a password
+    /// login; nil means it should. Once it's there, logins stop reading the
+    /// password from the Keychain.
+    var keyLogin: KeyLogin?
 
-    var label: String { user.map { "\($0)@\(address)" } ?? address }
+    enum KeyLogin: String, Codable, Sendable {
+        case wanted, declined, installed
+    }
+
+    /// `user@address`, what ssh connects to.
+    var destination: String { user.map { "\($0)@\(address)" } ?? address }
+    var label: String { name ?? destination }
 
     /// The Keychain account for this host's password.
     var account: String { "\(user ?? "")@\(address):\(port ?? 22)" }
@@ -80,6 +92,8 @@ enum RemoteHostStore {
 enum RemoteState: Equatable {
     /// `step` says what's happening ("Installing dend…").
     case connecting(step: String)
+    /// Sending dend to the host; bytes handed to ssh so far.
+    case uploading(sent: Int, total: Int, isUpdate: Bool)
     /// Key authentication failed and no saved password worked.
     case needsLogin
     case connected(hostName: String)

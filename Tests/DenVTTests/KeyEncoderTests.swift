@@ -21,4 +21,34 @@ import Testing
         let bytes = try KeyEncoder().encode(colon, terminal: terminal, optionAsAlt: true)
         #expect(bytes == Data(":".utf8))
     }
+
+    private func optionSpace(right: Bool, text: String, consumed: KeyMods) -> KeyInput {
+        KeyInput(macKeyCode: 0x31, action: .press, mods: right ? [.alt, .altRight] : [.alt], consumedMods: consumed,
+                 text: text, unshifted: UInt32(UInt8(ascii: " ")))
+    }
+
+    @Test func optionSpaceSendsEscSpaceWhenOptionIsAlt() throws {
+        let terminal = try VTTerminal(cols: 20, rows: 4)
+        let bytes = try KeyEncoder().encode(optionSpace(right: false, text: " ", consumed: []), terminal: terminal, optionAsAlt: .both)
+        #expect(bytes == Data("\u{1b} ".utf8))
+    }
+
+    @Test func leftOnlyModeTreatsLeftOptionAsAlt() throws {
+        let terminal = try VTTerminal(cols: 20, rows: 4)
+        let bytes = try KeyEncoder().encode(optionSpace(right: false, text: " ", consumed: []), terminal: terminal, optionAsAlt: .left)
+        #expect(bytes == Data("\u{1b} ".utf8))
+    }
+
+    /// Right option composes text (here a no-break space) when only left is alt.
+    @Test func leftOnlyModeLetsRightOptionCompose() throws {
+        let terminal = try VTTerminal(cols: 20, rows: 4)
+        let bytes = try KeyEncoder().encode(optionSpace(right: true, text: "\u{a0}", consumed: [.alt]), terminal: terminal, optionAsAlt: .left)
+        #expect(bytes == Data("\u{a0}".utf8))
+    }
+
+    @Test func optionComposesWhenNotAlt() throws {
+        let terminal = try VTTerminal(cols: 20, rows: 4)
+        let bytes = try KeyEncoder().encode(optionSpace(right: false, text: "\u{a0}", consumed: [.alt]), terminal: terminal, optionAsAlt: .none)
+        #expect(bytes == Data("\u{a0}".utf8))
+    }
 }

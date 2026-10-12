@@ -32,6 +32,15 @@ else
 fi
 # SwiftPM resources (bundled fonts); Bundle.module finds them in Resources.
 cp -R "$bin/Den_DenApp.bundle" "$app/Contents/Resources/"
+# App icon: den.icon (Icon Composer) compiles to Assets.car for macOS 26's
+# layered icon plus den.icns for older systems. Needs Xcode's actool.
+if xcrun --find actool >/dev/null 2>&1; then
+  xcrun actool "$root/den.icon" --compile "$app/Contents/Resources" --app-icon den \
+    --platform macosx --minimum-deployment-target 15.0 \
+    --output-partial-info-plist "$root/.build/den-icon-partial.plist" --errors >/dev/null
+else
+  echo "warning: Xcode's actool not found; Den.app ships without its icon" >&2
+fi
 
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,6 +52,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>den.dipxsy.app</string>
   <key>CFBundleExecutable</key><string>Den</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>den</string>
+  <key>CFBundleIconName</key><string>den</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
@@ -52,6 +63,12 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-[[ -f "$app/Contents/MacOS/fsearch" ]] && codesign --force --sign - "$app/Contents/MacOS/fsearch" >/dev/null
-codesign --force --sign - "$app/Contents/MacOS/dend" "$app" >/dev/null
+# A stable identity keeps the Keychain's "Always Allow" for saved SSH
+# passwords across rebuilds; an ad-hoc signature changes every build, so
+# macOS asks again. DEN_SIGN_IDENTITY overrides; "-" forces ad-hoc.
+identity="${DEN_SIGN_IDENTITY:-$(security find-identity -p codesigning -v 2>/dev/null | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}"
+identity="${identity:--}"
+[[ "$identity" == "-" ]] && echo "warning: no Apple Development identity; signing ad-hoc (Keychain will ask again after each rebuild)" >&2
+[[ -f "$app/Contents/MacOS/fsearch" ]] && codesign --force --sign "$identity" "$app/Contents/MacOS/fsearch" >/dev/null
+codesign --force --sign "$identity" "$app/Contents/MacOS/dend" "$app" >/dev/null
 echo "Built $app"

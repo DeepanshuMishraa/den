@@ -112,14 +112,15 @@ final class TerminalView: MTKView {
         if isFocusedPane { claimFocus() }
     }
 
-    /// Takes keyboard focus when the model says this pane is focused. Only
-    /// moves focus between terminals, never away from a text field.
+    /// Takes keyboard focus when the model says this pane is focused. Never
+    /// takes it from a text field being edited (its field editor is an
+    /// NSTextView); anything else, such as a SwiftUI host left holding focus
+    /// after a click on the tab bar, gives it up, or typing would go nowhere.
     private func claimFocus() {
         guard mode == .interactive else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isFocusedPane, let window = self.window, window.firstResponder !== self else { return }
-            let responder = window.firstResponder
-            if responder == nil || responder === window || responder is TerminalView {
+            if !(window.firstResponder is NSTextView) {
                 window.makeFirstResponder(self)
             }
         }
@@ -247,23 +248,54 @@ final class TerminalView: MTKView {
 
     // MARK: Keyboard
 
+    /// Config keybinds run before Den's menu shortcuts.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, runKeybind(event) else { return super.performKeyEquivalent(with: event) }
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
-        guard mode == .interactive, let replica, let keyEncoder, let model else { return }
+        guard mode == .interactive, let model else { return }
         if event.keyCode == UInt16(kVK_Escape), model.overview != .none {
             model.overview = .none
             return
         }
-        let bytes = keyEncoder.encode(keyInput(event, action: event.isARepeat ? .repeat : .press), terminal: replica.terminal, optionAsAlt: true)
+        if runKeybind(event) { return }
+        sendKey(event)
+    }
+
+    private func sendKey(_ event: NSEvent) {
+        guard let replica, let keyEncoder, let model else { return }
+        let bytes = keyEncoder.encode(keyInput(event, action: event.isARepeat ? .repeat : .press), terminal: replica.terminal, optionAsAlt: optionAsAlt)
         guard !bytes.isEmpty else { return }
         replica.terminal.clearSelection()
         replica.scroll(.bottom)
         model.input(paneID, bytes)
     }
 
+    /// Runs the config keybind for `event`, if there is one.
+    private func runKeybind(_ event: NSEvent) -> Bool {
+        guard mode == .interactive, event.type == .keyDown, let model, let replica,
+              let bind = model.config.keybind(keyCode: event.keyCode, unmodified: event.characters(byApplyingModifiers: []), flags: event.modifierFlags)
+        else { return false }
+        switch bind.action {
+        case .ignore: break
+        case .command(let command): command.perform(model)
+        case .passthrough: sendKey(event)
+        case .text(let bytes):
+            replica.terminal.clearSelection()
+            replica.scroll(.bottom)
+            model.input(paneID, bytes)
+        }
+        return true
+    }
+
     override func keyUp(with event: NSEvent) {
         guard mode == .interactive, let replica, let keyEncoder, let model else { return }
-        model.input(paneID, keyEncoder.encode(keyInput(event, action: .release), terminal: replica.terminal, optionAsAlt: true))
+        model.input(paneID, keyEncoder.encode(keyInput(event, action: .release), terminal: replica.terminal, optionAsAlt: optionAsAlt))
     }
+
+    private var optionAsAlt: OptionAsAlt { model?.config.optionAsAlt ?? .both }
 
     private func keyInput(_ event: NSEvent, action: KeyAction) -> KeyInput {
         let flags = event.modifierFlags
@@ -273,11 +305,16 @@ final class TerminalView: MTKView {
         if flags.contains(.option) { mods.insert(.alt) }
         if flags.contains(.command) { mods.insert(.super) }
         if flags.contains(.capsLock) { mods.insert(.capsLock) }
+        // Device-dependent bits (NX_DEVICELALTKEYMASK/NX_DEVICERALTKEYMASK)
+        // say which option key is down.
+        let rightOption = flags.contains(.option) && flags.rawValue & 0x40 != 0 && flags.rawValue & 0x20 == 0
+        if rightOption { mods.insert(.altRight) }
+        let optionIsAlt = flags.contains(.option) && optionAsAlt.treatsAsAlt(rightSide: rightOption)
 
         // With option-as-alt the text is what the key types without option,
-        // and the encoder adds the ESC prefix.
+        // and the encoder adds the ESC prefix. Otherwise option composes it.
         let produced = event.type == .keyDown || event.type == .keyUp
-            ? (flags.contains(.option) ? event.characters(byApplyingModifiers: flags.subtracting(.option)) : event.characters)
+            ? (optionIsAlt ? event.characters(byApplyingModifiers: flags.subtracting(.option)) : event.characters)
             : nil
         let text = produced.flatMap { s -> String? in
             guard let scalar = s.unicodeScalars.first else { return nil }
@@ -286,10 +323,10 @@ final class TerminalView: MTKView {
             if scalar.value < 0x20 || scalar.value == 0x7F || (0xF700 ... 0xF8FF).contains(scalar.value) { return nil }
             return s
         }
-        // Control and command never translate text; option doesn't either
-        // since it's treated as alt. Whatever remains (shift, caps lock)
-        // produced the text, so kitty-mode programs get `:` and not `<S-;>`.
-        var consumed = mods.subtracting([.ctrl, .alt, .super])
+        // Control and command never translate text; option does only when
+        // it isn't alt. Whatever remains (shift, caps lock) produced the
+        // text, so kitty-mode programs get `:` and not `<S-;>`.
+        var consumed = mods.subtracting(optionIsAlt ? [.ctrl, .alt, .altRight, .super] : [.ctrl, .altRight, .super])
         if text == nil { consumed = [] }
         let unshifted = (event.type == .keyDown || event.type == .keyUp)
             ? event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0

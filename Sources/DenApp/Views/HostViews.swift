@@ -2,9 +2,12 @@ import SwiftUI
 
 /// How a remote host's connection reads in menus.
 enum HostStatus {
+    private static func percent(_ sent: Int, _ total: Int) -> Int { total > 0 ? sent * 100 / total : 0 }
+
     static func short(_ state: RemoteState) -> String {
         switch state {
         case .connecting: "Connecting…"
+        case .uploading(let sent, let total, let isUpdate): "\(isUpdate ? "Updating" : "Installing") dend \(percent(sent, total))%"
         case .needsLogin: "Needs login"
         case .connected: "Connected"
         case .reconnecting(_, let retryIn): "Retrying in \(retryIn)s"
@@ -16,6 +19,8 @@ enum HostStatus {
     static func detail(_ state: RemoteState) -> String {
         switch state {
         case .connecting(let step): step
+        case .uploading(let sent, let total, let isUpdate):
+            "\(isUpdate ? "Updating" : "Installing") dend on the host: \(sent >> 20) of \(total >> 20) MB sent. Slow links take a few minutes."
         case .needsLogin: "Key login was refused. Log in with a user name and password."
         case .connected(let hostName): "Connected to \(hostName)"
         case .reconnecting(let reason, let retryIn): "\(reason) Retrying in \(retryIn)s."
@@ -26,7 +31,7 @@ enum HostStatus {
     static func color(_ state: RemoteState?, theme: Theme) -> Color {
         switch state {
         case .connected: .green
-        case .connecting, .reconnecting: .orange
+        case .connecting, .uploading, .reconnecting: .orange
         case .needsLogin, .failed: .red
         case nil: theme.tertiaryText
         }
@@ -107,5 +112,62 @@ struct LoginForm: View {
         var updated = request
         updated.user = user
         model.logIn(updated, password: password, installKey: installKey)
+    }
+}
+
+/// Rename and remove for a saved host, shown on hover in host lists.
+/// Removing takes a second click, since it disconnects the host's sessions.
+struct HostActions: View {
+    let host: RemoteHost.ID
+    /// Icon color, so the controls read on a highlighted row too.
+    let color: Color
+    let rename: () -> Void
+    @Environment(AppModel.self) private var model
+    @State private var confirming = false
+
+    var body: some View {
+        let theme = model.theme
+        HStack(spacing: 2) {
+            if confirming {
+                Button { model.removeRemoteHost(host) } label: {
+                    Text("Remove")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .frame(height: 20)
+                        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.red.opacity(0.85)))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
+            } else {
+                HostActionButton(symbol: "pencil", color: color, theme: theme, action: rename)
+                    .denTooltip("Rename Host")
+                HostActionButton(symbol: "trash", color: color, theme: theme) { confirming = true }
+                    .denTooltip("Remove Host")
+            }
+        }
+        .animation(.denFast, value: confirming)
+        .onHover { if !$0 { confirming = false } }
+    }
+}
+
+private struct HostActionButton: View {
+    let symbol: String
+    let color: Color
+    let theme: Theme
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 20, height: 20)
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(hovering ? theme.hover : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

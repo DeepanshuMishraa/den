@@ -33,7 +33,7 @@ struct ProgramKind: Equatable {
     var isAgent: Bool { Self.agentIDs.contains(id) }
     private static let agentIDs: Set<String> = [
         "claude", "codex", "gemini", "antigravity", "grok", "opencode", "aider", "amp",
-        "cursor", "copilot", "goose", "crush", "droid", "qwen",
+        "cursor", "copilot", "goose", "crush", "droid", "qwen", "pi",
     ]
 
     static let shell = ProgramKind(id: "shell", name: "shell", top: 0x45494F, bottom: 0x1D1F22, ink: 0x5EE38C, glyph: .prompt)
@@ -126,6 +126,7 @@ extension ProgramKind {
         add(["crush"], "crush", "Crush", 0xFF6AC1, 0xB43A8C, .symbol("heart.fill"))
         add(["droid"], "droid", "Droid", 0xF97316, 0xC2410C, .symbol("cpu.fill"))
         add(["qwen"], "qwen", "Qwen", 0x7C6CF2, 0x4B3FC2, .brand(asset: "qwen", template: true))
+        add(["pi", "pi-coding-agent"], "pi", "Pi", 0x2B2B2B, 0x0A0A0A, .brand(asset: "pi", template: false))
         add(["llm"], "llm", "LLM", 0x64748B, 0x334155, .symbol("text.bubble.fill"))
 
         // Editors.

@@ -59,12 +59,12 @@ struct Sidebar: View {
 
             HStack {
                 IconButton(symbol: "line.3.horizontal.circle", size: 14) { model.palette = .root }
-                    .denTooltip("Command Palette", keys: ["⇧", "⌘", "P"])
+                    .denTooltip("Command Palette", command: .commandPalette)
                 Spacer()
                 IconButton(symbol: "rectangle.stack.badge.plus", size: 13) { model.createSession(name: "") }
-                    .denTooltip("New Session", keys: ["⇧", "⌘", "N"])
+                    .denTooltip("New Session", command: .newSession)
                 IconButton(symbol: "globe", size: 13.5) { model.palette = .addHost }
-                    .denTooltip("Add Remote Host", keys: [])
+                    .denTooltip("Add Remote Host", command: .addRemoteHost)
             }
             .padding(.horizontal, 10)
             .frame(height: 36)
@@ -162,7 +162,7 @@ private struct ActivityModeToggle: View {
                     .transition(.scale.combined(with: .opacity))
             }
         }
-        .denTooltip(on ? "Leave Activity Mode" : "Activity Mode", keys: ["⇧", "⌘", "A"])
+        .denTooltip(on ? "Leave Activity Mode" : "Activity Mode", command: .toggleActivityMode)
     }
 }
 
@@ -172,7 +172,7 @@ struct SidebarToggle: View {
 
     var body: some View {
         IconButton(symbol: "sidebar.left", size: 14) { withAnimation(.den) { model.toggleSidebar() } }
-            .denTooltip(model.sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar", keys: ["⌥", "⌘", "S"])
+            .denTooltip(model.sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar", command: .toggleSidebar)
     }
 }
 

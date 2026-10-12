@@ -9,6 +9,32 @@ public struct KeyMods: OptionSet, Sendable {
     public static let alt = KeyMods(rawValue: UInt16(GHOSTTY_MODS_ALT))
     public static let `super` = KeyMods(rawValue: UInt16(GHOSTTY_MODS_SUPER))
     public static let capsLock = KeyMods(rawValue: UInt16(GHOSTTY_MODS_CAPS_LOCK))
+    /// With `.alt`: the right option key is the one held.
+    public static let altRight = KeyMods(rawValue: UInt16(GHOSTTY_MODS_ALT_SIDE))
+}
+
+/// Which option keys act as alt (ESC-prefix) instead of composing text,
+/// like Ghostty's `macos-option-as-alt`.
+public enum OptionAsAlt: String, Sendable, CaseIterable {
+    case none = "false", both = "true", left, right
+
+    public func treatsAsAlt(rightSide: Bool) -> Bool {
+        switch self {
+        case .none: false
+        case .both: true
+        case .left: !rightSide
+        case .right: rightSide
+        }
+    }
+
+    var ghostty: GhosttyOptionAsAlt {
+        switch self {
+        case .none: GHOSTTY_OPTION_AS_ALT_FALSE
+        case .both: GHOSTTY_OPTION_AS_ALT_TRUE
+        case .left: GHOSTTY_OPTION_AS_ALT_LEFT
+        case .right: GHOSTTY_OPTION_AS_ALT_RIGHT
+        }
+    }
 }
 
 public enum KeyAction: Sendable {
@@ -61,8 +87,12 @@ public final class KeyEncoder {
     }
 
     public func encode(_ input: KeyInput, terminal: VTTerminal, optionAsAlt: Bool) -> Data {
+        encode(input, terminal: terminal, optionAsAlt: optionAsAlt ? .both : .none)
+    }
+
+    public func encode(_ input: KeyInput, terminal: VTTerminal, optionAsAlt: OptionAsAlt) -> Data {
         ghostty_key_encoder_setopt_from_terminal(encoder, terminal.handle)
-        var optionMode: GhosttyOptionAsAlt = optionAsAlt ? GHOSTTY_OPTION_AS_ALT_TRUE : GHOSTTY_OPTION_AS_ALT_FALSE
+        var optionMode = optionAsAlt.ghostty
         ghostty_key_encoder_setopt(encoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &optionMode)
 
         let action: GhosttyKeyAction = switch input.action {

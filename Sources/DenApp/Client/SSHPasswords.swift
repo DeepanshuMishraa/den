@@ -29,6 +29,19 @@ enum SSHPasswords {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Whether a password is saved, read from its attributes only: unlike
+    /// reading the password, this never brings up a Keychain prompt.
+    static func exists(for account: String) -> Bool {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnAttributes: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
+
     static func save(_ password: String, for account: String) -> Result<Void, Failure> {
         let match: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account]
         let data = Data(password.utf8)

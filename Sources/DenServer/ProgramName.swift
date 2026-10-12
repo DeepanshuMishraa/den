@@ -14,12 +14,18 @@ enum ProgramName {
     /// tool: `main.js`, `cli.js`, `dist/`, `node_modules/`, `.bin/`.
     static let genericNames: Set<String> = [
         "cli", "main", "index", "server", "app", "run", "start",
-        "bin", "lib", "dist", "build", "out", "src", "node_modules", ".bin",
+        "bin", "lib", "dist", "build", "bundle", "out", "src", "node_modules", ".bin",
     ]
 
     static func resolve(process: String, arguments: [String]) -> String {
         let bare = String(process.prefix { !$0.isNumber && $0 != "." })
         guard interpreters.contains(bare) else { return process }
+        // A program that set its own title (node's process.title) has
+        // overwritten argv, so argv[0] is that title: `pi`, `npm run dev`.
+        if let first = arguments.first?.split(separator: " ").first {
+            let name = String(first.split(separator: "/").last ?? first)
+            if !interpreters.contains(String(name.prefix { !$0.isNumber && $0 != "." })) { return name }
+        }
         var args = arguments.dropFirst()
         while let arg = args.first {
             args = args.dropFirst()

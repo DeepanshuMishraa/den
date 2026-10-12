@@ -33,6 +33,7 @@ struct RootView: View {
             PaneDragGhost()
         }
         .coordinateSpace(.named(Self.space))
+        .overlayPreferenceValue(TooltipKey.self) { TooltipLayer(requests: $0, theme: theme) }
         .ignoresSafeArea()
         .preferredColorScheme(theme.isDark ? .dark : .light)
         .animation(.den, value: model.overview)
@@ -40,6 +41,7 @@ struct RootView: View {
         .animation(.den, value: model.density)
         .animation(.easeInOut(duration: 0.25), value: model.effectiveInterfaceStyle)
         .animation(.easeOut(duration: 0.18), value: model.toast)
+        .animation(.easeOut(duration: 0.12), value: model.leaderPending)
         .animation(.easeOut(duration: 0.18), value: model.loginRequest)
         .animation(.easeInOut(duration: 0.25), value: theme)
     }
@@ -202,6 +204,17 @@ struct RootView: View {
                 .padding(.top, TitleBar.height + 40)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
+        }
+
+        if model.leaderPending {
+            VStack {
+                Spacer()
+                TooltipBubble(text: "Leader", keys: [model.config.leader.keycaps], theme: model.theme)
+                    .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity)
+            .allowsHitTesting(false)
+            .transition(.opacity.combined(with: .offset(y: 4)))
         }
 
         if let toast = model.toast {

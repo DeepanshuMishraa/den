@@ -6,16 +6,20 @@ import UniformTypeIdentifiers
 /// Which list the palette shows. Submenus appear as a chip in the field.
 enum PaletteRoute: Equatable {
     case root, theme, interfaceStyle, font, shell, changeSession, renameSession, renameTab, goToDirectory, addHost, deleteTheme
+    /// Not a list: shows the Ghostty migration's progress.
+    case migrateGhostty
+    case renameHost(RemoteHost.ID)
 
     var chip: String? {
         switch self {
-        case .root: nil
+        case .root, .migrateGhostty: nil
         case .theme: "Theme"
         case .font: "Font"
         case .shell: "Shell"
         case .interfaceStyle: "Interface Style"
         case .changeSession: "Session"
         case .renameSession, .renameTab: "Rename"
+        case .renameHost: "Rename Host"
         case .goToDirectory: nil
         case .addHost: "Add Host"
         case .deleteTheme: "Delete Theme"
@@ -32,9 +36,11 @@ enum PaletteRoute: Equatable {
         case .changeSession: "Filter sessions…"
         case .renameSession: "Session name"
         case .renameTab: "Tab title"
+        case .renameHost: "Host name"
         case .goToDirectory: "Path"
         case .addHost: "user@host, 100.x.y.z or machine.tailnet.ts.net"
         case .deleteTheme: "Select a custom theme…"
+        case .migrateGhostty: ""
         }
     }
 }
@@ -58,6 +64,8 @@ struct PaletteItem: Identifiable {
     var keepOpen = false
     var theme: Theme?
     var interfaceStyle: InterfaceStyle?
+    /// A saved host: the row shows rename and remove on hover.
+    var host: RemoteHost.ID?
     let action: Action
 }
 
@@ -79,9 +87,33 @@ struct CommandPalette: View {
     private var route: PaletteRoute { model.palette ?? .root }
 
     var body: some View {
+        if route == .migrateGhostty, let run = model.ghosttyMigration {
+            GhosttyMigrationPanel(run: run, theme: model.theme, openConfig: {
+                close()
+                model.openConfigFile()
+            }, done: close)
+            .padding(6)
+            .frame(width: 440)
+            .background(MenuSurface(theme: model.theme))
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focused)
+            .onAppear(perform: enter)
+            .onKeyPress(.return) {
+                guard run.phase != .running else { return .ignored }
+                close()
+                return .handled
+            }
+            .onKeyPress(.escape) { close(); return .handled }
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         let theme = model.theme
         let items = visibleItems
-        VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 4) {
             field(theme)
             if items.isEmpty {
                 Text(emptyHint)
@@ -224,6 +256,10 @@ struct CommandPalette: View {
             if item.submenu {
                 Image(systemName: "chevron.right").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(dim)
             }
+            if let host = item.host, highlighted {
+                HostActions(host: host, color: fg) { model.palette = .renameHost(host) }
+                    .transition(.opacity)
+            }
         }
         .padding(.horizontal, 9)
         .frame(height: 30)
@@ -243,6 +279,7 @@ struct CommandPalette: View {
         switch target {
         case .renameSession: query = model.currentSummary?.name ?? ""
         case .renameTab: query = model.activeLayout.map(model.tabTitle) ?? ""
+        case .renameHost(let id): query = model.remoteHost(id)?.name ?? ""
         case .goToDirectory: query = (model.cwd(of: model.focused) ?? (model.currentHost == .local ? FileManager.default.homeDirectoryForCurrentUser.path : "~")) + "/"
         case .theme:
             query = ""
@@ -298,6 +335,7 @@ struct CommandPalette: View {
     private var visibleItems: [PaletteItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
         switch route {
+        case .migrateGhostty: return []
         case .root, .theme, .interfaceStyle, .font, .shell, .changeSession, .deleteTheme:
             let all = items(for: route)
             guard !q.isEmpty else { return all }
@@ -311,10 +349,19 @@ struct CommandPalette: View {
                 return [PaletteItem(id: "reset", title: "Use the program's title", shortcut: "↩", action: .run { model.renameTab(tab, to: nil) })]
             }
             return [PaletteItem(id: "rename", title: "Rename tab to “\(q)”", shortcut: "↩", action: .run { model.renameTab(tab, to: q) })]
+        case .renameHost(let id):
+            guard let host = model.remoteHost(id) else { return [] }
+            if q.isEmpty {
+                return [PaletteItem(id: "reset", title: "Use the address", detail: host.destination, shortcut: "↩",
+                                    action: .run { model.renameRemoteHost(id, to: nil) })]
+            }
+            return [PaletteItem(id: "rename", title: "Rename host to “\(q)”", detail: host.destination, shortcut: "↩",
+                                action: .run { model.renameRemoteHost(id, to: q) })]
         case .addHost:
             let saved = model.remoteHosts.map { host in
                 PaletteItem(id: "host-\(host.id)", section: "Saved Hosts", sectionIcon: "server.rack", icon: "server.rack", title: host.label,
-                            detail: model.remoteStates[host.id].map(HostStatus.short), action: .run { model.connectRemote(host.id, reveal: true) })
+                            detail: model.remoteStates[host.id].map(HostStatus.short), host: host.id,
+                            action: .run { model.connectRemote(host.id, reveal: true) })
             }
             guard !q.isEmpty else { return saved }
             let connect = PaletteItem(id: "connect", icon: "network", title: "Connect to “\(q)”", shortcut: "↩", action: .run { model.addRemoteHost(q) })
@@ -354,7 +401,7 @@ struct CommandPalette: View {
             }
         case .changeSession:
             return model.orderedSessions.enumerated().map { i, s in
-                PaletteItem(id: "session-\(s.id)", title: s.name, shortcut: i < 9 ? "⌘\(i + 1)" : nil, checked: s.id == model.currentSession,
+                PaletteItem(id: "session-\(s.id)", title: s.name, shortcut: model.config.shortcutLabel(.goToSession, number: i + 1), checked: s.id == model.currentSession,
                             action: .run { model.switchSession(s.id) })
             }
         case .deleteTheme:
@@ -366,6 +413,11 @@ struct CommandPalette: View {
         }
     }
 
+    /// The command's current shortcut label, as the config sets it.
+    private func key(_ command: DenCommand) -> String? {
+        model.config.shortcutLabel(command)
+    }
+
     private var rootItems: [PaletteItem] {
         let session = model.currentSummary?.name
         let tabTitle = model.activeLayout.map(model.tabTitle)
@@ -375,29 +427,29 @@ struct CommandPalette: View {
             PaletteItem(id: "rename-session", title: "Rename Session", detail: session, submenu: true, action: .push(.renameSession)),
             PaletteItem(id: "rename-tab", title: "Rename Tab", detail: tabTitle, submenu: true, action: .push(.renameTab)),
             PaletteItem(id: "add-host", icon: "network", title: "Add Remote Host…", submenu: true, action: .push(.addHost)),
-            PaletteItem(id: "new-session", title: "New Session", shortcut: "⇧⌘N", action: .run { model.createSession(name: "") }),
-            PaletteItem(id: "new-tab", title: "New Tab", shortcut: "⌘T", action: .run { model.newTab() }),
-            PaletteItem(id: "insert-path", icon: "text.insert", title: "Insert Path…", shortcut: "⌘O",
+            PaletteItem(id: "new-session", title: "New Session", shortcut: key(.newSession), action: .run { model.createSession(name: "") }),
+            PaletteItem(id: "new-tab", title: "New Tab", shortcut: key(.newTab), action: .run { model.newTab() }),
+            PaletteItem(id: "insert-path", icon: "text.insert", title: "Insert Path…", shortcut: key(.insertPath),
                         // After the palette hands focus back to the terminal.
                         action: .run { DispatchQueue.main.async { model.openPathPicker() } }),
-            PaletteItem(id: "goto", icon: "folder", title: "Go to Directory…", detail: cwd, shortcut: "⇧⌘G", submenu: true, action: .push(.goToDirectory)),
-            PaletteItem(id: "close-tab", title: "Close Tab", shortcut: "⇧⌘W", action: .run { model.activeTab.map(model.closeTab) }),
+            PaletteItem(id: "goto", icon: "folder", title: "Go to Directory…", detail: cwd, shortcut: key(.goToDirectory), submenu: true, action: .push(.goToDirectory)),
+            PaletteItem(id: "close-tab", title: "Close Tab", shortcut: key(.closeTab), action: .run { model.activeTab.map(model.closeTab) }),
             PaletteItem(id: "prev-session", title: "Previous Session", action: .run { model.cycleSession(-1) }),
             PaletteItem(id: "next-session", title: "Next Session", action: .run { model.cycleSession(1) }),
-            PaletteItem(id: "prev-tab", title: "Show Previous Tab", shortcut: "⇧⌘[", action: .run { model.cycleTab(-1) }),
-            PaletteItem(id: "next-tab", title: "Show Next Tab", shortcut: "⇧⌘]", action: .run { model.cycleTab(1) }),
-            PaletteItem(id: "move-tab-left", title: "Move Tab Left", shortcut: "⌥⇧⌘[", action: .run { model.moveActiveTab(-1) }),
-            PaletteItem(id: "move-tab-right", title: "Move Tab Right", shortcut: "⌥⇧⌘]", action: .run { model.moveActiveTab(1) }),
+            PaletteItem(id: "prev-tab", title: "Show Previous Tab", shortcut: key(.previousTab), action: .run { model.cycleTab(-1) }),
+            PaletteItem(id: "next-tab", title: "Show Next Tab", shortcut: key(.nextTab), action: .run { model.cycleTab(1) }),
+            PaletteItem(id: "move-tab-left", title: "Move Tab Left", shortcut: key(.moveTabLeft), action: .run { model.moveActiveTab(-1) }),
+            PaletteItem(id: "move-tab-right", title: "Move Tab Right", shortcut: key(.moveTabRight), action: .run { model.moveActiveTab(1) }),
             PaletteItem(id: "tidy", title: "Tidy Tab Title", action: .run { model.tidyTabTitle() }),
             PaletteItem(id: "close-session", title: "Close Session", action: .run { model.currentSession.map(model.killSession) }),
         ]
-        let paneSpecs: [(String, String, String, @MainActor () -> Void)] = [
-            ("split-right", "Split Pane Right", "⌘D", { model.split(.horizontal) }),
-            ("split-down", "Split Pane Down", "⇧⌘D", { model.split(.vertical) }),
-            ("focus-next", "Focus Next Pane", "⌘]", { model.cyclePane(1) }),
-            ("focus-prev", "Focus Previous Pane", "⌘[", { model.cyclePane(-1) }),
-            ("zoom", "Zoom Pane", "⇧⌘↩", { model.toggleZoom() }),
-            ("close-pane", "Close Pane", "⌘W", { model.closeFocusedPane() }),
+        let paneSpecs: [(String, String, String?, @MainActor () -> Void)] = [
+            ("split-right", "Split Pane Right", key(.splitRight), { model.split(.horizontal) }),
+            ("split-down", "Split Pane Down", key(.splitDown), { model.split(.vertical) }),
+            ("focus-next", "Focus Next Pane", key(.nextPane), { model.cyclePane(1) }),
+            ("focus-prev", "Focus Previous Pane", key(.previousPane), { model.cyclePane(-1) }),
+            ("zoom", "Zoom Pane", key(.zoomPane), { model.toggleZoom() }),
+            ("close-pane", "Close Pane", key(.closePane), { model.closeFocusedPane() }),
         ]
         let pane = paneSpecs.map { id, title, key, run in
             PaletteItem(id: id, section: "Pane", sectionIcon: "rectangle.split.2x2", title: title, shortcut: key, action: .run(run))
@@ -415,9 +467,9 @@ struct CommandPalette: View {
                         action: .run { withAnimation(.den) { model.density = .compact } }),
             PaletteItem(id: "change-shell", title: "Change Default Shell", detail: (model.defaultShell as NSString).lastPathComponent,
                         submenu: true, action: .push(.shell)),
-            PaletteItem(id: "font-bigger", title: "Increase Font Size", detail: "\(Int(model.fontSize)) pt", shortcut: "⌘=",
+            PaletteItem(id: "font-bigger", title: "Increase Font Size", detail: "\(Int(model.fontSize)) pt", shortcut: key(.fontBigger),
                         keepOpen: true, action: .run { model.adjustFontSize(1) }),
-            PaletteItem(id: "font-smaller", title: "Decrease Font Size", shortcut: "⌘-", keepOpen: true, action: .run { model.adjustFontSize(-1) }),
+            PaletteItem(id: "font-smaller", title: "Decrease Font Size", shortcut: key(.fontSmaller), keepOpen: true, action: .run { model.adjustFontSize(-1) }),
         ]
         view += AppearanceMode.allCases.map { mode in
             PaletteItem(id: "appearance-\(mode.rawValue)", title: mode.title, checked: model.appearanceMode == mode, action: .run { model.appearanceMode = mode })
@@ -425,18 +477,23 @@ struct CommandPalette: View {
         view += [
             PaletteItem(id: "tabs", title: model.tabStyle == .horizontal ? "Switch to Vertical Tabs" : "Switch to Horizontal Tabs",
                         action: .run { withAnimation(.den) { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal } }),
-            PaletteItem(id: "sidebar", title: model.tabStyle == .vertical && !model.sidebarCollapsed ? "Hide Sidebar" : "Show Sidebar", shortcut: "⌥⌘S",
+            PaletteItem(id: "sidebar", title: model.tabStyle == .vertical && !model.sidebarCollapsed ? "Hide Sidebar" : "Show Sidebar", shortcut: key(.toggleSidebar),
                         action: .run { withAnimation(.den) { model.toggleSidebar() } }),
-            PaletteItem(id: "activity", title: model.activityMode ? "Leave Activity Mode" : "Activity Mode", shortcut: "⇧⌘A",
+            PaletteItem(id: "activity", title: model.activityMode ? "Leave Activity Mode" : "Activity Mode", shortcut: key(.toggleActivityMode),
                         action: .run { withAnimation(.den) { model.toggleActivityMode() } }),
             PaletteItem(id: "headers", title: model.showPaneHeaders ? "Hide Pane Headers" : "Show Pane Headers",
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
             PaletteItem(id: "acc", title: "Automatic Contrast Correction", checked: model.contrastCorrection,
                         keepOpen: true, action: .run { model.contrastCorrection.toggle() }),
-            PaletteItem(id: "peek", title: "Peek at Tabs", shortcut: "⌃⌘↓", action: .run { withAnimation(.den) { model.overview = .peek } }),
-            PaletteItem(id: "expose", title: "Show All Sessions", shortcut: "⌃⌘E", action: .run { withAnimation(.den) { model.overview = .expose } }),
+            PaletteItem(id: "peek", title: "Peek at Tabs", shortcut: key(.peek), action: .run { withAnimation(.den) { model.overview = .peek } }),
+            PaletteItem(id: "expose", title: "Show All Sessions", shortcut: key(.showAllSessions), action: .run { withAnimation(.den) { model.overview = .expose } }),
             PaletteItem(id: "import-theme", title: "Import Theme File…", action: .run { importTheme() }),
-            PaletteItem(id: "migrate-ghostty", title: "Migrate Theme from Ghostty Config", action: .run { migrateGhostty() }),
+            PaletteItem(id: "migrate-ghostty", icon: "arrow.down.doc", title: "Migrate from Ghostty Config", detail: "Theme, option key, key bindings",
+                        keepOpen: true, action: .run { model.migrateFromGhostty() }),
+            PaletteItem(id: "open-config", icon: "doc.text", title: "Open Config File", detail: PathQuery.abbreviate(UserConfig.url.path),
+                        shortcut: key(.openConfig), action: .run { model.openConfigFile() }),
+            PaletteItem(id: "reload-config", icon: "arrow.clockwise", title: "Reload Config", shortcut: key(.reloadConfig),
+                        action: .run { model.reloadConfig(force: true) }),
         ]
         if !model.customThemes.isEmpty {
             view.append(PaletteItem(id: "delete-theme", title: "Delete Custom Theme…", submenu: true, action: .push(.deleteTheme)))
@@ -516,18 +573,6 @@ struct CommandPalette: View {
         if panel.runModal() == .OK, let url = panel.url { model.importTheme(from: url) }
     }
 
-    private func migrateGhostty() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = [
-            home.appending(path: ".config/ghostty/config"),
-            home.appending(path: "Library/Application Support/com.mitchellh.ghostty/config"),
-        ]
-        guard let config = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
-            model.report("No Ghostty config found at ~/.config/ghostty/config. Nothing was imported.")
-            return
-        }
-        model.importTheme(from: config)
-    }
 }
 
 private struct SectionHeader: View {

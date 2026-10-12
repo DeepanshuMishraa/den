@@ -18,12 +18,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: DenWindowController?
     private var actions: [MenuAction] = []
     private var appearanceObservation: NSKeyValueObservation?
+    private var leaderMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FontRegistry.registerBundled()
         let model = AppModel(systemIsDark: Self.isDark(NSApp.effectiveAppearance))
         self.model = model
         NSApp.mainMenu = buildMenu(model)
+        model.configDidChange = { [weak self, weak model] in
+            guard let self, let model else { return }
+            NSApp.mainMenu = buildMenu(model)
+        }
+        // Before any view sees the key, so the leader works wherever focus is.
+        leaderMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
+            let keyCode = event.keyCode, flags = event.modifierFlags
+            let unmodified = event.characters(byApplyingModifiers: [])
+            let used = MainActor.assumeIsolated {
+                model?.handleKey(keyCode: keyCode, unmodified: unmodified, flags: flags) ?? false
+            }
+            return used ? nil : event
+        }
         let controller = DenWindowController(model: model)
         windowController = controller
         controller.showWindow(nil)
@@ -115,14 +129,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Menu
 
-    private func item(_ title: String, _ key: String = "", _ mods: NSEvent.ModifierFlags = [.command], _ handler: @escaping () -> Void) -> NSMenuItem {
-        let action = MenuAction(handler)
+    /// A menu item for a command, with its shortcut from the config.
+    private func item(_ command: DenCommand, _ model: AppModel) -> NSMenuItem {
+        let action = MenuAction { command.perform(model) }
         actions.append(action)
-        // Shifted letters are matched against the shifted character, so ⇧⌘P
-        // is written "P" (with .shift kept in the mask for clarity).
-        let key = mods.contains(.shift) && key.count == 1 && key.first?.isLowercase == true ? key.uppercased() : key
-        let item = NSMenuItem(title: title, action: #selector(MenuAction.fire(_:)), keyEquivalent: key)
-        item.keyEquivalentModifierMask = mods
+        // Menus can't show two-step shortcuts; leader ones run from the
+        // leader monitor, and their label sits in the title instead.
+        let trigger = model.config.shortcut(for: command)
+        var title = command.title
+        var chord: KeyChord?
+        switch trigger {
+        case .chord(let c)? where c.key == .digit: title += "    " + c.label
+        case .chord(let c)?: chord = c
+        case .leader?: title += "    " + (model.config.shortcutLabel(command) ?? "")
+        case nil: break
+        }
+        let item = NSMenuItem(title: title, action: #selector(MenuAction.fire(_:)), keyEquivalent: chord?.keyEquivalent ?? "")
+        item.keyEquivalentModifierMask = chord?.modifierFlags ?? []
         item.target = action
         return item
     }
@@ -136,101 +159,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildMenu(_ model: AppModel) -> NSMenu {
+        actions.removeAll()
         let main = NSMenu()
-        let animate: (@escaping () -> Void) -> () -> Void = { body in { withAnimation(.den) { body() } } }
+        let items: ([DenCommand?]) -> [NSMenuItem] = { commands in
+            commands.map { $0.map { self.item($0, model) } ?? .separator() }
+        }
 
         main.addItem(menu("Den", [
             NSMenuItem(title: "About Den", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""),
             .separator(),
-            item("Command Palette…", "p", [.command, .shift]) { model.palette = .root },
-            .separator(),
-            NSMenuItem(title: "Hide Den", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"),
-            NSMenuItem(title: "Quit Den", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
-        ]))
+        ] + items([.commandPalette, .openConfig, .reloadConfig, nil, .hide, .quit])))
 
-        main.addItem(menu("File", [
-            item("New Tab", "t") { model.newTab() },
-            item("New Session", "n", [.command, .shift]) { model.createSession(name: "") },
-            item("Go to Directory…", "g", [.command, .shift]) { model.palette = .goToDirectory },
-            item("Insert Path…", "o") { model.openPathPicker() },
-            .separator(),
-            item("Close", "w") { model.closeFocusedPane() },
-            item("Close Tab", "w", [.command, .shift]) { model.activeTab.map(model.closeTab) },
+        main.addItem(menu("File", items([.newTab, .newSession, .goToDirectory, .insertPath, nil, .closePane, .closeTab])))
+        main.addItem(menu("Edit", items([.copy, .paste, .selectAll])))
+        main.addItem(menu("View", items([
+            .changeTheme, .changeFont, .fontBigger, .fontSmaller, .fontReset, nil,
+            .toggleVerticalTabs, .toggleSidebar, .toggleActivityMode, .togglePaneHeaders, .toggleContrastCorrection, nil,
+            .peek, .leavePeek, .showAllSessions, nil, .toggleFullScreen,
+        ])))
+        main.addItem(menu("Pane", items([
+            .splitRight, .splitDown, nil, .zoomPane, .nextPane, .previousPane, nil,
+            .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown,
+        ])))
+        main.addItem(menu("Session", items([
+            .changeSession, .renameSession, .renameTab, .tidyTabTitle, nil, .previousSession, .nextSession, nil,
+            .goToSession, nil,
+            .addRemoteHost, .closeSession,
+        ])))
+        let windowMenu = menu("Window", items([
+            .nextTab, .previousTab, .moveTabLeft, .moveTabRight, nil,
+            .goToTab, .lastTab, nil, .minimize,
         ]))
-
-        main.addItem(menu("Edit", [
-            NSMenuItem(title: "Copy", action: #selector(TerminalView.copy(_:)), keyEquivalent: "c"),
-            NSMenuItem(title: "Paste", action: #selector(TerminalView.paste(_:)), keyEquivalent: "v"),
-            NSMenuItem(title: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a"),
-        ]))
-
-        main.addItem(menu("View", [
-            item("Change Theme…") { model.palette = .theme },
-            item("Change Font…") { model.palette = .font },
-            item("Bigger", "=") { model.adjustFontSize(1) },
-            item("Smaller", "-") { model.adjustFontSize(-1) },
-            item("Actual Size", "0") { model.resetFontSize() },
-            .separator(),
-            item("Toggle Vertical Tabs", "s", [.command, .control], animate { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal }),
-            item("Toggle Sidebar", "s", [.command, .option], animate { model.toggleSidebar() }),
-            item("Toggle Activity Mode", "a", [.command, .shift], animate { model.toggleActivityMode() }),
-            item("Toggle Pane Headers", "", [], animate { model.showPaneHeaders.toggle() }),
-            .separator(),
-            item("Peek at Tabs", String(UnicodeScalar(NSDownArrowFunctionKey).map(Character.init) ?? "↓"), [.command, .control], animate { model.stepOverview(1) }),
-            item("Leave Peek", String(UnicodeScalar(NSUpArrowFunctionKey).map(Character.init) ?? "↑"), [.command, .control], animate { model.stepOverview(-1) }),
-            item("Show All Sessions", "e", [.command, .control], animate { model.overview = model.overview == .expose ? .none : .expose }),
-            .separator(),
-            NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f").with(mods: [.command, .control]),
-        ]))
-
-        main.addItem(menu("Pane", [
-            item("Split Right", "d") { model.split(.horizontal) },
-            item("Split Down", "d", [.command, .shift]) { model.split(.vertical) },
-            .separator(),
-            item("Zoom Pane", "\r", [.command, .shift]) { model.toggleZoom() },
-            item("Next Pane", "]") { model.cyclePane(1) },
-            item("Previous Pane", "[") { model.cyclePane(-1) },
-            .separator(),
-            item("Move Pane Left", String(UnicodeScalar(NSLeftArrowFunctionKey).map(Character.init) ?? "←"), [.command, .option], animate { model.moveFocusedPane(.left) }),
-            item("Move Pane Right", String(UnicodeScalar(NSRightArrowFunctionKey).map(Character.init) ?? "→"), [.command, .option], animate { model.moveFocusedPane(.right) }),
-            item("Move Pane Up", String(UnicodeScalar(NSUpArrowFunctionKey).map(Character.init) ?? "↑"), [.command, .option], animate { model.moveFocusedPane(.up) }),
-            item("Move Pane Down", String(UnicodeScalar(NSDownArrowFunctionKey).map(Character.init) ?? "↓"), [.command, .option], animate { model.moveFocusedPane(.down) }),
-        ]))
-
-        main.addItem(menu("Session", [
-            item("Change Session…", "k") { withAnimation(.denFast) { model.showSessionMenu.toggle() } },
-            item("Rename Session…") { model.palette = .renameSession },
-            item("Rename Tab…") { model.palette = .renameTab },
-            .separator(),
-            item("Previous Session", "[", [.command, .option]) { model.cycleSession(-1) },
-            item("Next Session", "]", [.command, .option]) { model.cycleSession(1) },
-            .separator(),
-            item("Close Session") { model.currentSession.map(model.killSession) },
-        ]))
-
-        var windowItems = [
-            item("Show Next Tab", "]", [.command, .shift]) { model.cycleTab(1) },
-            item("Show Previous Tab", "[", [.command, .shift]) { model.cycleTab(-1) },
-            item("Move Tab Left", "[", [.command, .shift, .option]) { model.moveActiveTab(-1) },
-            item("Move Tab Right", "]", [.command, .shift, .option]) { model.moveActiveTab(1) },
-            .separator(),
-        ]
-        for i in 1 ... 9 {
-            windowItems.append(item("Tab \(i)", "\(i)") { model.selectTab(at: i == 9 ? max(model.tabs.count - 1, 0) : i - 1) })
-        }
-        windowItems.append(.separator())
-        windowItems.append(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
-        let windowMenu = menu("Window", windowItems)
         NSApp.windowsMenu = windowMenu.submenu
         main.addItem(windowMenu)
 
         return main
-    }
-}
-
-extension NSMenuItem {
-    func with(mods: NSEvent.ModifierFlags) -> NSMenuItem {
-        keyEquivalentModifierMask = mods
-        return self
     }
 }

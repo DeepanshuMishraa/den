@@ -42,7 +42,7 @@ struct SessionMenu: View {
                 case .needsLogin: rows.append(.logIn(host.id))
                 case .failed, .reconnecting: rows.append(.reconnect(host.id))
                 case .connected: rows.append(.newSessionOn(host.id))
-                case .connecting, nil: break
+                case .connecting, .uploading, nil: break
                 }
             }
         } else {
@@ -139,7 +139,9 @@ struct SessionMenu: View {
                     Circle().fill(highlighted ? fg : theme.accent).frame(width: 6, height: 6)
                 }
                 Spacer()
-                if let shortcut { Text("⌘\(shortcut)").font(.system(size: 11.5)).foregroundStyle(dim) }
+                if let label = shortcut.flatMap({ model.config.shortcutLabel(.goToSession, number: $0) }) {
+                    Text(label).font(.system(size: 11.5)).foregroundStyle(dim)
+                }
             case .create(let name):
                 Image(systemName: "plus").font(.system(size: 10, weight: .bold)).frame(width: 12)
                 Text("Create “\(name)”").font(.system(size: 13))
@@ -148,7 +150,7 @@ struct SessionMenu: View {
                 Image(systemName: "rectangle.stack.badge.plus").font(.system(size: 11)).frame(width: 12)
                 Text("New Session").font(.system(size: 13))
                 Spacer()
-                Text("⇧⌘N").font(.system(size: 11.5)).foregroundStyle(dim)
+                if let label = model.config.shortcutLabel(.newSession) { Text(label).font(.system(size: 11.5)).foregroundStyle(dim) }
             case .addHost:
                 Image(systemName: "network").font(.system(size: 11)).frame(width: 12)
                 Text("Add Remote Host…").font(.system(size: 13))
@@ -189,23 +191,41 @@ struct SessionMenu: View {
                 Circle().fill(HostStatus.color(state, theme: theme)).frame(width: 6, height: 6)
                 Text(model.hostLabel(host)).font(.system(size: 11, weight: .medium)).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 6)
-                if let state, !state.isConnected {
+                if hoveredHost == id {
+                    HostActions(host: id, color: theme.secondaryText) {
+                        model.showSessionMenu = false
+                        model.palette = .renameHost(id)
+                    }
+                    .transition(.opacity)
+                } else if let state, !state.isConnected {
                     Text(HostStatus.short(state)).font(.system(size: 10.5))
                 }
             }
         }
         .foregroundStyle(theme.tertiaryText)
         .padding(.horizontal, 8)
+        .frame(minHeight: 20)
         .padding(.top, first ? 3 : 8)
         .padding(.bottom, 3)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            guard case .remote(let id) = host else { return }
+            withAnimation(.denFast) { hoveredHost = inside ? id : (hoveredHost == id ? nil : hoveredHost) }
+        }
         .help(helpText(host))
         .contextMenu {
             if case .remote(let id) = host {
                 Button("Reconnect") { model.connectRemote(id, reveal: false) }
+                Button("Rename Host…") {
+                    model.showSessionMenu = false
+                    model.palette = .renameHost(id)
+                }
                 Button("Remove Host", role: .destructive) { model.removeRemoteHost(id) }
             }
         }
     }
+
+    @State private var hoveredHost: RemoteHost.ID?
 
     private func helpText(_ host: HostID) -> String {
         guard case .remote(let id) = host, let state = model.remoteStates[id] else { return "" }

@@ -81,4 +81,16 @@ import Testing
         let stderr = "Warning: Permanently added 'box' (ED25519) to the list of known hosts.\nme@box: Permission denied (password)."
         #expect(SSH.classify(status: 255, stderr: stderr) == .authentication("me@box: Permission denied (password)."))
     }
+
+    /// Hosts saved before names existed still load; a name replaces the
+    /// address in labels but not where ssh connects.
+    @Test func namedHostsKeepTheirDestination() throws {
+        let old = Data(#"[{"id":"31E6D360-79FF-4B84-BBAC-97B340BEEC45","address":"albert.tail6cbdb7.ts.net","user":"dev"}]"#.utf8)
+        var host = try #require(try JSONDecoder().decode([RemoteHost].self, from: old).first)
+        #expect(host.name == nil)
+        #expect(host.label == "dev@albert.tail6cbdb7.ts.net")
+        host.name = "Albert"
+        #expect(host.label == "Albert")
+        #expect(host.destination == "dev@albert.tail6cbdb7.ts.net")
+    }
 }

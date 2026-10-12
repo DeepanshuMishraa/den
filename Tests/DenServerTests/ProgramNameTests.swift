@@ -9,6 +9,24 @@ import Testing
         #expect(ProgramName.resolve(process: "python3.12", arguments: ["/usr/bin/python3", "/Users/me/.local/bin/httpie"]) == "httpie")
     }
 
+    /// The pi coding agent, run directly and for `pi update --extensions`.
+    @Test func piResolvesFromItsLinkOrItsBundle() {
+        #expect(ProgramName.resolve(process: "node", arguments: ["node", "/opt/homebrew/bin/pi"]) == "pi")
+        #expect(ProgramName.resolve(process: "node", arguments: ["node", "/opt/homebrew/bin/pi", "update", "--extensions"]) == "pi")
+        #expect(ProgramName.resolve(process: "node", arguments: [
+            "node", "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js", "update",
+        ]) == "pi-coding-agent")
+    }
+
+    /// Node programs that set `process.title` overwrite argv; the kernel then
+    /// reports just the title (pi leaves "pi " with padding).
+    @Test func selfSetTitlesNameTheProgram() {
+        #expect(ProgramName.resolve(process: "node", arguments: ["pi "]) == "pi")
+        #expect(ProgramName.resolve(process: "node", arguments: ["npm run dev"]) == "npm")
+        #expect(ProgramName.resolve(process: "node", arguments: ["/opt/homebrew/bin/node", "-e", "1"]) == "node")
+        #expect(ProgramName.resolve(process: "node", arguments: ["node"]) == "node")
+    }
+
     @Test func pythonModulesResolveToTheModule() {
         #expect(ProgramName.resolve(process: "python3", arguments: ["python3", "-m", "pytest", "-x"]) == "pytest")
         #expect(ProgramName.resolve(process: "python3", arguments: ["python3", "-m", "http.server"]) == "http")
