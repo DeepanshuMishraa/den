@@ -64,16 +64,27 @@ jobs:
           path: .tools/zig
           key: zig-0.16.0-macos-arm64
 
-      # Same as a local release build: submodules, the ghostty-vt
-      # xcframework, then Den.app. Version is stamped into the Info.plist
-      # before signing, so the signature stays valid.
+      - name: Check out submodules
+        run: git submodule update --init vendor/ghostty vendor/fsearch
+
+      # Ghostty's Zig dependencies come from third-party hosts (codeberg.org
+      # among them); a cached copy keeps their outages from failing a release.
+      - name: Cache Zig packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/zig-cache/p
+          key: zig-packages-${{ hashFiles('vendor/ghostty/build.zig.zon', 'vendor/ghostty/pkg/*/build.zig.zon') }}
+          restore-keys: zig-packages-
+
+      # Same as a local release build: the ghostty-vt xcframework, then
+      # Den.app. Version is stamped into the Info.plist before signing, so
+      # the signature stays valid.
       - name: Build Den.app
         env:
           DEN_VERSION: ${{ steps.version.outputs.version }}
           DEN_SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
-        run: |
-          git submodule update --init vendor/ghostty vendor/fsearch
-          scripts/bundle.sh release
+          ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
+        run: scripts/bundle.sh release
 
       # The app is ad-hoc signed, not notarized. Gatekeeper treats it as
       # unsigned on other Macs (right-click > Open on first launch).
