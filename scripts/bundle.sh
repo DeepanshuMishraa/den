@@ -58,15 +58,18 @@ else
 fi
 # SwiftPM resources (bundled fonts); Bundle.module finds them in Resources.
 cp -R "$bin/Den_DenApp.bundle" "$app/Contents/Resources/"
-# App icon: den.icon (Icon Composer) compiles to Assets.car for macOS 26's
-# layered icon plus den.icns for older systems. Needs Xcode's actool.
-if xcrun --find actool >/dev/null 2>&1; then
-  xcrun actool "$root/den.icon" --compile "$app/Contents/Resources" --app-icon den \
-    --platform macosx --minimum-deployment-target 15.0 \
-    --output-partial-info-plist "$root/.build/den-icon-partial.plist" --errors >/dev/null
-else
-  echo "warning: Xcode's actool not found; Den.app ships without its icon" >&2
-fi
+# Build a legacy .icns directly. actool's Icon Composer compilation crashes
+# on GitHub's macOS runner, while the source PNG works with the native tools.
+iconset="$root/.build/den.iconset"
+mkdir -p "$iconset"
+for size in 16 32 64 128 256 512; do
+  sips -z "$size" "$size" "$root/den.icon/Assets/Cozy Cave Creature Icon.png" \
+    --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z "$((size * 2))" "$((size * 2))" "$root/den.icon/Assets/Cozy Cave Creature Icon.png" \
+    --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil --convert icns "$iconset" --output "$app/Contents/Resources/den.icns"
+rm -rf "$iconset"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
