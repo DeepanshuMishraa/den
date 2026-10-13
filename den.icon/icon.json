@@ -1,18 +1,58 @@
 {
-  "fill" : {
-    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
-  },
+  "fill-specializations" : [
+    {
+      "value" : "automatic"
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.73218,0.00000,0.95934,1.00000",
+          "srgb:0.74523,1.00000,0.96773,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 1
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 0
+          }
+        }
+      }
+    }
+  ],
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "Cozy Cave Creature Icon.png",
-          "name" : "Cozy Cave Creature Icon",
+          "blend-mode-specializations" : [
+            {
+              "value" : "darken"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "multiply"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "value" : "none"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "none"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "Cozy Fox Nest App Icon.png",
+          "name" : "Cozy Fox Nest App Icon",
           "position" : {
-            "scale" : 1.04,
+            "scale" : 0.98,
             "translation-in-points" : [
-              0,
-              0
+              4,
+              18
             ]
           }
         }

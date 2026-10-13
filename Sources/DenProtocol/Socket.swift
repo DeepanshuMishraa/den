@@ -40,6 +40,9 @@ public enum DenPaths {
     }
     public static var log: URL { supportDirectory.appending(path: "dend.log") }
     public static var themes: URL { supportDirectory.appending(path: "themes", directoryHint: .isDirectory) }
+    /// Session reopened on launch, as a plain file so dev and bundled builds
+    /// (whose UserDefaults domains differ) remember the same one.
+    public static var lastSession: URL { supportDirectory.appending(path: "last-session") }
 }
 
 public struct SocketError: Error, CustomStringConvertible, Sendable {
@@ -88,6 +91,8 @@ public enum UnixSocket {
     }
 
     /// Binds and listens on `path`, replacing a stale socket file.
+    /// Callers must first take `acquireSingletonLock`: replacing the path
+    /// while another dend owns it would orphan that dend's sessions.
     public static func listen(_ path: String) throws(SocketError) -> Int32 {
         var addr = try address(path)
         unlink(path)
@@ -121,6 +126,35 @@ public enum UnixSocket {
             throw SocketError(operation: "fcntl O_NONBLOCK", path: path, errno: errno)
         }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+    }
+
+    /// One dend per socket, enforced with an flock'd sidecar lock held for
+    /// the process's life. A socket connect-test alone is not enough: if the
+    /// socket file was deleted out from under a live owner, a second dend
+    /// would steal the path and orphan the first dend's sessions.
+    /// Returns the fd (keep it open for life), or nil when another live dend
+    /// holds the lock. The holder's pid is written into the lock file.
+    public static func acquireSingletonLock(_ socketPath: String) throws(SocketError) -> Int32? {
+        let lockPath = socketPath + ".lock"
+        let fd = lockPath.withCString { open($0, O_RDWR | O_CREAT, 0o600) }
+        guard fd >= 0 else { throw SocketError(operation: "open lock", path: lockPath, errno: errno) }
+        if flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            let e = errno
+            close(fd)
+            if e == EWOULDBLOCK || e == EAGAIN { return nil }
+            throw SocketError(operation: "flock", path: lockPath, errno: e)
+        }
+        let pidLine = "\(ProcessInfo.processInfo.processIdentifier)\n"
+        _ = ftruncate(fd, 0)
+        _ = pidLine.withCString { write(fd, $0, strlen($0)) }
+        return fd
+    }
+
+    /// Best-effort pid of the dend holding `socketPath`'s lock, for messages.
+    public static func lockHolderPid(_ socketPath: String) -> String? {
+        guard let s = try? String(contentsOfFile: socketPath + ".lock", encoding: .utf8) else { return nil }
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }
 

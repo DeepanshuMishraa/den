@@ -397,10 +397,30 @@ final class AppModel {
     /// Grid size used for panes the server creates before their view exists.
     @ObservationIgnored var defaultGridSize = GridSize(cols: 100, rows: 30, cellWidthPx: 16, cellHeightPx: 34)
 
-    private static let lastSessionKey = "lastSessionID"
+    private static let lastSessionKey = "lastSessionID" // legacy UserDefaults key
     /// The session open when Den last quit, until it's back on screen or
-    /// you pick another one.
-    @ObservationIgnored private var awaitingRemembered = UserDefaults.standard.string(forKey: AppModel.lastSessionKey).flatMap(UUID.init(uuidString:)).map(SessionID.init)
+    /// you pick another one. File-backed so dev and bundled builds (whose
+    /// UserDefaults domains differ) remember the same session.
+    @ObservationIgnored private var awaitingRemembered: SessionID? = AppModel.readRememberedSession()
+
+    private static func readRememberedSession() -> SessionID? {
+        if let s = try? String(contentsOf: DenPaths.lastSession, encoding: .utf8),
+           let uuid = UUID(uuidString: s.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return SessionID(uuid)
+        }
+        if let s = UserDefaults.standard.string(forKey: lastSessionKey),
+           let uuid = UUID(uuidString: s) {
+            let id = SessionID(uuid)
+            writeRememberedSession(id)
+            return id
+        }
+        return nil
+    }
+
+    private static func writeRememberedSession(_ id: SessionID) {
+        try? FileManager.default.createDirectory(at: DenPaths.supportDirectory, withIntermediateDirectories: true)
+        try? id.raw.uuidString.write(to: DenPaths.lastSession, atomically: true, encoding: .utf8)
+    }
 
     init(systemIsDark: Bool) {
         let d = UserDefaults.standard
@@ -1068,7 +1088,7 @@ final class AppModel {
     private func show(_ id: SessionID) {
         currentSession = id
         zoomedPane = nil
-        defaults.set(id.raw.uuidString, forKey: Self.lastSessionKey)
+        Self.writeRememberedSession(id)
         clearActivity()
     }
 

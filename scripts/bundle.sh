@@ -58,8 +58,37 @@ else
 fi
 # SwiftPM resources (bundled fonts); Bundle.module finds them in Resources.
 cp -R "$bin/Den_DenApp.bundle" "$app/Contents/Resources/"
-# actool's Icon Composer compilation crashes on GitHub's macOS runner.
-cp "$root/den.icon/den.icns" "$app/Contents/Resources/den.icns"
+# Build a legacy .icns from the .icon artwork. actool's Icon Composer
+# compilation crashes on GitHub's macOS runner, so sips+iconutil render the
+# committed PNG instead. The source is icon.json's image-name, so swapping
+# artwork re-hooks automatically instead of breaking the bundle.
+icon_src="$(jq -r '.groups[0].layers[0]."image-name"' "$root/den.icon/icon.json")"
+[[ -f "$root/den.icon/Assets/$icon_src" ]] || { echo "error: missing icon artwork den.icon/Assets/$icon_src (check icon.json image-name)" >&2; exit 1; }
+iconset="$root/.build/den.iconset"
+mkdir -p "$iconset"
+for size in 16 32 64 128 256 512; do
+  sips -z "$size" "$size" "$root/den.icon/Assets/$icon_src" \
+    --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z "$((size * 2))" "$((size * 2))" "$root/den.icon/Assets/$icon_src" \
+    --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil --convert icns "$iconset" --output "$app/Contents/Resources/den.icns"
+rm -rf "$iconset"
+# Liquid Glass icon: compile the .icon package into Assets.car so macOS 26+
+# renders its layers, glass and gradient (CFBundleIconName=den is already in
+# the plist below). Best-effort: actool crashes on some CI runners, so a
+# failure only warns and the flat .icns above remains the fallback.
+icontmp="$root/.build/den-iconcompile"
+mkdir -p "$icontmp"
+if xcrun actool --output-format human-readable-text --notices --warnings \
+    --target-device mac --minimum-deployment-target 15.0 --platform macosx \
+    --compile "$icontmp" "$root/den.icon" >/dev/null 2>&1 \
+    && [[ -f "$icontmp/Assets.car" ]]; then
+  cp "$icontmp/Assets.car" "$app/Contents/Resources/"
+else
+  echo "warning: actool den.icon compilation failed; app ships flat .icns only" >&2
+fi
+rm -rf "$icontmp"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

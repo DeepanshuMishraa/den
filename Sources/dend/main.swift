@@ -32,6 +32,22 @@ if let fd = try? UnixSocket.connect(socketPath) {
     exit(0)
 }
 
+// ... and even when the socket file is gone but its owner lives. A second
+// dend used to steal the path here and orphan the first dend's sessions.
+// The kernel releases the lock if we die, so it never goes stale.
+let singletonFd: Int32 = {
+    do {
+        if let fd = try UnixSocket.acquireSingletonLock(socketPath) { return fd }
+    } catch {
+        FileHandle.standardError.write(Data("[dend] cannot lock \(socketPath).lock: \(error)\n".utf8))
+        exit(1)
+    }
+    let holder = UnixSocket.lockHolderPid(socketPath).map { " (pid \($0))" } ?? ""
+    FileHandle.standardError.write(Data("[dend] already running\(holder); leaving it alone\n".utf8))
+    exit(0)
+}()
+_ = singletonFd
+
 #if os(macOS)
 let hostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 #else

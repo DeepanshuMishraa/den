@@ -5,3 +5,7 @@
 Frameworks/
 dist/
 *.xcodeproj/xcuserdata/
+scripts/bench/vtebench/
+scripts/bench/typometer/
+scripts/bench/results/
+scripts/bench/latency/.build/

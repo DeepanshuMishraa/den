@@ -28,8 +28,10 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
   with no round trip.
 - **Persistent sessions.** The app starts dend in its own session (`setsid`), so
   quitting Den keeps every shell running. The next launch reattaches to the
-  last session.
-- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
+  last session. One dend owns the socket (an `flock`'d sidecar lock refuses a
+  second dend even if the socket file was deleted); the reopened session is
+  remembered in `~/Library/Application Support/Den/last-session`, shared by
+  dev and bundled builds.- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
   the system `ssh`. Den runs `dend --stdio` there, which starts the host's dend
   if needed and relays the SSH channel to its socket, so a remote session
   speaks the same protocol and outlives dropped connections. See
