@@ -389,7 +389,8 @@ final class AppModel {
         }
         if !startedRemotes {
             startedRemotes = true
-            for host in remoteHosts { connectRemote(host.id, reveal: false) }
+            // Disconnected hosts stay that way until explicitly reconnected.
+            for host in remoteHosts where host.autoConnect { connectRemote(host.id, reveal: false) }
         }
     }
 
@@ -745,6 +746,12 @@ final class AppModel {
     func connectRemote(_ id: RemoteHost.ID, reveal: Bool) {
         guard let host = remoteHost(id) else { return }
         if reveal { revealOnConnect.insert(id) }
+        // An explicit connect re-arms launch auto-connect and retries; a
+        // disconnect clears it (see disconnectHost), so it sticks.
+        if let i = remoteHosts.firstIndex(where: { $0.id == id }), !remoteHosts[i].autoConnect {
+            remoteHosts[i].autoConnect = true
+            RemoteHostStore.save(remoteHosts)
+        }
         // Already on its way (maybe mid-upload): starting over would only
         // throw that work away.
         switch remoteStates[id] {
@@ -766,6 +773,12 @@ final class AppModel {
         revealOnConnect.remove(id)
         disconnectRemote(id)
         retryDelays[id] = nil
+        // Persisted: a disconnected host stays disconnected across restarts
+        // until explicitly connected again.
+        if let i = remoteHosts.firstIndex(where: { $0.id == id }), remoteHosts[i].autoConnect {
+            remoteHosts[i].autoConnect = false
+            RemoteHostStore.save(remoteHosts)
+        }
         remoteStates[id] = .disconnected
         if let current = currentSession, sessionHosts[current] == .remote(id) {
             if let next = orderedSessions.first(where: { sessionHosts[$0.id] != .remote(id) }) { switchSession(next.id) }
@@ -779,6 +792,9 @@ final class AppModel {
 
     /// Each host's connection attempt in flight; cancelling it ends its ssh.
     @ObservationIgnored private var setups: [RemoteHost.ID: Task<Void, Never>] = [:]
+    /// Hosts whose dend boot persistence was ensured this launch (fresh
+    /// install or persistCommand), so it isn't re-run on every reconnect.
+    @ObservationIgnored private var persistenceEnsured: Set<RemoteHost.ID> = []
 
     /// Ends the connection and invalidates attempts and retries in flight.
     private func disconnectRemote(_ id: RemoteHost.ID) {
@@ -824,6 +840,18 @@ final class AppModel {
             }
             guard attempts[id] == attempt else { return }
             if case .failure(let failure) = installed { return setupFailed(host, failure) }
+            // A fresh install registers boot persistence itself.
+            persistenceEnsured.insert(id)
+        } else if !probe.serviceRegistered, !persistenceEnsured.contains(id) {
+            // dend predates boot persistence (or the service was removed):
+            // register it so the daemon is back after a reboot. Best-effort
+            // and once per launch; on-demand start over SSH covers the rest.
+            persistenceEnsured.insert(id)
+            let persisted = await ssh.run(RemoteSetup.persistCommand)
+            guard attempts[id] == attempt else { return }
+            if case .failure(let failure) = persisted {
+                NSLog("Den: boot persistence not registered on %@: %@", host.label, failure.description)
+            }
         }
 
         remoteStates[id] = .connecting(step: "Attaching to \(host.address)…")

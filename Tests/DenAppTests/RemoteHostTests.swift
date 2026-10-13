@@ -44,10 +44,12 @@ import Testing
 
 @Suite struct RemoteSetupTests {
     @Test func readsTheProbeAfterBanners() {
-        let output = "Welcome to Ubuntu\nLinux x86_64\n9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\n"
-        #expect(RemoteSetup.parseProbe(output) == .init(os: "Linux", arch: "x86_64", installedHash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"))
-        #expect(RemoteSetup.parseProbe("Linux aarch64\nnone\n") == .init(os: "Linux", arch: "aarch64", installedHash: nil))
-        #expect(RemoteSetup.parseProbe("Darwin arm64\nnone") == .init(os: "Darwin", arch: "arm64", installedHash: nil))
+        let output = "Welcome to Ubuntu\nLinux x86_64\n9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\nsvc=ok\n"
+        #expect(RemoteSetup.parseProbe(output) == .init(os: "Linux", arch: "x86_64", installedHash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", serviceRegistered: true))
+        #expect(RemoteSetup.parseProbe("Linux aarch64\nnone\nsvc=missing\n") == .init(os: "Linux", arch: "aarch64", installedHash: nil, serviceRegistered: false))
+        #expect(RemoteSetup.parseProbe("Darwin arm64\nnone\nsvc=ok") == .init(os: "Darwin", arch: "arm64", installedHash: nil, serviceRegistered: true))
+        // Hosts probed without the svc line report no service.
+        #expect(RemoteSetup.parseProbe("Linux aarch64\nnone\n") == .init(os: "Linux", arch: "aarch64", installedHash: nil, serviceRegistered: false))
         #expect(RemoteSetup.parseProbe("garbage") == nil)
     }
 
@@ -59,9 +61,21 @@ import Testing
 
     @Test func remoteCommandsHaveNoNestedSingleQuotes() {
         let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample den@mac"
-        for command in [RemoteSetup.probeCommand, RemoteSetup.installCommand, RemoteSetup.streamCommand, RemoteSetup.authorizeCommand(publicKey: key)] {
+        for command in [RemoteSetup.probeCommand, RemoteSetup.installCommand, RemoteSetup.persistCommand, RemoteSetup.streamCommand, RemoteSetup.authorizeCommand(publicKey: key)] {
             #expect(command.hasPrefix("sh -c '") && command.hasSuffix("'"))
             #expect(command.dropFirst(7).dropLast().contains("'") == false)
+        }
+    }
+
+    @Test func setupRegistersBootPersistence() {
+        // Fresh installs and the standalone persist step both leave a
+        // boot-persistent service behind (systemd on Linux, LaunchAgent on
+        // macOS) plus lingering, so dend is back after a reboot.
+        for command in [RemoteSetup.installCommand, RemoteSetup.persistCommand] {
+            #expect(command.contains("den-dend.service"))
+            #expect(command.contains("systemctl --user enable --now den-dend.service"))
+            #expect(command.contains("den.dend.plist"))
+            #expect(command.contains("enable-linger"))
         }
     }
 }
@@ -92,5 +106,22 @@ import Testing
         host.name = "Albert"
         #expect(host.label == "Albert")
         #expect(host.destination == "dev@albert.tail6cbdb7.ts.net")
+    }
+
+    /// Hosts saved before the auto-connect flag existed connect as before;
+    /// disconnecting persists the opt-out across restarts.
+    @Test func hostsWithoutAutoConnectFlagDefaultToConnecting() throws {
+        let old = Data(#"[{"id":"31E6D360-79FF-4B84-BBAC-97B340BEEC45","address":"box","user":"dev"}]"#.utf8)
+        let host = try #require(try JSONDecoder().decode([RemoteHost].self, from: old).first)
+        #expect(host.autoConnect)
+    }
+
+    @Test func autoConnectFlagRoundTrips() throws {
+        var host = try #require(RemoteHost.parse("dev@box"))
+        host.autoConnect = false
+        let data = try JSONEncoder().encode([host])
+        let back = try #require(try JSONDecoder().decode([RemoteHost].self, from: data).first)
+        #expect(!back.autoConnect)
+        #expect(back.destination == "dev@box")
     }
 }

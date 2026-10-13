@@ -17,6 +17,38 @@ struct RemoteHost: Codable, Hashable, Identifiable, Sendable {
     var port: UInt16?
     /// A name you gave it; shown instead of the address.
     var name: String?
+    /// Whether Den connects on launch and keeps retrying drops. Cleared by
+    /// an explicit disconnect; set again by any explicit connect. Saved with
+    /// the host, so a disconnect sticks across restarts.
+    var autoConnect: Bool = true
+
+    // Custom decoding so hosts saved before autoConnect existed still load
+    // (defaulting to connecting, the old behavior) instead of failing the
+    // whole saved-hosts read.
+    private enum CodingKeys: String, CodingKey {
+        case id, address, user, port, name, autoConnect, keyLogin
+    }
+
+    init(id: UUID, address: String, user: String? = nil, port: UInt16? = nil, name: String? = nil, autoConnect: Bool = true, keyLogin: KeyLogin? = nil) {
+        self.id = id
+        self.address = address
+        self.user = user
+        self.port = port
+        self.name = name
+        self.autoConnect = autoConnect
+        self.keyLogin = keyLogin
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        address = try c.decode(String.self, forKey: .address)
+        user = try c.decodeIfPresent(String.self, forKey: .user)
+        port = try c.decodeIfPresent(UInt16.self, forKey: .port)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        autoConnect = try c.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? true
+        keyLogin = try c.decodeIfPresent(KeyLogin.self, forKey: .keyLogin)
+    }
     /// Whether Den's own SSH key should go on the host after a password
     /// login; nil means it should. Once it's there, logins stop reading the
     /// password from the Keychain.

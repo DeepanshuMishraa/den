@@ -14,14 +14,69 @@ enum RemoteSetup {
         let arch: String
         /// SHA-256 of the installed dend, nil when there is none.
         let installedHash: String?
+        /// A boot-persistent dend service is registered (systemd unit or
+        /// LaunchAgent), so the daemon is back after a reboot without Den.
+        let serviceRegistered: Bool
     }
 
-    static let probeCommand = sh(#"uname -sm; f="$HOME/.den/bin/dend"; if [ -x "$f" ]; then (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f") | cut -d" " -f1; else echo none; fi"#)
+    static let probeCommand = sh(#"uname -sm; f="$HOME/.den/bin/dend"; if [ -x "$f" ]; then (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f") | cut -d" " -f1; else echo none; fi; s=missing; u="$(uname -s)"; if [ "$u" = Linux ] && command -v systemctl >/dev/null 2>&1; then systemctl --user is-enabled den-dend.service >/dev/null 2>&1 && s=ok; elif [ "$u" = Darwin ]; then launchctl print gui/$(id -u)/den.dend >/dev/null 2>&1 && s=ok; fi; echo svc=$s"#)
+
+    /// Registers dend to start at boot: a systemd user service on Linux, a
+    /// LaunchAgent on macOS, plus lingering so logind keeps the user manager
+    /// (and dend) alive after the last SSH login ends. Idempotent,
+    /// best-effort and silent: hosts without systemd/launchctl just skip it,
+    /// and on-demand start over SSH still covers them.
+    ///
+    /// The script must not contain single quotes. Heredoc bodies and their
+    /// EOF markers start at column 0 on purpose: heredoc content is literal
+    /// (an indented XML declaration would invalidate the plist, and an
+    /// indented EOF would not terminate the heredoc).
+    private static let registerServiceScript = #"""
+if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/den-dend.service" <<EOF
+[Unit]
+Description=Den terminal server
+After=network-online.target
+Wants=network-online.target
+[Service]
+ExecStart=%h/.den/bin/dend
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload >/dev/null 2>&1 || true
+systemctl --user enable --now den-dend.service >/dev/null 2>&1 || true
+fi
+if command -v loginctl >/dev/null 2>&1; then loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true; fi
+if [ "$(uname -s)" = "Darwin" ]; then
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$HOME/Library/LaunchAgents/den.dend.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+<key>Label</key><string>den.dend</string>
+<key>ProgramArguments</key><array><string>$HOME/.den/bin/dend</string></array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+</dict>
+</plist>
+EOF
+launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/den.dend.plist" >/dev/null 2>&1 || true
+fi
+"""#
 
     /// Reads dend from stdin into place atomically, so a running dend keeps
-    /// its old binary. Lingering keeps the systemd user manager, and the dend
-    /// it runs, alive after the last SSH login ends.
-    static let installCommand = sh(#"set -e; umask 077; mkdir -p "$HOME/.den/bin"; cat > "$HOME/.den/bin/dend.new"; chmod 755 "$HOME/.den/bin/dend.new"; mv -f "$HOME/.den/bin/dend.new" "$HOME/.den/bin/dend"; if command -v loginctl >/dev/null 2>&1; then loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true; fi"#)
+    /// its old binary. Also registers boot persistence (see above).
+    static let installCommand = sh(#"set -e; umask 077; mkdir -p "$HOME/.den/bin"; cat > "$HOME/.den/bin/dend.new"; chmod 755 "$HOME/.den/bin/dend.new"; mv -f "$HOME/.den/bin/dend.new" "$HOME/.den/bin/dend"; "# + registerServiceScript)
+
+    /// Boot-persistence registration for hosts whose dend is already
+    /// installed. Runs when the probe reports no service, at most once per
+    /// host per launch.
+    static let persistCommand = sh(registerServiceScript)
 
     static let streamCommand = sh(#"exec "$HOME/.den/bin/dend" --stdio"#)
 
@@ -34,13 +89,20 @@ enum RemoteSetup {
     private static func sh(_ script: String) -> String { "sh -c '\(script)'" }
 
     static func parseProbe(_ output: String) -> Probe? {
-        let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-        // Login banners may come first; the probe's lines are the last two.
+        var lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        // Login banners may come first; the probe's lines are the last ones.
+        // The trailing svc= line is new; hosts probed by older output (or a
+        // truncated read) just report no service.
+        var serviceRegistered = false
+        if let last = lines.last, last.hasPrefix("svc=") {
+            serviceRegistered = last == "svc=ok"
+            lines.removeLast()
+        }
         guard lines.count >= 2 else { return nil }
         let uname = lines[lines.count - 2].split(separator: " ")
         guard uname.count == 2 else { return nil }
         let hash = lines[lines.count - 1]
-        return Probe(os: String(uname[0]), arch: normalize(arch: String(uname[1]), os: String(uname[0])), installedHash: hash == "none" ? nil : hash)
+        return Probe(os: String(uname[0]), arch: normalize(arch: String(uname[1]), os: String(uname[0])), installedHash: hash == "none" ? nil : hash, serviceRegistered: serviceRegistered)
     }
 
     static func normalize(arch: String, os: String) -> String {
