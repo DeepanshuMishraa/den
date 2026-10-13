@@ -97,6 +97,10 @@ enum ConfigManual {
                 editors expect for M-x) or types symbols like å. "left"/"right"
                 use only that Option key as Alt. Default: true.
 
+            toast_position = "top-left" | "top-center" | "top-right" |
+                             "bottom-left" | "bottom-center" | "bottom-right"
+                Where the toast pill sits. Default: "bottom-center".
+
             terminal_font = "JetBrainsMono Nerd Font"
             terminal_font_size = 13
             ui_font = "SF Mono"

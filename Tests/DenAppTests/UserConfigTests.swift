@@ -102,6 +102,22 @@ import DenVT
         #expect(e.message.contains("left"))
     }
 
+    @Test func toastPositionDefaultsToBottomCenter() throws {
+        #expect(try UserConfig.parse("").get().toastPosition == .bottomCenter)
+    }
+
+    @Test func toastPositionAcceptsAllSixSpots() throws {
+        for position in ToastPosition.allCases {
+            #expect(try UserConfig.parse("toast_position = \"\(position.rawValue)\"").get().toastPosition == position)
+        }
+    }
+
+    @Test func toastPositionRejectsAnythingElse() {
+        guard case .failure(let e) = UserConfig.parse("toast_position = \"middle\"") else { Issue.record("parsed"); return }
+        #expect(e.message.contains("top-left"))
+        guard case .failure = UserConfig.parse("toast_position = true") else { Issue.record("parsed"); return }
+    }
+
     /// The Ghostty bindings that pass ⌘A etc. to Neovim as alt+key.
     @Test func textKeybindSendsEscapedBytes() throws {
         let config = try UserConfig.parse("""

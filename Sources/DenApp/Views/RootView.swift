@@ -219,20 +219,29 @@ struct RootView: View {
         }
 
         if let toast = model.toast {
+            let position = model.config.toastPosition
             VStack {
-                Spacer()
+                if !position.isTop {
+                    Spacer()
+                }
                 ToastView(toast: toast, theme: model.theme, style: model.effectiveInterfaceStyle,
                           fontFamily: model.uiFontFamily, fontSize: model.uiFontSize - 1,
                           onAction: { model.performToastAction($0) })
-                    // Sits on the window's bottom edge, like Rex's pill.
-                    .padding(.bottom, 2)
+                    .frame(maxWidth: .infinity, alignment: position.frameAlignment)
+                    // Side pills keep clear of the window edge; top pills sit
+                    // below the tab bar, bottom pills on the window's edge.
+                    .padding(.horizontal, 12)
+                    .padding(position.isTop ? .top : .bottom, position.isTop ? TitleBar.height + 4 : 2)
+                if position.isTop {
+                    Spacer()
+                }
             }
             .frame(maxWidth: .infinity)
             // Plain confirmations let clicks pass through to the terminal;
             // button toasts need to receive them.
             .allowsHitTesting(!toast.actions.isEmpty)
             .id(toast.id)
-            .transition(.opacity.combined(with: .offset(y: 6)))
+            .transition(.opacity.combined(with: .offset(y: position.isTop ? -6 : 6)))
         }
 
         if let error = model.lastError {
@@ -250,6 +259,17 @@ struct RootView: View {
             }
             .frame(maxWidth: .infinity)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
+private extension ToastPosition {
+    /// Horizontal placement of the pill within its full-width row.
+    var frameAlignment: Alignment {
+        switch self {
+        case .topLeft, .bottomLeft: .leading
+        case .topCenter, .bottomCenter: .center
+        case .topRight, .bottomRight: .trailing
         }
     }
 }

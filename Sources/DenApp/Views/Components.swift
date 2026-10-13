@@ -220,7 +220,7 @@ struct ToastView: View {
 
     var body: some View {
         let font = Font.custom(fontFamily, size: fontSize)
-        VStack(spacing: 5) {
+        ToastLayout(spacing: 5, maxWidth: 636) {
             HStack(spacing: 12) {
                 ZStack {
                     Circle().fill(green)
@@ -260,7 +260,6 @@ struct ToastView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .frame(maxWidth: 660)
         .background(toastGlass)
     }
 
@@ -344,6 +343,59 @@ private struct ToastButton: View {
     }
 }
 
+/// Lays out the toast's content row and optional progress bar. Sizes the toast to
+/// hug its content row (capped at `maxWidth`), and forces the progress bar to match
+/// the width of the row rather than greedily expanding the toast.
+private struct ToastLayout: Layout {
+    var spacing: CGFloat = 5
+    var maxWidth: CGFloat = 636
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let first = subviews.first else { return .zero }
+        let availableWidth = min(proposal.width ?? maxWidth, maxWidth)
+        let firstSize = first.sizeThatFits(ProposedViewSize(width: availableWidth, height: proposal.height))
+        let toastWidth = min(firstSize.width, availableWidth)
+        var totalHeight = firstSize.height
+        for subview in subviews.dropFirst() {
+            let s = subview.sizeThatFits(ProposedViewSize(width: toastWidth, height: proposal.height))
+            totalHeight += spacing + s.height
+        }
+        return CGSize(width: toastWidth, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let first = subviews.first else { return }
+        var y = bounds.minY
+        let rowH = first.sizeThatFits(ProposedViewSize(width: bounds.width, height: proposal.height)).height
+        first.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: rowH))
+        y += rowH + spacing
+        for subview in subviews.dropFirst() {
+            let h = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
+            subview.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: h))
+            y += h + spacing
+        }
+    }
+}
+
+/// Sizes ticker text to fit its natural text width when unconstrained, but caps at
+/// the proposed width when constrained so long text can scroll.
+private struct TickerTextLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let textMeasure = subviews.first else { return .zero }
+        let natural = textMeasure.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let width = proposal.width.map { min(natural.width, $0) } ?? natural.width
+        return CGSize(width: width, height: max(20, natural.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        if subviews.count > 1 {
+            subviews[1].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        } else if let first = subviews.first {
+            first.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+}
+
 /// A single-line message that scrolls like a ticker when it overflows,
 /// with soft fades at the edges while it moves.
 private struct TickerText: View {
@@ -351,40 +403,49 @@ private struct TickerText: View {
     let font: Font
     let color: Color
     @State private var textWidth: CGFloat = 0
-    @State private var visibleWidth: CGFloat = 0
     @State private var start = Date()
 
     private static let speed: CGFloat = 42
     private static let gap: CGFloat = 56
 
-    private var scrolling: Bool { textWidth > visibleWidth + 1 }
-
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 60)) { context in
-            let offset = x(at: context.date)
-            HStack(spacing: 0) {
-                Text(text).font(font).foregroundStyle(color)
-                    .fixedSize()
-                    .onGeometryChange(for: CGFloat.self, of: \.size.width) { textWidth = $0 }
-                if scrolling {
-                    // Second copy for a seamless wrap.
-                    Text(text).font(font).foregroundStyle(color)
-                        .fixedSize()
-                        .padding(.leading, Self.gap)
+        TickerTextLayout {
+            // Index 0: unconstrained measurement of text width
+            Text(text)
+                .font(font)
+                .lineLimit(1)
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { textWidth = $0 }
+
+            // Index 1: placed within visible bounds
+            GeometryReader { geo in
+                let visibleWidth = geo.size.width
+                let scrolling = textWidth > visibleWidth + 1
+                TimelineView(.animation(minimumInterval: 1 / 60)) { context in
+                    let offset = x(at: context.date, scrolling: scrolling)
+                    HStack(spacing: 0) {
+                        Text(text).font(font).foregroundStyle(color)
+                            .fixedSize()
+                        if scrolling {
+                            // Second copy for a seamless wrap.
+                            Text(text).font(font).foregroundStyle(color)
+                                .fixedSize()
+                                .padding(.leading, Self.gap)
+                        }
+                    }
+                    .offset(x: offset)
+                    .lineLimit(1)
+                    .frame(width: visibleWidth, alignment: .leading)
+                    .clipped()
+                    .mask(fade(scrolling: scrolling))
                 }
             }
-            .offset(x: offset)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .clipped()
-            .mask(fade)
         }
         .frame(height: 20)
-        .onGeometryChange(for: CGFloat.self, of: \.size.width) { visibleWidth = $0 }
         .onChange(of: text) { start = Date() }
     }
 
-    private func x(at date: Date) -> CGFloat {
+    private func x(at date: Date, scrolling: Bool) -> CGFloat {
         guard scrolling else { return 0 }
         let elapsed = max(0, date.timeIntervalSince(start) - 1.1)
         let total = textWidth + Self.gap
@@ -392,7 +453,7 @@ private struct TickerText: View {
     }
 
     @ViewBuilder
-    private var fade: some View {
+    private func fade(scrolling: Bool) -> some View {
         if scrolling {
             LinearGradient(stops: [
                 .init(color: .clear, location: 0),

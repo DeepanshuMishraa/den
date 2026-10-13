@@ -2,6 +2,24 @@ import AppKit
 import Carbon.HIToolbox
 import DenVT
 
+/// Where the toast pill sits: three spots across the top of the window
+/// and three across the bottom. Set with `toast_position` in config.toml.
+enum ToastPosition: String, CaseIterable {
+    case topLeft = "top-left"
+    case topCenter = "top-center"
+    case topRight = "top-right"
+    case bottomLeft = "bottom-left"
+    case bottomCenter = "bottom-center"
+    case bottomRight = "bottom-right"
+
+    var isTop: Bool {
+        switch self {
+        case .topLeft, .topCenter, .topRight: true
+        case .bottomLeft, .bottomCenter, .bottomRight: false
+        }
+    }
+}
+
 /// `~/.config/den/config.toml`, the file you edit by hand. Missing keys keep
 /// their defaults; keys Den doesn't know yet are ignored.
 struct UserConfig: Equatable {
@@ -13,6 +31,8 @@ struct UserConfig: Equatable {
     static let defaultLeader = KeyChord(modifiers: [.option], key: .code(UInt16(kVK_Space)))
 
     var optionAsAlt: OptionAsAlt = .both
+    /// Where the toast pill sits. `toast_position` in config.toml.
+    var toastPosition: ToastPosition = .bottomCenter
     /// Terminal typeface and size. When set, they win over Change Font and
     /// ⌘=/⌘- on every config reload.
     var terminalFont: String?
@@ -148,6 +168,15 @@ struct UserConfig: Equatable {
             }
             config.optionAsAlt = mode
         }
+        switch root["toast_position"] {
+        case nil: break
+        case let other?:
+            let choices = ToastPosition.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ", ")
+            guard case .string(let s) = other, let position = ToastPosition(rawValue: s) else {
+                return .failure(ConfigError(message: "toast_position is \(describe(other)); use one of \(choices)."))
+            }
+            config.toastPosition = position
+        }
 
         func checkSize(_ key: String, _ size: Double) -> Result<Double?, ConfigError> {
             guard (8 ... 32).contains(size) else {
@@ -251,6 +280,10 @@ struct UserConfig: Equatable {
         # Option sends ESC-prefixed keys (alt) instead of typing symbols like å.
         # true | false | "left" | "right"
         macos_option_as_alt = true
+
+        # Where the toast pill sits: "top-left" | "top-center" | "top-right" |
+        # "bottom-left" | "bottom-center" | "bottom-right"
+        toast_position = "bottom-center"
 
         # Fonts, split by surface. When set, these win over Change Font and
         # ⌘=/⌘- on every reload; when commented out, the palette's choices

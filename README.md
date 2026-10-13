@@ -166,7 +166,10 @@ Inside a Den pane, `-s` and `-p` default to that pane (`DEN_PANE_ID`).
   with Change Default Shell (stored as `shell = …` in
   `~/Library/Application Support/Den/config`).
 - **Config file**: `~/.config/den/config.toml` (Open Config File, ⌘,)
-  sets `macos_option_as_alt` (`true`, `false`, `"left"`, `"right"`), every
+  sets `macos_option_as_alt` (`true`, `false`, `"left"`, `"right"`),
+  `toast_position` (`"top-left"`, `"top-center"`, `"top-right"`,
+  `"bottom-left"`, `"bottom-center"`, `"bottom-right"`; default
+  `"bottom-center"`), every
   command's shortcut under `[keys]` (`new_tab = "cmd+shift+t"`, `""` to
   unbind; the starter file lists all names), and `[[keys.bind]]` entries
   (`key = "cmd+a"`, `action` a command name, `'text:\x1ba'`,
