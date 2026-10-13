@@ -1,8 +1,8 @@
 import Foundation
 
-/// Puts `den` on PATH when Den.app starts: a link at ~/.local/bin/den to
-/// the copy inside this bundle, so installing (or moving) the app is all it
-/// takes. Panes get the bundle's bin folder on PATH regardless (dend adds it).
+/// Links `den` onto PATH on explicit request (command palette): a link at
+/// ~/.local/bin/den to the copy inside this bundle. Panes get the bundle's
+/// bin folder on PATH regardless (dend adds it).
 enum CLIInstaller {
     /// `Den.app/Contents/Resources/bin/den`, nil when not running from a bundle.
     static var bundledCLI: URL? {

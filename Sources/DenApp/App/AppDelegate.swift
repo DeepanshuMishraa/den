@@ -22,10 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FontRegistry.registerBundled()
-        // Keep ~/.local/bin/den pointing at this copy of the app.
-        DispatchQueue.global(qos: .utility).async {
-            if case .failed(let message) = CLIInstaller.install() { NSLog("%@", message) }
-        }
+        // The `den` CLI installs explicitly from the command palette, never
+        // on launch. Panes still get the bundle's bin folder on PATH through
+        // dend, so `den` works inside Den regardless.
         let model = AppModel(systemIsDark: Self.isDark(NSApp.effectiveAppearance))
         self.model = model
         NSApp.mainMenu = buildMenu(model)

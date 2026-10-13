@@ -223,6 +223,48 @@ final class AppModel {
         updates.checkForUpdates()
     }
 
+    /// Installs the `den` command line tool (`~/.local/bin/den`), narrating
+    /// each step in a toast. Explicit only: launching the app never links it.
+    func installCommandLineTool() {
+        showUpdateProgress("Installing command line tool…", progress: nil)
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) { CLIInstaller.install() }.value
+            switch outcome {
+            case .linked:
+                if Self.cliLinkWorks {
+                    showToast("Installed den to ~/.local/bin/den")
+                } else {
+                    lastError = "Linked ~/.local/bin/den, but it doesn't resolve to an executable. The link may be broken; remove it and install again."
+                }
+            case .alreadyLinked:
+                showToast(Self.cliLinkWorks ? "Command line tool already installed" : "The den link exists but is broken — remove ~/.local/bin/den and install again")
+            case .occupied:
+                showActionToast("Something else is at ~/.local/bin/den — left alone",
+                                actions: [("Reveal", { NSWorkspace.shared.activateFileViewerSelecting([CLIInstaller.linkURL]) })])
+            case .failed(let message):
+                lastError = message
+            case .notBundled:
+                showToast("The command line tool installs from release builds")
+            }
+        }
+    }
+
+    /// Palette detail for the install item.
+    var cliInstallDetail: String {
+        guard CLIInstaller.bundledCLI != nil else { return "Release builds only" }
+        return Self.cliLinkWorks ? "Installed" : "Not installed"
+    }
+
+    /// The link exists, points at this bundle's tool, and executes.
+    private static var cliLinkWorks: Bool {
+        let fm = FileManager.default
+        guard let target = CLIInstaller.bundledCLI,
+              let dest = try? fm.destinationOfSymbolicLink(atPath: CLIInstaller.linkURL.path),
+              URL(fileURLWithPath: dest).standardizedFileURL.path == URL(fileURLWithPath: target.path).standardizedFileURL.path
+        else { return false }
+        return fm.isExecutableFile(atPath: dest)
+    }
+
     // MARK: Shell
 
     /// Shells listed in /etc/shells that exist on this Mac.

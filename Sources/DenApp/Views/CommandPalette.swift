@@ -506,6 +506,8 @@ struct CommandPalette: View {
                         shortcut: key(.openConfig), action: .run { model.openConfigFile() }),
             PaletteItem(id: "reload-config", icon: "arrow.clockwise", title: "Reload Config", shortcut: key(.reloadConfig),
                         action: .run { model.reloadConfig(force: true) }),
+            PaletteItem(id: "install-cli", icon: "terminal", title: "Install Command Line Tool…", detail: model.cliInstallDetail,
+                        action: .run { model.installCommandLineTool() }),
             PaletteItem(id: "check-updates", icon: "arrow.down.circle", title: "Check for Updates…",
                         action: .run { model.checkForUpdates() }),
         ]
