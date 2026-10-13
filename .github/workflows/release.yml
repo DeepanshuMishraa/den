@@ -31,6 +31,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The app icon PNG is Git LFS; without it bundle.sh gets a pointer
+          # file and sips fails the build.
+          lfs: true
 
       - name: Resolve version from tag
         id: version
