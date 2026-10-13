@@ -115,7 +115,7 @@ extension ProgramKind {
         add(["claude"], "claude", "Claude Code", 0xEC8A6A, 0xD25B3D, .brand(asset: "claude", template: true))
         add(["codex"], "codex", "Codex", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .brand(asset: "codex", template: true))
         add(["gemini"], "gemini", "Gemini", 0xFFFFFF, 0xE4E6EA, .brand(asset: "gemini", template: false))
-        add(["antigravity"], "antigravity", "Antigravity", 0x2B2B2B, 0x0A0A0A, .brand(asset: "antigravity", template: false))
+        add(["antigravity", "agy"], "antigravity", "Antigravity", 0x2B2B2B, 0x0A0A0A, .brand(asset: "antigravity", template: false))
         add(["grok", "xai"], "grok", "Grok", 0xFFFFFF, 0xE3E4E8, ink: 0x0D0D0D, .brand(asset: "grok", template: true))
         add(["opencode"], "opencode", "OpenCode", 0x2B2B2B, 0x0A0A0A, .brand(asset: "opencode", template: true))
         add(["aider"], "aider", "Aider", 0x22C55E, 0x15803D, .monogram("ai"))

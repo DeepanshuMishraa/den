@@ -221,9 +221,11 @@ struct RootView: View {
         if let toast = model.toast {
             VStack {
                 Spacer()
-                ToastView(toast: toast, theme: model.theme, fontFamily: model.uiFontFamily, fontSize: model.uiFontSize - 1,
+                ToastView(toast: toast, theme: model.theme, style: model.effectiveInterfaceStyle,
+                          fontFamily: model.uiFontFamily, fontSize: model.uiFontSize - 1,
                           onAction: { model.performToastAction($0) })
-                    .padding(.bottom, 24)
+                    // Sits on the window's bottom edge, like Rex's pill.
+                    .padding(.bottom, 2)
             }
             .frame(maxWidth: .infinity)
             // Plain confirmations let clicks pass through to the terminal;

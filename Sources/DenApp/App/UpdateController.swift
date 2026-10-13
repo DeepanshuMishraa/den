@@ -133,7 +133,7 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
             phase = .idle
             if let url = appcastItem.infoURL {
                 model?.showActionToast("Den \(version) is available — download it from GitHub",
-                                       actions: [("Open", { NSWorkspace.shared.open(url) })])
+                                       actions: [("Open", nil, { NSWorkspace.shared.open(url) })])
             } else {
                 model?.showToast("Den \(version) is available")
             }
@@ -206,8 +206,8 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
             readyContinuation = continuation
             model?.showActionToast("Update ready — restart Den to finish",
                                    actions: [
-                                       ("Restart", { [weak self] in self?.resumeReady(with: .install) }),
-                                       ("Later", { [weak self] in self?.resumeReady(with: .dismiss) }),
+                                       ("Restart", "cmd+shift+u", { [weak self] in self?.resumeReady(with: .install) }),
+                                       ("Later", "cmd+shift+.", { [weak self] in self?.resumeReady(with: .dismiss) }),
                                    ])
         }
         readyContinuation = nil
@@ -258,8 +258,8 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
             // buttons resume the one Sparkle is already waiting on.
             model?.showActionToast("Update ready — restart Den to finish",
                                    actions: [
-                                       ("Restart", { [weak self] in self?.resumeReady(with: .install) }),
-                                       ("Later", { [weak self] in self?.resumeReady(with: .dismiss) }),
+                                       ("Restart", "cmd+shift+u", { [weak self] in self?.resumeReady(with: .install) }),
+                                       ("Later", "cmd+shift+.", { [weak self] in self?.resumeReady(with: .dismiss) }),
                                    ])
         }
     }

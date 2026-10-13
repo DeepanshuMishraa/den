@@ -197,59 +197,212 @@ struct IconButton: View {
     }
 }
 
-/// A toast that reads as part of the terminal: the terminal's own font and
-/// palette, a flat card with the same hairline border as the panes, and a
-/// plain accent check instead of a badge.
+/// Den's toast: a floating glass pill pinned to the bottom edge of the
+/// window, as in Superlogical's Rex. The pill blurs what is behind it and
+/// tints the blur with the active theme; how much theme shows follows the
+/// interface style (Modern most see-through, Themed opaque). A success
+/// badge, a single-line message that ticks over when it is too long to
+/// fit, and capsule buttons with their shortcuts printed inside.
 struct ToastView: View {
     let toast: AppModel.Toast
     let theme: Theme
+    let style: InterfaceStyle
     let fontFamily: String
     let fontSize: CGFloat
     let onAction: (UUID) -> Void
 
+    /// Success green that reads on both appearances.
+    private var green: Color {
+        theme.isDark
+            ? Color(red: 0.32, green: 0.92, blue: 0.52)
+            : Color(red: 0.03, green: 0.48, blue: 0.24)
+    }
+
     var body: some View {
         let font = Font.custom(fontFamily, size: fontSize)
-        VStack(alignment: .leading, spacing: fontSize * 0.4) {
-            HStack(spacing: fontSize * 0.6) {
-                Text("✓").font(font.weight(.bold)).foregroundStyle(theme.accent)
-                Text(toast.message).font(font).foregroundStyle(theme.foreground.color.opacity(0.88))
+        VStack(spacing: 5) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(green)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(theme.isDark ? Color.black.opacity(0.75) : Color.white)
+                }
+                .frame(width: 24, height: 24)
+                TickerText(text: toast.message, font: font.weight(.semibold), color: toast.actions.isEmpty ? theme.chromeText : green)
+                    .layoutPriority(1)
                 if !toast.actions.isEmpty {
-                    HStack(spacing: fontSize * 0.5) {
-                        ForEach(toast.actions, id: \.id) { action in
-                            Button { onAction(action.id) } label: {
-                                Text(action.label).font(font.weight(.semibold))
+                    HStack(spacing: 8) {
+                        ForEach(Array(toast.actions.enumerated()), id: \.element.id) { index, action in
+                            ToastButton(label: action.label, shortcut: action.shortcut,
+                                        primary: index == 0, theme: theme, green: green, font: font) {
+                                onAction(action.id)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(theme.accent)
-                            .padding(.horizontal, fontSize * 0.55)
-                            .padding(.vertical, fontSize * 0.2)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(theme.accent.opacity(0.5), lineWidth: 1)
-                            )
                         }
                     }
-                    .padding(.leading, fontSize * 0.3)
                 }
             }
             if let progress = toast.progress {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
-                    .tint(theme.accent)
-                    .frame(width: 200)
+                    .tint(green)
+                    .frame(height: 3)
+                    .clipShape(Capsule())
+            } else if toast.isPersistent, toast.actions.isEmpty {
+                // Indeterminate work (checking, installing): a thin bar
+                // under the message keeps the pill visibly alive.
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .tint(green)
+                    .frame(height: 3)
+                    .clipShape(Capsule())
             }
         }
-        .padding(.horizontal, fontSize * 0.9)
-        .padding(.vertical, fontSize * 0.45)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(theme.isDark ? theme.background.lightened(0.05).color : theme.background.darkened(0.03).color)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: 660)
+        .background(toastGlass)
+    }
+
+    /// The glass capsule: blur plus a theme tint whose strength follows the
+    /// interface style, a hairline border and a top highlight.
+    @ViewBuilder
+    private var toastGlass: some View {
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        switch style {
+        case .themed:
+            shape
+                .fill(theme.isDark ? theme.background.lightened(0.06).color : Color.white)
+                .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
+                .overlay(shape.strokeBorder(highlight, lineWidth: 0.5).padding(0.5).opacity(0.6))
+                .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)
+        case .modern, .blended:
+            let tint = theme.isDark
+                ? theme.background.darkened(0.25).color.opacity(style == .modern ? 0.55 : 0.82)
+                : Color.white.opacity(style == .modern ? 0.55 : 0.85)
+            shape
+                .fill(.ultraThinMaterial)
+                .overlay(shape.fill(tint))
+                .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(theme.focusedBorder, lineWidth: 1)
+                    shape.strokeBorder(highlight, lineWidth: 1)
+                        .padding(0.5)
+                        .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: .center))
                 )
-                .shadow(color: .black.opacity(theme.isDark ? 0.25 : 0.06), radius: 6, y: 2)
-        )
+                .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)
+        }
+    }
+
+    private var highlight: Color {
+        theme.isDark ? Color.white.opacity(0.14) : Color.white.opacity(0.9)
+    }
+}
+
+/// One pill button inside the toast. The first button is the green primary
+/// action; the rest are neutral. A shortcut hint prints inside, dimmed.
+private struct ToastButton: View {
+    let label: String
+    let shortcut: String?
+    let primary: Bool
+    let theme: Theme
+    let green: Color
+    let font: Font
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(label).font(font.weight(.semibold))
+                if let shortcut {
+                    Text(shortcut).font(font.weight(.medium)).opacity(0.6)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(fill))
+            .overlay(Capsule().strokeBorder(stroke, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(foreground)
+        .opacity(hovering ? 0.88 : 1)
+        .onHover { hovering = $0 }
+    }
+
+    private var fill: Color {
+        if primary { return green.opacity(theme.isDark ? 0.22 : 0.14) }
+        return theme.isDark ? Color.white.opacity(hovering ? 0.13 : 0.08) : Color.black.opacity(hovering ? 0.09 : 0.06)
+    }
+
+    private var stroke: Color {
+        if primary { return green.opacity(0.45) }
+        return theme.menuBorder
+    }
+
+    private var foreground: Color {
+        primary ? green : theme.chromeText
+    }
+}
+
+/// A single-line message that scrolls like a ticker when it overflows,
+/// with soft fades at the edges while it moves.
+private struct TickerText: View {
+    let text: String
+    let font: Font
+    let color: Color
+    @State private var textWidth: CGFloat = 0
+    @State private var visibleWidth: CGFloat = 0
+    @State private var start = Date()
+
+    private static let speed: CGFloat = 42
+    private static let gap: CGFloat = 56
+
+    private var scrolling: Bool { textWidth > visibleWidth + 1 }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 60)) { context in
+            let offset = x(at: context.date)
+            HStack(spacing: 0) {
+                Text(text).font(font).foregroundStyle(color)
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self, of: \.size.width) { textWidth = $0 }
+                if scrolling {
+                    // Second copy for a seamless wrap.
+                    Text(text).font(font).foregroundStyle(color)
+                        .fixedSize()
+                        .padding(.leading, Self.gap)
+                }
+            }
+            .offset(x: offset)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .mask(fade)
+        }
+        .frame(height: 20)
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { visibleWidth = $0 }
+        .onChange(of: text) { start = Date() }
+    }
+
+    private func x(at date: Date) -> CGFloat {
+        guard scrolling else { return 0 }
+        let elapsed = max(0, date.timeIntervalSince(start) - 1.1)
+        let total = textWidth + Self.gap
+        return -(elapsed * Self.speed).truncatingRemainder(dividingBy: total)
+    }
+
+    @ViewBuilder
+    private var fade: some View {
+        if scrolling {
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: 0.07),
+                .init(color: .black, location: 0.93),
+                .init(color: .clear, location: 1),
+            ], startPoint: .leading, endPoint: .trailing)
+        } else {
+            LinearGradient(colors: [.black], startPoint: .leading, endPoint: .trailing)
+        }
     }
 }
 

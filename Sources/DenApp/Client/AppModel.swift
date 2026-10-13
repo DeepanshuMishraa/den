@@ -121,6 +121,12 @@ final class AppModel {
     struct ToastAction: Equatable {
         let id = UUID()
         let label: String
+        /// Displayed hint inside the button ("⇧⌘U"), if one was given.
+        let shortcut: String?
+        /// Matchable chord for the hint; nil when there is no hint or it
+        /// didn't parse. Checked in `handleKey` so the buttons work from
+        /// the keyboard exactly as shown.
+        let chord: KeyChord?
     }
 
     struct Toast: Equatable {
@@ -186,12 +192,20 @@ final class AppModel {
         }
     }
 
-    /// A toast that stays until one of its buttons is tapped.
-    func showActionToast(_ message: String, actions: [(label: String, handler: () -> Void)]) {
+    /// A toast that stays until one of its buttons is tapped. Each action
+    /// may name a `cmd+shift+u`-style shortcut: it is shown in the button
+    /// (as "⇧⌘U") and fires the button from `handleKey`.
+    func showActionToast(_ message: String, actions: [(label: String, shortcut: String?, handler: () -> Void)]) {
         toastHandlers = [:]
         var toastActions: [ToastAction] = []
-        for (label, handler) in actions {
-            let action = ToastAction(label: label)
+        for (label, shortcut, handler) in actions {
+            let chord: KeyChord?
+            if let shortcut, case .success(let parsed) = KeyChord.parse(shortcut) {
+                chord = parsed
+            } else {
+                chord = nil
+            }
+            let action = ToastAction(label: label, shortcut: chord?.label ?? shortcut, chord: chord)
             toastActions.append(action)
             toastHandlers[action.id] = handler
         }
@@ -239,8 +253,8 @@ final class AppModel {
             case .alreadyLinked:
                 showToast(Self.cliLinkWorks ? "Command line tool already installed" : "The den link exists but is broken — remove ~/.local/bin/den and install again")
             case .occupied:
-                showActionToast("Something else is at ~/.local/bin/den — left alone",
-                                actions: [("Reveal", { NSWorkspace.shared.activateFileViewerSelecting([CLIInstaller.linkURL]) })])
+                showActionToast("Something else is at \(CLIInstaller.linkURL.path) — left alone",
+                                actions: [("Reveal", nil, { NSWorkspace.shared.activateFileViewerSelecting([CLIInstaller.linkURL]) })])
             case .failed(let message):
                 lastError = message
             case .notBundled:
@@ -1386,6 +1400,14 @@ final class AppModel {
     /// when it used the key. The leader pressed twice goes through to the
     /// program.
     func handleKey(keyCode: UInt16, unmodified: String?, flags: NSEvent.ModifierFlags) -> Bool {
+        // A button toast's shortcuts (shown in its buttons) fire first, so
+        // the update's Relaunch/Dismiss keys work even while typing.
+        if let toast, !toast.actions.isEmpty {
+            for action in toast.actions where action.chord?.matches(keyCode: keyCode, unmodified: unmodified, flags: flags) == true {
+                performToastAction(action.id)
+                return true
+            }
+        }
         let digit = KeyChord.digit(unmodified)
         if let entry = numberEntry {
             let held = KeyChord.modifiers(of: flags)
