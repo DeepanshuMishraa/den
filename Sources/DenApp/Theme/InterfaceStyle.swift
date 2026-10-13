@@ -6,8 +6,6 @@ import SwiftUI
 enum InterfaceStyle: String, CaseIterable {
     /// Liquid Glass: the desktop shows through window and panes.
     case modern
-    /// Solid macOS window and text-background colors.
-    case system
     /// The theme tints everything, fully opaque.
     case themed
     /// The theme's colors over a subtle glass backdrop.
@@ -16,7 +14,6 @@ enum InterfaceStyle: String, CaseIterable {
     var title: String {
         switch self {
         case .modern: "Modern"
-        case .system: "System"
         case .themed: "Themed"
         case .blended: "Blended"
         }
@@ -29,7 +26,7 @@ enum InterfaceStyle: String, CaseIterable {
         switch self {
         case .modern: .glass
         case .blended: .blur
-        case .system, .themed: .none
+        case .themed: .none
         }
     }
 }
@@ -61,11 +58,6 @@ struct Surfaces {
             windowTop = theme.windowTop
             windowBottom = theme.windowBottom
             card = AnyShapeStyle(theme.cardGradient)
-        case .system:
-            let window = Color(nsColor: .windowBackgroundColor)
-            windowTop = window
-            windowBottom = window
-            card = AnyShapeStyle(Color(nsColor: .textBackgroundColor))
         case .modern:
             // Most see-through: the desktop's hue reads clearly, but the
             // theme color keeps chrome and text contrast intact.

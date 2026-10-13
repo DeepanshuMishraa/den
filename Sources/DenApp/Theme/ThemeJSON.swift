@@ -175,11 +175,23 @@ enum ThemeJSON {
     }
 
     /// Writes every built-in theme as an example JSON file (dark/light pairs
-    /// share one file), without touching files that already exist — user edits
-    /// win. Lives in `examples/` so the examples don't duplicate the picker.
+    /// share one file), without touching files the user has edited — user
+    /// edits win. Lives in `examples/` so the examples don't duplicate the
+    /// picker.
+    ///
+    /// A manifest (`.den-manifest.json`) records the hash of each file as
+    /// generated, so the next app update can refresh examples whose
+    /// built-ins changed while still leaving user edits alone: a file that
+    /// is missing is written, a file that still matches its manifest entry
+    /// is refreshed to the latest content, and anything else is treated as
+    /// user-modified and preserved. Orphaned examples (a theme renamed or
+    /// removed) are deleted only when unmodified.
     static func exportExamples(to directory: URL) {
-        let fm = FileManager.default
-        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        sync(exampleDocuments(), to: directory)
+    }
+
+    /// The generated example files: filename plus JSON content.
+    static func exampleDocuments() -> [(file: String, data: Data)] {
         var pairs: [(base: String, dark: Theme?, light: Theme?)] = []
         func baseName(_ name: String) -> String {
             if name.hasSuffix(" Dark") { return String(name.dropLast(5)) }
@@ -194,17 +206,82 @@ enum ThemeJSON {
                 pairs.append((base, theme.appearance == .dark ? theme : nil, theme.appearance == .light ? theme : nil))
             }
         }
+        var docs: [(file: String, data: Data)] = []
         for pair in pairs.sorted(by: { $0.base < $1.base }) {
-            let url = directory.appending(path: "\(pair.base).json")
-            guard !fm.fileExists(atPath: url.path) else { continue }
             var doc: [String: Any] = ["name": pair.base]
             for variant in [pair.dark, pair.light].compactMap({ $0 }) {
                 doc[variant.appearance.rawValue] = variantDict(variant)
             }
             if let data = try? JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(to: url)
+                docs.append((file: "\(pair.base).json", data: data))
             }
         }
+        return docs
+    }
+
+    /// Writes `docs` into `directory` per the manifest rules above. Factored
+    /// out from `exportExamples` so updates are testable with fixed content.
+    static func sync(_ docs: [(file: String, data: Data)], to directory: URL) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        var manifest = manifestIn(directory)
+        let generated = Dictionary(uniqueKeysWithValues: docs.map { ($0.file, $0.data) })
+        for (file, data) in docs {
+            let url = directory.appending(path: file)
+            let wanted = hash(data)
+            guard let current = try? Data(contentsOf: url) else {
+                try? data.write(to: url)
+                manifest[file] = wanted
+                continue
+            }
+            // Unmodified (matches the manifest, or already current): refresh.
+            // Anything else is a user edit and stays untouched.
+            if manifest[file] == nil, hash(current) == wanted {
+                manifest[file] = wanted
+            } else if manifest[file] == hash(current), hash(current) != wanted {
+                try? data.write(to: url)
+                manifest[file] = wanted
+            }
+        }
+        // Drop orphaned examples only when unmodified; user edits stay as
+        // the user's own files (and leave the manifest).
+        let orphans = manifest.filter { generated[$0.key] == nil }
+        for (file, recorded) in orphans {
+            let url = directory.appending(path: file)
+            if let current = try? Data(contentsOf: url), hash(current) == recorded {
+                try? fm.removeItem(at: url)
+                manifest.removeValue(forKey: file)
+            } else if (try? Data(contentsOf: url)) == nil {
+                manifest.removeValue(forKey: file)
+            }
+        }
+        writeManifest(manifest, to: directory)
+    }
+
+    private static let manifestFile = ".den-manifest.json"
+
+    private static func manifestIn(_ directory: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: directory.appending(path: manifestFile)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return json
+    }
+
+    private static func writeManifest(_ manifest: [String: String], to directory: URL) {
+        if let data = try? JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]) {
+            try? data.write(to: directory.appending(path: manifestFile))
+        }
+    }
+
+    /// FNV-1a 64-bit, hex. A stable content fingerprint without imports.
+    static func hash(_ data: Data) -> String {
+        var h: UInt64 = 0xcbf29ce484222325
+        for byte in data {
+            h ^= UInt64(byte)
+            h &*= 0x100000001b3
+        }
+        return String(format: "%016llx", h)
     }
 }
 

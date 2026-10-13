@@ -22,13 +22,19 @@ enum CLIInstaller {
     }
 
     /// Never replaces a file or a link to something other than a Den.app.
+    /// Runs on every launch (including the relaunch after a Sparkle update),
+    /// so the link tracks whichever copy of the app is running: same-path
+    /// updates need no relink (the link resolves into the new bundle), and a
+    /// copy launched from a new location takes the link over.
     @discardableResult
     static func install() -> Outcome {
         guard let target = bundledCLI else { return .notBundled }
         let fm = FileManager.default
         let link = linkURL
+        let want = URL(fileURLWithPath: target.path).standardizedFileURL.path
         if let existing = try? fm.destinationOfSymbolicLink(atPath: link.path) {
-            if existing == target.path { return .alreadyLinked }
+            let have = URL(fileURLWithPath: existing).standardizedFileURL.path
+            if have == want { return .alreadyLinked }
             guard existing.hasSuffix(".app/Contents/Resources/bin/den") else { return .occupied }
             try? fm.removeItem(at: link)
         } else if fm.fileExists(atPath: link.path) {

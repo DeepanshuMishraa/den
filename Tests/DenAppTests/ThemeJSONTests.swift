@@ -99,7 +99,8 @@ import Testing
         ThemeJSON.exportExamples(to: dir.appending(path: "examples"))
         let files = try FileManager.default.contentsOfDirectory(at: dir.appending(path: "examples"), includingPropertiesForKeys: nil)
         // 27 dark + 14 light pair into shared files (Merino, Silver Point).
-        #expect(files.count == 39)
+        // The hidden manifest tracks what was generated; it isn't a theme.
+        #expect(files.filter { !$0.lastPathComponent.hasPrefix(".") }.count == 39)
         let merino = try Data(contentsOf: dir.appending(path: "examples/Merino.json"))
         let doc = try #require(JSONSerialization.jsonObject(with: merino) as? [String: Any])
         #expect(doc["dark"] is [String: Any] && doc["light"] is [String: Any])
@@ -108,5 +109,37 @@ import Testing
         try "edited".write(to: keep, atomically: true, encoding: .utf8)
         ThemeJSON.exportExamples(to: dir.appending(path: "examples"))
         #expect(try String(contentsOf: keep, encoding: .utf8) == "edited")
+    }
+
+    @Test func syncRefreshesStaleExamplesButKeepsUserEdits() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "den-theme-sync-\(UUID().uuidString)")
+        let v1 = [(file: "A.json", data: Data("v1".utf8)), (file: "Gone.json", data: Data("gone".utf8))]
+        ThemeJSON.sync(v1, to: dir)
+        // User edits one file after the first sync.
+        try Data("mine".utf8).write(to: dir.appending(path: "A.json"))
+        // v2: A changes upstream, Gone is dropped, B is new.
+        let v2 = [(file: "A.json", data: Data("v2".utf8)), (file: "B.json", data: Data("v2".utf8))]
+        ThemeJSON.sync(v2, to: dir)
+        // User edit wins over the upstream change.
+        #expect(try String(contentsOf: dir.appending(path: "A.json"), encoding: .utf8) == "mine")
+        // New files are added.
+        #expect(try String(contentsOf: dir.appending(path: "B.json"), encoding: .utf8) == "v2")
+        // Unmodified orphans go away with the theme.
+        #expect(!FileManager.default.fileExists(atPath: dir.appending(path: "Gone.json").path))
+    }
+
+    @Test func syncRefreshesUnmodifiedStaleFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "den-theme-sync-\(UUID().uuidString)")
+        ThemeJSON.sync([(file: "A.json", data: Data("v1".utf8))], to: dir)
+        ThemeJSON.sync([(file: "A.json", data: Data("v2".utf8))], to: dir)
+        #expect(try String(contentsOf: dir.appending(path: "A.json"), encoding: .utf8) == "v2")
+    }
+
+    @Test func syncKeepsModifiedOrphans() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "den-theme-sync-\(UUID().uuidString)")
+        ThemeJSON.sync([(file: "Gone.json", data: Data("gone".utf8))], to: dir)
+        try Data("mine".utf8).write(to: dir.appending(path: "Gone.json"))
+        ThemeJSON.sync([], to: dir)
+        #expect(try String(contentsOf: dir.appending(path: "Gone.json"), encoding: .utf8) == "mine")
     }
 }

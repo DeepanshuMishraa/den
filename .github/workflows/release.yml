@@ -126,7 +126,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          SPARKLE_VERSION=2.9.6
+          SPARKLE_VERSION=2.10.0
           curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" -o /tmp/sparkle.tar.xz
           mkdir -p /tmp/sparkle && tar xJf /tmp/sparkle.tar.xz -C /tmp/sparkle
           keyfile="$(mktemp)"; chmod 600 "$keyfile"; printf '%s' "$SPARKLE_PRIVATE_KEY" > "$keyfile"

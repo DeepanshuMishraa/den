@@ -80,7 +80,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>SUFeedURL</key><string>$sparkle_feed</string>
   <key>SUPublicEDKey</key><string>$sparkle_key</string>
-  <key>SUEnableAutomaticChecks</key><false/>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
 </dict>
 </plist>
 PLIST

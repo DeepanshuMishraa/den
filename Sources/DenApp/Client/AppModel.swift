@@ -141,6 +141,23 @@ final class AppModel {
     @ObservationIgnored private var toastHandlers: [UUID: () -> Void] = [:]
 
     func showToast(_ message: String) {
+        // A transient note must not bury an action prompt (notably the
+        // update's Restart button, which Sparkle is waiting on): show it
+        // briefly, then put the prompt back.
+        if let current = toast, !current.actions.isEmpty {
+            let restore = current
+            let restoreHandlers = toastHandlers
+            let next = Toast(message: message)
+            toastHandlers = [:]
+            toast = next
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(1600))
+                guard let self, self.toast?.id == next.id else { return }
+                self.toast = restore
+                self.toastHandlers = restoreHandlers
+            }
+            return
+        }
         toastHandlers = [:]
         let next = Toast(message: message)
         toast = next
@@ -153,6 +170,12 @@ final class AppModel {
     /// Creates or refreshes the update progress toast. A nil message keeps
     /// the current text; a nil progress shows an indeterminate state.
     func showUpdateProgress(_ message: String?, progress: Double?) {
+        if let current = toast, !current.actions.isEmpty {
+            // An action prompt (e.g. the update's Restart button) is showing:
+            // a stale progress push must not replace the choice Sparkle is
+            // waiting on. The driver re-shows the prompt on focus instead.
+            return
+        }
         if var current = toast, current.isPersistent, current.actions.isEmpty {
             if let message { current.message = message }
             current.progress = progress

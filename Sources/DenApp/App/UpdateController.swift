@@ -7,6 +7,12 @@ import Sparkle
 /// download, and a persistent toast with a Restart button once the update is
 /// ready to install.
 ///
+/// Flow: Sparkle detects a new version (manual check, on-launch background
+/// check, or the daily schedule), the driver returns `.install` straight
+/// away so it downloads, then `showReadyToInstallAndRelaunch` waits for the
+/// Restart tap. "Later" dismisses; Sparkle keeps the staged update and
+/// installs it on the next quit.
+///
 /// The app is ad-hoc signed, which is fine: update authenticity comes from
 /// the EdDSA signature (`SUPublicEDKey`), not an Apple certificate. What
 /// ad-hoc can't do is delta updates (full downloads only) and EdDSA key
@@ -29,7 +35,7 @@ final class UpdateController: NSObject {
         super.init()
         guard Bundle.main.bundleURL.pathExtension == "app" else { return }
         let driver = ToastUserDriver(model: model)
-        let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: nil)
+        let updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: self)
         self.driver = driver
         self.updater = updater
         do {
@@ -38,6 +44,13 @@ final class UpdateController: NSObject {
             NSLog("Den updates unavailable: %@", error.localizedDescription)
             self.driver = nil
             self.updater = nil
+            return
+        }
+        // Detect on launch when automatic checks are on (Info.plist
+        // SUEnableAutomaticChecks). Respects the user's preference: if they
+        // turned checks off, this stays quiet.
+        if updater.automaticallyChecksForUpdates {
+            updater.checkForUpdatesInBackground()
         }
     }
 
@@ -51,6 +64,21 @@ final class UpdateController: NSObject {
     }
 }
 
+// MARK: - Diagnostics
+
+extension UpdateController: SPUUpdaterDelegate {
+    nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        guard let error else { return }
+        let check = switch updateCheck {
+        case .updates: "manual"
+        case .updatesInBackground: "background"
+        case .updateInformation: "probe"
+        @unknown default: "unknown"
+        }
+        NSLog("Den: %@ update check finished with error: %@", check, error.localizedDescription)
+    }
+}
+
 /// SPUUserDriver that narrates the update through toasts. Every method runs
 /// on the main thread.
 @MainActor
@@ -59,6 +87,22 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
     private var expectedBytes: UInt64 = 0
     private var receivedBytes: UInt64 = 0
     private var lastProgressPush = Date.distantPast
+    /// What the toast is currently showing, so `showUpdateInFocus` (a second
+    /// "Check for Updates" while one is in flight) can resurface it.
+    private var phase: Phase = .idle
+    /// The Restart/Later choice Sparkle is waiting on, if any. Single-resume
+    /// guarded: re-showing the prompt (focus, toast churn) must not resume
+    /// the same continuation twice.
+    private var readyContinuation: CheckedContinuation<SPUUserUpdateChoice, Never>?
+    private var readyResumed = false
+
+    private enum Phase {
+        case idle
+        case checking
+        case downloading(message: String, progress: Double?)
+        case extracting(progress: Double?)
+        case ready
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -68,7 +112,7 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
     // MARK: Check
 
     func show(_ request: SPUUpdatePermissionRequest) async -> SUUpdatePermissionResponse {
-        // Automatic checks are off (`SUEnableAutomaticChecks = NO`), so this
+        // Automatic checks are on (`SUEnableAutomaticChecks = YES`), so this
         // only matters if that ever changes: allow checks, decline profiling.
         SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false)
     }
@@ -77,12 +121,16 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         // Persistent: a plain toast vanishes after ~1.6s, leaving a gap with
         // nothing on screen while the feed loads, which reads as "checking
         // then nothing". The progress toast stays until the check resolves.
+        // (Only called for manual checks; background checks stay silent
+        // until an update is actually found.)
+        phase = .checking
         model?.showUpdateProgress("Checking for updates…", progress: nil)
     }
 
     func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState) async -> SPUUserUpdateChoice {
         let version = appcastItem.displayVersionString
         if appcastItem.isInformationOnlyUpdate {
+            phase = .idle
             if let url = appcastItem.infoURL {
                 model?.showActionToast("Den \(version) is available — download it from GitHub",
                                        actions: [("Open", { NSWorkspace.shared.open(url) })])
@@ -92,8 +140,13 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
             return .dismiss
         }
         resetProgress()
-        model?.showUpdateProgress("Downloading Den \(version)…", progress: 0)
-        // Straight to downloading: the user asked to check, the feed is ours.
+        let message = "Downloading Den \(version)…"
+        phase = .downloading(message: message, progress: 0)
+        model?.showUpdateProgress(message, progress: 0)
+        NSLog("Den: update found (%@, background=%@), downloading", version, state.userInitiated ? "no" : "yes")
+        // Straight to downloading: the feed is ours, and the restart prompt
+        // comes after the download. Applies to background finds too, so a
+        // new version is already downloaded by the time the user is asked.
         return .install
     }
 
@@ -101,15 +154,15 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
 
     func showUpdateNotFoundWithError(_ error: Error) async {
-        // Automatic checks are off (`SUEnableAutomaticChecks = NO`), so any
-        // call here follows a manual check. Always toast: relying on
-        // `SPUNoUpdateFoundUserInitiatedKey` left users staring at a vanished
-        // "Checking…" toast when the flag was absent.
+        // Only called for user-initiated checks; background checks that find
+        // nothing stay silent.
+        phase = .idle
         NSLog("Den: no update found (%@)", error.localizedDescription)
         model?.showToast("No updates available")
     }
 
     func showUpdaterError(_ error: Error) async {
+        phase = .idle
         NSLog("Den: update failed: %@", error.localizedDescription)
         model?.showToast("Update failed: \(error.localizedDescription)")
     }
@@ -128,40 +181,87 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         let now = Date()
         guard now.timeIntervalSince(lastProgressPush) > 0.15 else { return }
         lastProgressPush = now
+        if case .downloading(let message, _) = phase {
+            phase = .downloading(message: message, progress: progress)
+        }
         model?.showUpdateProgress(nil, progress: progress)
     }
 
     func showDownloadDidStartExtractingUpdate() {
+        phase = .extracting(progress: nil)
         model?.showUpdateProgress("Installing update…", progress: nil)
     }
 
     func showExtractionReceivedProgress(_ progress: Double) {
+        phase = .extracting(progress: progress)
         model?.showUpdateProgress("Installing update…", progress: progress)
     }
 
     func showReadyToInstallAndRelaunch() async -> SPUUserUpdateChoice {
         // Wait for the Restart tap. Dismissing means "later": Sparkle keeps
         // the staged update and installs it on the next quit.
-        await withCheckedContinuation { continuation in
+        phase = .ready
+        readyResumed = false
+        let choice: SPUUserUpdateChoice = await withCheckedContinuation { continuation in
+            readyContinuation = continuation
             model?.showActionToast("Update ready — restart Den to finish",
                                    actions: [
-                                       ("Restart", { continuation.resume(returning: .install) }),
-                                       ("Later", { continuation.resume(returning: .dismiss) }),
+                                       ("Restart", { [weak self] in self?.resumeReady(with: .install) }),
+                                       ("Later", { [weak self] in self?.resumeReady(with: .dismiss) }),
                                    ])
         }
+        readyContinuation = nil
+        if choice == .install {
+            phase = .idle
+        } else {
+            // "Later": the prompt is gone but the staged update remains;
+            // stay idle so a later check starts fresh.
+            phase = .idle
+        }
+        return choice
     }
 
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool,
                               retryTerminatingApplication: @escaping () -> Void) {
+        phase = .idle
         model?.showToast("Installing update…")
     }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool) async {
+        phase = .idle
         model?.dismissToast()
     }
 
     func dismissUpdateInstallation() {
+        // Sparkle aborting or finishing: don't leave a stale prompt behind,
+        // and never leave a pending choice hanging (that would stall the
+        // updater with no UI on screen).
+        phase = .idle
         model?.dismissToast()
+        resumeReady(with: .dismiss)
+    }
+
+    func showUpdateInFocus() {
+        // The user asked to check again while an update is already in
+        // flight: resurface what we're showing instead of going silent.
+        switch phase {
+        case .idle:
+            break
+        case .checking:
+            model?.showUpdateProgress("Checking for updates…", progress: nil)
+        case .downloading(let message, let progress):
+            model?.showUpdateProgress(message, progress: progress)
+        case .extracting(let progress):
+            model?.showUpdateProgress("Installing update…", progress: progress)
+        case .ready:
+            // Re-show the prompt without minting a second continuation: the
+            // buttons resume the one Sparkle is already waiting on.
+            model?.showActionToast("Update ready — restart Den to finish",
+                                   actions: [
+                                       ("Restart", { [weak self] in self?.resumeReady(with: .install) }),
+                                       ("Later", { [weak self] in self?.resumeReady(with: .dismiss) }),
+                                   ])
+        }
     }
 
     // MARK: Helpers
@@ -175,5 +275,14 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         expectedBytes = 0
         receivedBytes = 0
         lastProgressPush = .distantPast
+    }
+
+    /// Resume the pending restart choice exactly once. Late taps (a
+    /// re-shown prompt racing dismissal) are ignored.
+    private func resumeReady(with choice: SPUUserUpdateChoice) {
+        guard !readyResumed, let continuation = readyContinuation else { return }
+        readyResumed = true
+        readyContinuation = nil
+        continuation.resume(returning: choice)
     }
 }
