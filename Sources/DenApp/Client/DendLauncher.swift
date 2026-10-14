@@ -32,6 +32,13 @@ enum DendLauncher {
         posix_spawnattr_init(&attr)
         defer { posix_spawnattr_destroy(&attr) }
         posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        // Without this, macOS counts dend (and every shell under it) as
+        // Den's own process: after ⌘Q the Dock keeps Den's icon with "Stop
+        // running as background service", and that action kills every
+        // session. Disclaimed, dend is its own responsible process, so Den
+        // quits cleanly and reattaches on the next launch. Terminal.app
+        // and iTerm2 do the same for their shells.
+        _ = responsibility_spawnattrs_setdisclaim(&attr, 1)
 
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
@@ -49,3 +56,7 @@ enum DendLauncher {
         }
     }
 }
+
+/// libsystem SPI (no public header), stable since macOS 10.14.
+@_silgen_name("responsibility_spawnattrs_setdisclaim")
+private func responsibility_spawnattrs_setdisclaim(_ attrs: UnsafeMutablePointer<posix_spawnattr_t?>, _ disclaim: Int32) -> Int32

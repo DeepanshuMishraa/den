@@ -221,15 +221,19 @@ struct ToastView: View {
     var body: some View {
         let font = Font.custom(fontFamily, size: fontSize)
         ToastLayout(spacing: 5, maxWidth: 636) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ZStack {
                     Circle().fill(green)
                     Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 9.5, weight: .heavy))
                         .foregroundStyle(theme.isDark ? Color.black.opacity(0.75) : Color.white)
                 }
-                .frame(width: 24, height: 24)
+                .frame(width: 18, height: 18)
+                .padding(.leading, 2)
                 TickerText(text: toast.message, font: font.weight(.semibold), color: toast.actions.isEmpty ? theme.chromeText : green)
+                    // Beside buttons the message gets a short window and
+                    // ticks through it, keeping the pill compact.
+                    .frame(maxWidth: toast.actions.isEmpty ? nil : 170, alignment: .leading)
                     .layoutPriority(1)
                 if !toast.actions.isEmpty {
                     HStack(spacing: 8) {
@@ -258,8 +262,10 @@ struct ToastView: View {
                     .clipShape(Capsule())
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        // Buttons sit close to the rounded end, as capsules nested in a capsule.
+        .padding(.leading, 10)
+        .padding(.trailing, toast.actions.isEmpty ? 14 : 7)
+        .padding(.vertical, 7)
         .background(toastGlass)
     }
 
@@ -388,10 +394,10 @@ private struct TickerTextLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // Every subview must be placed, or SwiftUI centers it in bounds.
+        subviews.first?.place(at: bounds.origin, proposal: .unspecified)
         if subviews.count > 1 {
             subviews[1].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
-        } else if let first = subviews.first {
-            first.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
         }
     }
 }
@@ -410,11 +416,12 @@ private struct TickerText: View {
 
     var body: some View {
         TickerTextLayout {
-            // Index 0: unconstrained measurement of text width
+            // Index 0: unconstrained measurement of text width, never drawn
             Text(text)
                 .font(font)
                 .lineLimit(1)
                 .fixedSize()
+                .hidden()
                 .onGeometryChange(for: CGFloat.self, of: \.size.width) { textWidth = $0 }
 
             // Index 1: placed within visible bounds

@@ -6,6 +6,8 @@ struct RootView: View {
     /// The window's coordinate space, origin top-left: pane frames for ⌘-drag
     /// hit-testing and the drag card are both in it.
     static let space = "den.window"
+    /// Gap between the toast pill and the window edges it sits against.
+    static let toastInset: CGFloat = 16
 
     var body: some View {
         let theme = model.theme
@@ -228,10 +230,10 @@ struct RootView: View {
                           fontFamily: model.uiFontFamily, fontSize: model.uiFontSize - 1,
                           onAction: { model.performToastAction($0) })
                     .frame(maxWidth: .infinity, alignment: position.frameAlignment)
-                    // Side pills keep clear of the window edge; top pills sit
-                    // below the tab bar, bottom pills on the window's edge.
-                    .padding(.horizontal, 12)
-                    .padding(position.isTop ? .top : .bottom, position.isTop ? TitleBar.height + 4 : 2)
+                    // Floats over the panes with the same inset from every
+                    // edge it hugs; top pills start below the tab bar.
+                    .padding(.horizontal, Self.toastInset)
+                    .padding(position.isTop ? .top : .bottom, position.isTop ? TitleBar.height + Self.toastInset : Self.toastInset)
                 if position.isTop {
                     Spacer()
                 }
