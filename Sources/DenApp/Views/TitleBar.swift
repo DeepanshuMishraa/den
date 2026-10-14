@@ -232,12 +232,10 @@ struct TabItem: View {
                         if compact, let status { StatusGlyph(indicator: status.indicator, size: 9).offset(x: 4, y: 4) }
                     }
                 if !compact {
-                    Text(model.tabTitle(tab))
+                    // The tab you're on shows its whole title, flowing, rather than "…".
+                    MarqueeText(text: model.tabTitle(tab), flowing: active && peek == 0)
                         .uiFont(size: 13, weight: active ? .medium : .regular)
                         .foregroundStyle(active ? theme.chromeText : theme.secondaryText)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !compact, hovered || (active && peek == 0) {
                     Button { model.closeTab(tab.id) } label: {

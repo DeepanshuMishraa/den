@@ -162,10 +162,15 @@ public enum UnixSocket {
 /// callers confine it to one queue.
 public final class FDWriter {
     public let fd: Int32
-    private var pending = Data()
+    /// Unsent chunks, oldest first; `offset` bytes of the first are sent.
+    /// Chunks rather than one Data so a partial write costs O(1), not a
+    /// copy of the whole backlog.
+    private var pending: [Data] = []
+    private var head = 0
+    private var offset = 0
     private var source: DispatchSourceWrite?
     private let queue: DispatchQueue
-    public var pendingBytes: Int { pending.count }
+    public private(set) var pendingBytes = 0
     /// Called once when a write fails with an error other than EAGAIN.
     public var onError: ((Int32) -> Void)?
 
@@ -176,17 +181,19 @@ public final class FDWriter {
 
     public func write(_ data: Data) {
         guard !data.isEmpty else { return }
-        if pending.isEmpty {
+        var sent = 0
+        if pendingBytes == 0 {
             let written = data.withUnsafeBytes { sysWrite(fd, $0.baseAddress, $0.count) }
             if written == data.count { return }
             if written < 0, errno != EAGAIN, errno != EINTR {
                 onError?(errno)
                 return
             }
-            pending.append(data.dropFirst(max(written, 0)))
-        } else {
-            pending.append(data)
+            sent = max(written, 0)
+            offset = sent
         }
+        pending.append(data)
+        pendingBytes += data.count - sent
         armSource()
     }
 
@@ -199,25 +206,45 @@ public final class FDWriter {
     }
 
     private func flush() {
-        while !pending.isEmpty {
-            let written = pending.withUnsafeBytes { sysWrite(fd, $0.baseAddress, $0.count) }
+        while head < pending.count {
+            let chunk = pending[head]
+            let written = chunk.withUnsafeBytes { raw in
+                sysWrite(fd, raw.baseAddress.map { $0 + offset }, raw.count - offset)
+            }
             if written > 0 {
-                pending.removeFirst(written)
+                pendingBytes -= written
+                offset += written
+                if offset == chunk.count {
+                    head += 1
+                    offset = 0
+                    // Drop sent chunks now and then rather than on every write.
+                    if head >= 64, head * 2 >= pending.count {
+                        pending.removeFirst(head)
+                        head = 0
+                    }
+                }
             } else if written < 0, errno == EAGAIN || errno == EINTR {
                 return
             } else {
                 onError?(errno)
-                pending.removeAll()
                 break
             }
         }
+        clear()
         source?.cancel()
         source = nil
+    }
+
+    private func clear() {
+        pending.removeAll()
+        head = 0
+        offset = 0
+        pendingBytes = 0
     }
 
     public func cancel() {
         source?.cancel()
         source = nil
-        pending.removeAll()
+        clear()
     }
 }

@@ -489,6 +489,93 @@ enum KeyboardFocus {
     }
 }
 
+/// One line of text that, while `flowing` and too wide for its space, drifts
+/// left in a seamless loop instead of ending in "…": a pause to read the
+/// start, then two copies a gap apart scroll by under faded edges. Otherwise,
+/// and under Reduce Motion, it truncates like any label. Font and color come
+/// from the environment.
+struct MarqueeText: View {
+    let text: String
+    let flowing: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var textWidth: CGFloat = 0
+    @State private var boxWidth: CGFloat = 0
+
+    var body: some View {
+        let flows = flowing && !reduceMotion && boxWidth > 0 && textWidth > boxWidth + 0.5
+        Text(text)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(flows ? 0 : 1)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
+            .background(alignment: .leading) {
+                // Natural width, measured without affecting layout.
+                Text(text)
+                    .fixedSize()
+                    .hidden()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+            }
+            .overlay(alignment: .leading) {
+                if flows {
+                    MarqueeStrip(text: text, distance: textWidth + MarqueeStrip.gap)
+                        .frame(width: boxWidth, alignment: .leading)
+                        .mask(MarqueeStrip.edgeFade)
+                        // A new title or width starts the loop over.
+                        .id(MarqueeStrip.Key(text: text, textWidth: textWidth))
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
+            }
+            .animation(.denFast, value: flows)
+    }
+}
+
+/// The moving part of `MarqueeText`.
+private struct MarqueeStrip: View {
+    struct Key: Hashable {
+        let text: String
+        let textWidth: CGFloat
+    }
+
+    static let gap: CGFloat = 32
+    /// Points per second: slow enough to read along.
+    static let speed: CGFloat = 32
+    /// Rest at the start of every pass.
+    static let pause: Double = 1.4
+
+    static let edgeFade = LinearGradient(
+        stops: [
+            .init(color: .clear, location: 0),
+            .init(color: .black, location: 0.06),
+            .init(color: .black, location: 0.86),
+            .init(color: .clear, location: 1),
+        ],
+        startPoint: .leading, endPoint: .trailing
+    )
+
+    let text: String
+    /// One copy plus the gap: shifting this far looks like no shift at all.
+    let distance: CGFloat
+    @State private var shift: CGFloat = 0
+
+    var body: some View {
+        HStack(spacing: Self.gap) {
+            Text(text).fixedSize()
+            Text(text).fixedSize()
+        }
+        .lineLimit(1)
+        .offset(x: shift)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+        .onAppear {
+            withAnimation(.linear(duration: distance / Self.speed).delay(Self.pause).repeatForever(autoreverses: false)) {
+                shift = -distance
+            }
+        }
+    }
+}
+
 /// The springs Den uses throughout: quick and slightly soft.
 extension Animation {
     static let den = Animation.spring(response: 0.3, dampingFraction: 0.86)

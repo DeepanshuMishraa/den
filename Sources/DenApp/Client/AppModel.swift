@@ -458,8 +458,8 @@ final class AppModel {
     func connect() async {
         connectionState = .connecting
         do {
-            let fd = try await DendLauncher.connect()
-            await attach(fd: fd, to: .local) { [weak self] reason in self?.connectionClosed(.local, reason) }
+            let fd = if let running = DendLauncher.connectExisting() { running } else { try await DendLauncher.connect() }
+            attach(fd: fd, to: .local) { [weak self] reason in self?.connectionClosed(.local, reason) }
         } catch {
             connectionState = .disconnected(error.description)
         }
@@ -470,14 +470,12 @@ final class AppModel {
         }
     }
 
-    private func attach(fd: Int32, to host: HostID, closed: @escaping DenConnection.Closed) async {
+    private func attach(fd: Int32, to host: HostID, closed: @escaping DenConnection.Closed) {
         let conn = DenConnection(fd: fd, deliver: { [weak self] batch in self?.receive(batch, from: host) }, closed: closed)
         connections[host] = conn
-        await conn.start()
         // The oldest version we speak, so an older running dend still
         // accepts us; its welcome says what it can do.
-        conn.send(.hello(version: minimumProtocolVersion, client: "Den.app"))
-        conn.send(.subscribe)
+        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app"), .subscribe])
     }
 
     /// Sends to the dend that owns what the message is about.
@@ -550,8 +548,32 @@ final class AppModel {
 
     // MARK: Server messages
 
-    private func receive(_ batch: [ServerMessage], from host: HostID) {
-        for message in batch { handle(message, from: host) }
+    private func receive(_ batch: [Incoming], from host: HostID) {
+        for incoming in batch {
+            switch incoming {
+            case .message(let message): handle(message, from: host)
+            case .snapshot(let id, let restored): restore(id, restored)
+            }
+        }
+    }
+
+    private func restore(_ id: PaneID, _ restored: Result<RestoredTerminal, VTError>) {
+        statusSyncPending.insert(id)
+        switch restored {
+        case .success(let restored):
+            if let existing = replicas[id] {
+                existing.reset(terminal: restored.terminal)
+            } else {
+                let replica = PaneReplica(id: id, terminal: restored.terminal, theme: theme, contrastCorrection: contrastCorrection)
+                replica.onTitleChange = { [weak self] title in self?.titles[id] = title }
+                replica.onBell = { [weak self] in self?.markActivity(id) }
+                replicas[id] = replica
+                titles[id] = replica.terminal.title
+                lastSeen[id] = Date()
+            }
+        case .failure(let error):
+            lastError = "Could not restore a pane from dend's snapshot: \(error). The pane keeps running in dend; restart Den to resync."
+        }
     }
 
     private func handle(_ message: ServerMessage, from host: HostID) {
@@ -610,22 +632,9 @@ final class AppModel {
         case .directoryListing(let request, let path, let entries):
             listings.removeValue(forKey: request)?.reply.resume(returning: (path, entries))
 
-        case .paneSnapshot(let id, let bytes):
-            statusSyncPending.insert(id)
-            do {
-                if let existing = replicas[id] {
-                    try existing.reset(snapshot: bytes)
-                } else {
-                    let replica = try PaneReplica(id: id, snapshot: bytes, theme: theme, contrastCorrection: contrastCorrection)
-                    replica.onTitleChange = { [weak self] title in self?.titles[id] = title }
-                    replica.onBell = { [weak self] in self?.markActivity(id) }
-                    replicas[id] = replica
-                    titles[id] = replica.terminal.title
-                    lastSeen[id] = Date()
-                }
-            } catch {
-                lastError = "Could not restore a pane from dend's snapshot: \(error). The pane keeps running in dend; restart Den to resync."
-            }
+        case .paneSnapshot:
+            // DenConnection restores snapshots and delivers them as `.snapshot`.
+            break
 
         case .paneOutput(let id, let bytes):
             // Output means the attach sync is over (an older dend sends no
@@ -937,7 +946,7 @@ final class AppModel {
         case .success(let channel):
             guard attempts[id] == attempt else { return channel.terminate() }
             channels[id] = channel
-            await attach(fd: channel.fd, to: .remote(id)) { [weak self] reason in
+            attach(fd: channel.fd, to: .remote(id)) { [weak self] reason in
                 self?.remoteClosed(id, attempt: attempt, reason: reason, channel: channel)
             }
         }

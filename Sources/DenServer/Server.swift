@@ -369,7 +369,7 @@ public actor DenServer {
                 case .vt: .vt
                 case .html: .html
                 }
-                return .text(try pane.terminal.format(vtFormat))
+                return .text(try pane.engine.sync { t in Result { () throws(VTError) in try t.format(vtFormat) } }.get())
             } catch {
                 return .failed("Formatting \(id) failed: \(error). The pane is unaffected.")
             }
@@ -388,7 +388,7 @@ public actor DenServer {
                     let (child, foreground) = pane.processes()
                     return PaneState(
                         id: id, label: pane.label, command: pane.command, keepOpen: pane.keepOpen,
-                        process: pane.meta.process, cwd: pane.meta.cwd, title: pane.terminal.title,
+                        process: pane.meta.process, cwd: pane.meta.cwd, title: pane.title,
                         cols: pane.size.cols, rows: pane.size.rows, createdAt: pane.createdAt,
                         child: child, foreground: foreground, exit: pane.exit
                     )
@@ -468,7 +468,10 @@ public actor DenServer {
 
     private func sendSnapshot(_ pane: Pane, to conn: ClientConnection) {
         do {
-            send(.paneSnapshot(pane.id, try pane.terminal.snapshot()), to: conn)
+            // Waits for the engine to parse everything already broadcast, so
+            // the snapshot lines up with the next output this client gets.
+            let snapshot = try pane.engine.sync { t in Result { () throws(VTError) in try t.snapshot() } }.get()
+            send(.paneSnapshot(pane.id, snapshot), to: conn)
             send(.paneMeta(pane.id, pane.meta), to: conn)
             // Always, even empty: clients treat this first one as a sync, not news.
             send(.programStatus(pane.id, pane.status.records), to: conn)
@@ -484,14 +487,23 @@ public actor DenServer {
         panes[id] = pane
         paneSession[id] = session.id
         let sid = session.id
-        pane.terminal.effects.bell = { [self] in assumeIsolated { $0.emit(.paneBell(session: sid, pane: id)) } }
+        // Effects fire on the engine queue; hop to dend's queue for state.
+        let queue = queue
+        pane.engine.setEffects(VTEffects(
+            writeBack: { [self] bytes in
+                let reply = Data(bytes)
+                queue.async { [self] in assumeIsolated { $0.panes[id]?.ptyWriter.write(reply) } }
+            },
+            bell: { [self] in queue.async { [self] in assumeIsolated { $0.emit(.paneBell(session: sid, pane: id)) } } }
+        ), onTitle: { [self] title in
+            queue.async { [self] in assumeIsolated { $0.panes[id]?.title = title } }
+        })
 
-        let master = pane.master
-        let read = DispatchSource.makeReadSource(fileDescriptor: master, queue: queue)
-        read.setEventHandler { [self] in assumeIsolated { $0.paneReadable(id) } }
-        read.setCancelHandler { close(master) }
-        read.resume()
-        pane.readSource = read
+        let reader = try PaneReader(fd: pane.master) { [self] in
+            queue.async { [self] in assumeIsolated { $0.paneReadable(id) } }
+        }
+        pane.reader = reader
+        reader.start(name: "dend.pty.\(id.raw.uuidString.prefix(8))")
 
         let pid = pane.pid
         #if os(Linux)
@@ -515,35 +527,42 @@ public actor DenServer {
     }
 
     private func paneReadable(_ id: PaneID) {
-        guard let pane = panes[id] else { return }
-        var chunk = Data()
-        // Coalesce bursts into one message, but yield regularly so one noisy
-        // pane cannot starve the others.
-        for _ in 0 ..< 8 {
-            let n = readBuffer.withUnsafeMutableBytes { read(pane.master, $0.baseAddress, $0.count) }
-            if n > 0 {
-                chunk.append(contentsOf: readBuffer[0 ..< n])
-                continue
-            }
-            if n < 0, errno == EAGAIN || errno == EINTR { break }
-            // EOF or EIO: the PTY slave side is gone; exit handling follows.
-            pane.readSource?.cancel()
-            break
-        }
+        guard let pane = panes[id], let reader = pane.reader else { return }
+        let chunk = reader.take()
         guard !chunk.isEmpty else { return }
         // Before the VT engine: a status query's reply must go out ahead of
         // the DA reply a program sends right after it.
         applyStatus(pane.statusScanner.feed(chunk), to: pane)
         // Echo of what the user just typed isn't the agent working.
         if Date().timeIntervalSince(pane.lastInput) > Self.echoWindow { pane.agentOutput = true }
-        pane.terminal.write(chunk)
         broadcast(.paneOutput(id, chunk))
+        feedEngine(pane, chunk)
+    }
+
+    /// Hands output to the pane's engine. Clients already have it, so
+    /// parsing overlaps the next PTY read instead of gating it.
+    /// `fromPTY` is false for text dend adds itself (the exit note), which the
+    /// reader never counted.
+    private func feedEngine(_ pane: Pane, _ bytes: Data, fromPTY: Bool = true) {
+        let count = bytes.count
+        let reader = fromPTY ? pane.reader : nil
+        pane.engine.write(bytes) { reader?.release(count) }
     }
 
     private func paneProcessExited(_ id: PaneID, pid: pid_t, reaped: Int32? = nil) {
         var status: Int32 = reaped ?? 0
         if reaped == nil { waitpid(pid, &status, WNOHANG) }
         log("\(id) process \(pid) exited with status \(status)")
+        guard let pane = panes[id], !pane.stopped, let reader = pane.reader else { return }
+        let exitStatus = status
+        // The program's last output goes out before its exit is reported.
+        let queue = queue
+        reader.flush { [self] in
+            queue.async { [self] in assumeIsolated { $0.finishExit(id, pid: pid, status: exitStatus) } }
+        }
+    }
+
+    private func finishExit(_ id: PaneID, pid: pid_t, status: Int32) {
         guard let pane = panes[id], !pane.stopped else { return }
         paneReadable(id)
         let exit = ExitState(waitStatus: status)
@@ -562,8 +581,8 @@ public actor DenServer {
         case .signal(let signal): "\r\n[process killed by signal \(signal)]\r\n"
         }
         let bytes = Data(note.utf8)
-        pane.terminal.write(bytes)
         broadcast(.paneOutput(id, bytes))
+        feedEngine(pane, bytes, fromPTY: false)
         DispatchQueue.global().async {
             var status: Int32 = 0
             waitpid(pid, &status, 0)
@@ -625,7 +644,7 @@ public actor DenServer {
                 broadcast(.paneMeta(id, meta))
                 if let sid = paneSession[id] { emit(.paneProcessChanged(session: sid, pane: id, process: meta.process, cwd: meta.cwd)) }
             }
-            let title = pane.terminal.title
+            let title = pane.title
             if title != pane.lastTitle {
                 pane.lastTitle = title
                 if let sid = paneSession[id] { emit(.paneTitleChanged(session: sid, pane: id, title: title)) }
@@ -677,7 +696,7 @@ public actor DenServer {
             return
         }
         var inference = pane.agentInference ?? AgentStatusInference()
-        let phase = inference.tick(output: output, title: pane.terminal.title)
+        let phase = inference.tick(output: output, title: pane.title)
         pane.agentInference = inference
         guard let phase else { return }
         pane.status.apply(.update(StatusRecord(id: Self.inferredID, phase: phase, app: pane.meta.process)))

@@ -27,6 +27,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // dend, so `den` works inside Den regardless.
         let model = AppModel(systemIsDark: Self.isDark(NSApp.effectiveAppearance))
         self.model = model
+        // Before building the window, so dend's snapshot is on its way while
+        // SwiftUI lays out. Immediate, where available, so the connect and
+        // handshake happen now rather than after this method returns.
+        let start = { @MainActor in
+            await model.connect()
+            #if DEBUG
+            await self.applyDebugUIState(model)
+            #endif
+        }
+        if #available(macOS 26, *) {
+            Task.immediate { await start() }
+        } else {
+            Task { await start() }
+        }
         NSApp.mainMenu = buildMenu(model)
         model.configDidChange = { [weak self, weak model] in
             guard let self, let model else { return }
@@ -50,12 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 model.systemAppearanceChanged(isDark: Self.isDark(NSApp.effectiveAppearance))
             }
-        }
-        Task {
-            await model.connect()
-            #if DEBUG
-            await applyDebugUIState(model)
-            #endif
         }
     }
 

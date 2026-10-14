@@ -1,5 +1,20 @@
 import Foundation
 import DenProtocol
+import DenVT
+import Synchronization
+
+/// A terminal restored on the connection queue and handed to the main
+/// actor, which owns it from then on. Never used from two places at once.
+struct RestoredTerminal: @unchecked Sendable {
+    let terminal: VTTerminal
+}
+
+/// A server message as the app receives it: pane snapshots arrive already
+/// restored, so the main thread never decodes scrollback.
+enum Incoming: Sendable {
+    case message(ServerMessage)
+    case snapshot(PaneID, Result<RestoredTerminal, VTError>)
+}
 
 /// Socket IO for one dend connection. Reads and writes happen on a private
 /// serial queue; decoded messages are delivered to the main actor in order.
@@ -7,7 +22,7 @@ actor DenConnection {
     private let queue = DispatchSerialQueue(label: "den.connection")
     nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
-    typealias Deliver = @MainActor @Sendable ([ServerMessage]) -> Void
+    typealias Deliver = @MainActor @Sendable ([Incoming]) -> Void
     typealias Closed = @MainActor @Sendable (String) -> Void
 
     private let fd: Int32
@@ -39,6 +54,17 @@ actor DenConnection {
         self.source = source
     }
 
+    /// Starts IO and sends `greeting` first, from any context without
+    /// waiting for the actor, so a handshake can go out mid-launch.
+    nonisolated func open(greeting: [ClientMessage]) {
+        queue.async { [self] in
+            assumeIsolated { conn in
+                conn.start()
+                for message in greeting { conn.write(message) }
+            }
+        }
+    }
+
     /// Enqueues a message. Callable from any context; messages are written in
     /// call order, which keeps keystrokes ordered.
     nonisolated func send(_ message: ClientMessage) {
@@ -65,8 +91,30 @@ actor DenConnection {
             return shutdown("dend sent data this client cannot read (\(error)). Restart Den to reconnect.")
         }
         guard !batch.isEmpty else { return }
+        let incoming = Self.restoreSnapshots(batch)
         let deliver = deliver
-        DispatchQueue.main.async { MainActor.assumeIsolated { deliver(batch) } }
+        DispatchQueue.main.async { MainActor.assumeIsolated { deliver(incoming) } }
+    }
+
+    /// Restores every snapshot in `batch`, in parallel: an attach sends one
+    /// per pane, each with its full scrollback.
+    private static func restoreSnapshots(_ batch: [ServerMessage]) -> [Incoming] {
+        let snapshots = batch.indices.filter { if case .paneSnapshot = batch[$0] { true } else { false } }
+        guard !snapshots.isEmpty else { return batch.map(Incoming.message) }
+        let slots = Mutex([Result<RestoredTerminal, VTError>?](repeating: nil, count: snapshots.count))
+        DispatchQueue.concurrentPerform(iterations: snapshots.count) { i in
+            guard case .paneSnapshot(_, let bytes) = batch[snapshots[i]] else { return }
+            let result = Result { () throws(VTError) in RestoredTerminal(terminal: try VTTerminal(snapshot: bytes)) }
+            slots.withLock { $0[i] = result }
+        }
+        let restored = slots.withLock { $0 }
+        var next = 0
+        return batch.enumerated().map { index, message in
+            guard next < snapshots.count, snapshots[next] == index, case .paneSnapshot(let id, _) = message,
+                  let result = restored[next] else { return .message(message) }
+            next += 1
+            return .snapshot(id, result)
+        }
     }
 
     private func shutdown(_ reason: String) {

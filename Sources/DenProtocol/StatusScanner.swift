@@ -31,8 +31,26 @@ public struct StatusScanner: Sendable {
 
     public mutating func feed(_ bytes: some Sequence<UInt8>) -> [Event] {
         var events: [Event] = []
-        for byte in bytes { step(byte, into: &events) }
+        // This runs over every PTY byte ahead of the VT engine, so skip
+        // ground-state runs with memchr instead of stepping byte by byte.
+        let scanned: Void? = bytes.withContiguousStorageIfAvailable { scan($0, into: &events) }
+        if scanned == nil {
+            for byte in bytes { step(byte, into: &events) }
+        }
         return events
+    }
+
+    private mutating func scan(_ buf: UnsafeBufferPointer<UInt8>, into events: inout [Event]) {
+        guard let base = buf.baseAddress else { return }
+        var i = 0
+        while i < buf.count {
+            if state == .ground {
+                guard let hit = memchr(base + i, 0x1B, buf.count - i) else { return }
+                i = UnsafeRawPointer(hit).assumingMemoryBound(to: UInt8.self) - base
+            }
+            step(base[i], into: &events)
+            i += 1
+        }
     }
 
     private mutating func step(_ byte: UInt8, into events: inout [Event]) {

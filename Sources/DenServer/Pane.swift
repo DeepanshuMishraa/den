@@ -24,7 +24,9 @@ final class Pane {
     let id: PaneID
     let pid: pid_t
     let master: Int32
-    let terminal: VTTerminal
+    let engine: PaneEngine
+    /// Latest OSC 0/2 title, kept current from the engine queue.
+    var title: String?
     private(set) var size: GridSize
     var meta: PaneMeta
     /// OSC 7501 records this pane's programs reported.
@@ -43,7 +45,7 @@ final class Pane {
     var agentOutput = false
     var lastInput = Date.distantPast
     let ptyWriter: FDWriter
-    var readSource: DispatchSourceRead?
+    var reader: PaneReader?
     var exitSource: DispatchSourceProtocol?
 
     var label: String?
@@ -104,17 +106,19 @@ final class Pane {
         self.command = launch.command
         self.keepOpen = launch.keepOpen
         self.meta = PaneMeta(process: launch.command.first.map { ($0 as NSString).lastPathComponent } ?? shellName, cwd: directory)
-        self.terminal = try VTTerminal(cols: size.cols, rows: size.rows)
+        let terminal = try VTTerminal(cols: size.cols, rows: size.rows)
         try terminal.resize(cols: size.cols, rows: size.rows, cellWidthPx: size.cellWidthPx, cellHeightPx: size.cellHeightPx)
+        self.engine = PaneEngine(terminal, label: "dend.pane.\(id.raw.uuidString.prefix(8))")
         self.ptyWriter = FDWriter(fd: masterFD, queue: queue)
-
-        let writer = ptyWriter
-        terminal.effects = VTEffects(writeBack: { bytes in writer.write(Data(bytes)) })
     }
 
     func resize(_ newSize: GridSize) throws {
         guard newSize != size else { return }
-        try terminal.resize(cols: newSize.cols, rows: newSize.rows, cellWidthPx: newSize.cellWidthPx, cellHeightPx: newSize.cellHeightPx)
+        try engine.sync { t in
+            Result { () throws(VTError) in
+                try t.resize(cols: newSize.cols, rows: newSize.rows, cellWidthPx: newSize.cellWidthPx, cellHeightPx: newSize.cellHeightPx)
+            }
+        }.get()
         // A stopped pane's master fd is closed and its number may be reused.
         if !stopped {
             _ = den_pty_resize(master, newSize.cols, newSize.rows,
@@ -182,7 +186,7 @@ final class Pane {
     func terminate() {
         guard !stopped else { return }
         stopped = true
-        readSource?.cancel()
+        reader?.stop()
         exitSource?.cancel()
         ptyWriter.cancel()
         kill(-pid, SIGHUP)

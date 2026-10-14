@@ -128,6 +128,27 @@ import Testing
         #expect(events == [.status(.update(StatusRecord(phase: .done)))])
     }
 
+    @Test func scannerMatchesByteAtATimeOnRandomStreams() {
+        // Fragments that drive every state, glued at random and split at
+        // random so chunk edges land inside sequences.
+        let pieces = ["plain text ", "\u{1B}[31m", "\u{1B}]7501;state=done\u{07}", "\u{1B}]133;A\u{1B}\\",
+                      "\u{1B}c", "\u{1B}]0;t\u{1B}x", "\u{1B}\u{1B}]133;A\u{07}", "\u{18}", "é漢😀", "\u{1B}]7501;?\u{1B}\\"]
+        var rng = SplitMix64(seed: 7501)
+        for _ in 0 ..< 200 {
+            let stream = Array((0 ..< 40).map { _ in pieces[Int(rng.next() % UInt64(pieces.count))] }.joined().utf8)
+            var whole = StatusScanner(), single = StatusScanner()
+            var chunked: [StatusScanner.Event] = [], bytewise: [StatusScanner.Event] = []
+            var i = 0
+            while i < stream.count {
+                let end = min(stream.count, i + 1 + Int(rng.next() % 64))
+                chunked += whole.feed(Data(stream[i ..< end]))
+                i = end
+            }
+            for byte in stream { bytewise += single.feed([byte]) }
+            #expect(chunked == bytewise)
+        }
+    }
+
     @Test func abortedOSCHandsItsEscapeOn() {
         var scanner = StatusScanner()
         let events = scanner.feed(Array("\u{1B}]7501;state=done\u{1B}c".utf8))
@@ -175,5 +196,18 @@ import Testing
 
     @Test func headlineOfNothingIsNil() {
         #expect(StatusRecords().headline == nil)
+    }
+}
+
+/// Seeded, so a failing random stream reproduces.
+struct SplitMix64: RandomNumberGenerator {
+    var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

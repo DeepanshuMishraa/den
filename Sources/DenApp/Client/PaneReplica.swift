@@ -16,11 +16,12 @@ final class PaneReplica {
     /// Several views (the pane, its peek and exposé thumbnails) can watch one replica.
     private var observers: [ObjectIdentifier: () -> Void] = [:]
 
-    init(id: PaneID, snapshot: Data, theme: Theme, contrastCorrection: Bool) throws(VTError) {
+    /// `terminal` was restored from dend's snapshot, off the main thread.
+    init(id: PaneID, terminal: VTTerminal, theme: Theme, contrastCorrection: Bool) {
         self.id = id
         self.theme = theme
         self.contrastCorrection = contrastCorrection
-        terminal = try VTTerminal(snapshot: snapshot)
+        self.terminal = terminal
         configure()
     }
 
@@ -32,8 +33,8 @@ final class PaneReplica {
         observers.removeValue(forKey: ObjectIdentifier(owner))
     }
 
-    func reset(snapshot: Data) throws(VTError) {
-        terminal = try VTTerminal(snapshot: snapshot)
+    func reset(terminal: VTTerminal) {
+        self.terminal = terminal
         configure()
         changed()
     }

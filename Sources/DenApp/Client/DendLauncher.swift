@@ -8,13 +8,21 @@ enum DendLauncher {
         let description: String
     }
 
+    /// The running dend, without suspending: launch uses it to handshake
+    /// before the window is built.
+    static func connectExisting() -> Int32? {
+        try? UnixSocket.connect(DenPaths.socket.path)
+    }
+
     static func connect() async throws(LaunchError) -> Int32 {
         let path = DenPaths.socket.path
-        if let fd = try? UnixSocket.connect(path) { return fd }
+        if let fd = connectExisting() { return fd }
 
         try spawn()
-        for _ in 0 ..< 60 {
-            try? await Task.sleep(for: .milliseconds(50))
+        // dend listens a few ms after spawn; poll finely so launch doesn't
+        // sit out a coarse interval.
+        for _ in 0 ..< 600 {
+            try? await Task.sleep(for: .milliseconds(5))
             if let fd = try? UnixSocket.connect(path) { return fd }
         }
         throw LaunchError(description: "dend did not start listening on \(path) within 3 seconds. See \(DenPaths.log.path) for its output.")
