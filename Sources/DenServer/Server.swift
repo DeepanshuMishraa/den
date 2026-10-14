@@ -156,14 +156,14 @@ public actor DenServer {
     }
 
     private func send(_ message: ServerMessage, to conn: ClientConnection) {
-        conn.writer.write(Frame.wrap(message.encode()))
+        conn.writer.write(message.framed())
         if conn.writer.pendingBytes > Self.maxClientBacklog {
             disconnect(conn.id, reason: "client fell \(conn.writer.pendingBytes) bytes behind")
         }
     }
 
     private func broadcast(_ message: ServerMessage) {
-        let frame = Frame.wrap(message.encode())
+        let frame = message.framed()
         for conn in connections.values where conn.subscribed {
             conn.writer.write(frame)
             if conn.writer.pendingBytes > Self.maxClientBacklog {
@@ -173,7 +173,7 @@ public actor DenServer {
     }
 
     private func broadcastSessions() {
-        let frame = Frame.wrap(ServerMessage.sessions(sessions.map(\.summary)).encode())
+        let frame = ServerMessage.sessions(sessions.map(\.summary)).framed()
         for conn in connections.values { conn.writer.write(frame) }
     }
 

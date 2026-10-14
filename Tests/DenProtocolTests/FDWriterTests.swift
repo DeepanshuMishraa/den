@@ -3,6 +3,18 @@ import Testing
 @testable import DenProtocol
 
 @Suite struct FDWriterTests {
+    @Test func framedMatchesWrappedEncoding() {
+        let id = PaneID()
+        let messages: [ServerMessage] = [
+            .paneOutput(id, Data((0 ..< 70_000).map { UInt8(truncatingIfNeeded: $0) })),
+            .paneOutput(id, Data()),
+            .paneSnapshot(id, Data("snap".utf8)),
+            .sessionClosed(SessionID()),
+            .error("x"),
+        ]
+        for m in messages { #expect(m.framed() == Frame.wrap(m.encode())) }
+    }
+
     /// Frames come back intact however the stream is split, including past
     /// the decoder's compaction point.
     @Test func decoderSplitsFramesAcrossArbitraryReads() throws {

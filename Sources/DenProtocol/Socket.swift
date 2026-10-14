@@ -116,11 +116,20 @@ public enum UnixSocket {
         return fd
     }
 
+    /// Socket buffer per direction. macOS defaults Unix sockets to 8KB, so a
+    /// flood of pane output crossed to the client 8KB per wakeup.
+    static let bufferBytes: Int32 = 2 * 1024 * 1024
+
     public static func configure(_ fd: Int32, path: String) throws(SocketError) {
         #if canImport(Darwin)
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         #endif
+        // Best effort: the kernel caps it (kern.ipc.maxsockbuf), and a
+        // smaller buffer only costs throughput.
+        var size = bufferBytes
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
         let flags = fcntl(fd, F_GETFL)
         guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
             throw SocketError(operation: "fcntl O_NONBLOCK", path: path, errno: errno)

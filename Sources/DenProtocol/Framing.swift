@@ -29,16 +29,19 @@ public struct FrameDecoder: Sendable {
     public init() {}
 
     public mutating func append(_ bytes: Data) {
+        bytes.withUnsafeBytes { append($0) }
+    }
+
+    /// Straight from a read buffer, without an intermediate Data.
+    public mutating func append(_ bytes: UnsafeRawBufferPointer) {
         if consumed > 0, consumed == buffer.count {
-            buffer = bytes
+            buffer.removeAll(keepingCapacity: true)
             consumed = 0
-            return
-        }
-        if consumed >= 64 * 1024 {
+        } else if consumed >= 64 * 1024 {
             buffer.removeSubrange(buffer.startIndex ..< buffer.startIndex + consumed)
             consumed = 0
         }
-        buffer.append(bytes)
+        buffer.append(contentsOf: bytes)
     }
 
     /// Returns the next complete payload, nil when more bytes are needed.

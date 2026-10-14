@@ -250,6 +250,23 @@ extension ClientMessage {
 extension ServerMessage {
     public func encode() -> Data {
         var w = BinaryWriter()
+        encode(into: &w)
+        return w.data
+    }
+
+    /// `Frame.wrap(encode())` without the extra copy; the pane output hot
+    /// path sends every PTY byte through this.
+    public func framed() -> Data {
+        let payload = switch self {
+        case .paneOutput(_, let bytes), .paneSnapshot(_, let bytes): bytes.count
+        default: 0
+        }
+        var w = BinaryWriter(framedCapacity: payload + 32)
+        encode(into: &w)
+        return w.finishFrame()
+    }
+
+    private func encode(into w: inout BinaryWriter) {
         switch self {
         case .welcome(let version, let host):
             w.u8(0x81); w.u16(version); w.string(host)
@@ -284,7 +301,6 @@ extension ServerMessage {
         case .error(let message):
             w.u8(0x8F); w.string(message)
         }
-        return w.data
     }
 
     public static func decode(_ data: Data) throws(DecodeError) -> ServerMessage {

@@ -15,6 +15,21 @@ public struct BinaryWriter: Sendable {
 
     public init() {}
 
+    /// Starts with room for `Frame`'s length prefix, filled in by
+    /// `finishFrame`, so a framed message is written once, not copied into
+    /// a frame after encoding.
+    init(framedCapacity: Int) {
+        data.reserveCapacity(4 + framedCapacity)
+        data.append(contentsOf: [0, 0, 0, 0])
+    }
+
+    /// The frame: length prefix plus everything written after it.
+    consuming func finishFrame() -> Data {
+        let length = UInt32(data.count - 4).littleEndian
+        withUnsafeBytes(of: length) { data.replaceSubrange(data.startIndex ..< data.startIndex + 4, with: $0) }
+        return data
+    }
+
     public mutating func u8(_ v: UInt8) { data.append(v) }
     public mutating func bool(_ v: Bool) { u8(v ? 1 : 0) }
     public mutating func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }

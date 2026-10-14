@@ -83,7 +83,7 @@ actor DenConnection {
             if errno == EAGAIN || errno == EINTR { return }
             return shutdown("Reading from dend failed: \(String(cString: strerror(errno))).")
         }
-        decoder.append(Data(buffer[0 ..< n]))
+        buffer.withUnsafeBytes { decoder.append(UnsafeRawBufferPointer(rebasing: $0[0 ..< n])) }
         var batch: [ServerMessage] = []
         do {
             while let payload = try decoder.next() { batch.append(try ServerMessage.decode(payload)) }
