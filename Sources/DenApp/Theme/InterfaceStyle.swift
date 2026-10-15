@@ -1,14 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// How much of the window the theme paints, from full Liquid Glass to solid
-/// system colors. Terminal text colors always come from the theme.
+/// What sits behind the window's content: Liquid Glass, a frosted blur of
+/// the desktop, or nothing. Terminal text colors always come from the theme.
 enum InterfaceStyle: String, CaseIterable {
-    /// Liquid Glass: the desktop shows through window and panes.
+    /// Liquid Glass (NSGlassEffectView) tinted with the theme.
     case modern
-    /// The theme tints everything, fully opaque.
+    /// The theme's colors, fully opaque.
     case themed
-    /// The theme's colors over a subtle glass backdrop.
+    /// The desktop, blurred (NSVisualEffectView), under a see-through coat
+    /// of the theme.
     case blended
 
     var title: String {
@@ -59,16 +60,18 @@ struct Surfaces {
             windowBottom = theme.windowBottom
             card = AnyShapeStyle(theme.cardGradient)
         case .modern:
-            // Most see-through: the desktop's hue reads clearly, but the
-            // theme color keeps chrome and text contrast intact.
-            windowTop = theme.windowTop.opacity(theme.isDark ? 0.5 : 0.45)
-            windowBottom = theme.windowBottom.opacity(theme.isDark ? 0.58 : 0.5)
-            card = AnyShapeStyle(theme.background.color.opacity(theme.isDark ? 0.62 : 0.6))
+            // The glass already carries the theme's tint (see
+            // `glassTint`); the chrome adds only a little depth so the
+            // glass's refraction and highlights read, and panes are just
+            // dense enough to keep text legible over any wallpaper.
+            windowTop = theme.windowTop.opacity(0.12)
+            windowBottom = theme.windowBottom.opacity(0.2)
+            card = AnyShapeStyle(theme.background.color.opacity(theme.isDark ? 0.5 : 0.55))
         case .blended:
-            // Mostly theme, with just a hint of the desktop.
-            windowTop = theme.windowTop.opacity(0.82)
-            windowBottom = theme.windowBottom.opacity(0.88)
-            card = AnyShapeStyle(theme.background.color.opacity(0.9))
+            // A clearly see-through coat over the blurred desktop.
+            windowTop = theme.windowTop.opacity(theme.isDark ? 0.5 : 0.45)
+            windowBottom = theme.windowBottom.opacity(theme.isDark ? 0.58 : 0.52)
+            card = AnyShapeStyle(theme.background.color.opacity(theme.isDark ? 0.6 : 0.62))
         }
     }
 }

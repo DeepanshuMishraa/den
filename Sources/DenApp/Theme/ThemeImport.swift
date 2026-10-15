@@ -40,7 +40,7 @@ enum ThemeImport {
 
     static func parse(_ text: String, name: String) throws(ImportError) -> Theme {
         var palette = [Int: RGB]()
-        var bg: RGB?, fg: RGB?, cursor: RGB?, selection: RGB?
+        var bg: RGB?, fg: RGB?, cursor: RGB?, selection: RGB?, selectionForeground: RGB?
         for raw in text.split(whereSeparator: \.isNewline) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { continue }
@@ -51,6 +51,7 @@ enum ThemeImport {
             case "foreground": fg = RGB(hexString: value)
             case "cursor-color": cursor = RGB(hexString: value)
             case "selection-background": selection = RGB(hexString: value)
+            case "selection-foreground": selectionForeground = RGB(hexString: value)
             case "palette":
                 let parts = value.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
                 if parts.count == 2, let i = Int(parts[0]), (0 ..< 16).contains(i), let c = RGB(hexString: parts[1]) {
@@ -73,7 +74,8 @@ enum ThemeImport {
             cursor: cursor ?? accent,
             selection: selection ?? bg.mixed(with: accent, 0.3),
             ansi: ansi,
-            accentRGB: accent
+            accentRGB: accent,
+            selectionForeground: selectionForeground
         )
         theme.isCustom = true
         return theme
@@ -148,6 +150,7 @@ enum ThemeImport {
         func hex(_ c: RGB) -> String { String(format: "#%02x%02x%02x", c.r, c.g, c.b) }
         var lines = ["background = \(hex(t.background))", "foreground = \(hex(t.foreground))",
                      "cursor-color = \(hex(t.cursor))", "selection-background = \(hex(t.selection))"]
+        if let selected = t.selectionForeground { lines.append("selection-foreground = \(hex(selected))") }
         for (i, c) in t.ansi.enumerated() { lines.append("palette = \(i)=\(hex(c))") }
         return lines.joined(separator: "\n") + "\n"
     }

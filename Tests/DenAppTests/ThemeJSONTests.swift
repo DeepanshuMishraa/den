@@ -98,14 +98,15 @@ import Testing
         let dir = FileManager.default.temporaryDirectory.appending(path: "den-theme-export-\(UUID().uuidString)")
         ThemeJSON.exportExamples(to: dir.appending(path: "examples"))
         let files = try FileManager.default.contentsOfDirectory(at: dir.appending(path: "examples"), includingPropertiesForKeys: nil)
-        // 27 dark + 14 light pair into shared files (Merino, Silver Point).
-        // The hidden manifest tracks what was generated; it isn't a theme.
-        #expect(files.filter { !$0.lastPathComponent.hasPrefix(".") }.count == 39)
-        let merino = try Data(contentsOf: dir.appending(path: "examples/Merino.json"))
-        let doc = try #require(JSONSerialization.jsonObject(with: merino) as? [String: Any])
+        // 36 dark + 19 light, with 11 dark/light pairs sharing a file
+        // (Gruvbox, One, Solarized, Monokai Pro…). The hidden manifest
+        // tracks what was generated; it isn't a theme.
+        #expect(files.filter { !$0.lastPathComponent.hasPrefix(".") }.count == 44)
+        let gruvbox = try Data(contentsOf: dir.appending(path: "examples/Gruvbox.json"))
+        let doc = try #require(JSONSerialization.jsonObject(with: gruvbox) as? [String: Any])
         #expect(doc["dark"] is [String: Any] && doc["light"] is [String: Any])
         // Existing files (user edits) are left alone.
-        let keep = dir.appending(path: "examples/Merino.json")
+        let keep = dir.appending(path: "examples/Gruvbox.json")
         try "edited".write(to: keep, atomically: true, encoding: .utf8)
         ThemeJSON.exportExamples(to: dir.appending(path: "examples"))
         #expect(try String(contentsOf: keep, encoding: .utf8) == "edited")

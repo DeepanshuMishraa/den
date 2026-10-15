@@ -18,6 +18,8 @@ struct Theme: Identifiable, Equatable, Sendable {
     let ansi: [RGB]
     /// Accent used for highlights, focus and selection in menus.
     let accentRGB: RGB
+    /// Text color inside the selection; nil keeps each cell's own color.
+    var selectionForeground: RGB? = nil
     /// Imported themes are user files and can be deleted.
     var isCustom = false
     /// The file a custom theme was loaded from, for deleting it.
@@ -43,13 +45,15 @@ struct Theme: Identifiable, Equatable, Sendable {
     /// themes, a soft accent-tinted wash in light themes.
     /// Light themes get Den's pastel wash: a pink-ish top easing into a warm
     /// bottom, both derived from the theme's accent so each theme differs.
+    /// Dark chrome sits about 18% below the terminal, as measured across
+    /// seven themes in Superlogical's Themed style.
     var windowTop: Color {
-        isDark ? background.mixed(with: accentRGB, 0.06).darkened(0.32).color
+        isDark ? background.mixed(with: accentRGB, 0.06).darkened(0.18).color
             : background.mixed(with: pastel(accentRGB.rotated(100)), 0.55).color
     }
 
     var windowBottom: Color {
-        isDark ? background.mixed(with: accentRGB, 0.10).darkened(0.42).color
+        isDark ? background.mixed(with: accentRGB, 0.10).darkened(0.28).color
             : background.mixed(with: pastel(accentRGB.rotated(190)), 0.6).color
     }
 
@@ -89,6 +93,9 @@ struct Theme: Identifiable, Equatable, Sendable {
     }
     var menuBorder: Color { isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.10) }
     var nsAppearance: NSAppearance? { NSAppearance(named: isDark ? .darkAqua : .aqua) }
+    /// Tint for Modern's Liquid Glass: the theme's background, strong
+    /// enough that dark themes don't turn milky grey.
+    var glassTint: NSColor { background.nsColor.withAlphaComponent(isDark ? 0.6 : 0.45) }
 }
 
 extension RGB {
@@ -122,6 +129,26 @@ extension RGB {
 }
 
 extension Theme {
+    /// A theme from its published terminal palette, colors taken verbatim.
+    /// Light or dark follows the background. The accent defaults to the
+    /// palette's blue.
+    init(published name: String, background: UInt32, foreground: UInt32, cursor: UInt32, selection: UInt32,
+         ansi: [UInt32], selectionForeground: UInt32? = nil, accent: UInt32? = nil) {
+        let bg = RGB(hex: background)
+        let palette = ansi.map(RGB.init(hex:))
+        self.init(
+            name: name,
+            appearance: bg.luminance < 0.2 ? .dark : .light,
+            background: bg,
+            foreground: RGB(hex: foreground),
+            cursor: RGB(hex: cursor),
+            selection: RGB(hex: selection),
+            ansi: palette,
+            accentRGB: accent.map(RGB.init(hex:)) ?? palette[4],
+            selectionForeground: selectionForeground.map(RGB.init(hex:))
+        )
+    }
+
     /// Generates a full theme from a compact spec. ANSI hues are placed in
     /// OKLCH so every theme gets evenly weighted, legible colors.
     static func generate(_ spec: ThemeSpec) -> Theme {

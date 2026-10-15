@@ -233,6 +233,7 @@ struct FrameBuilder {
 
             let isCursorCell = cursor.map { $0.shape == .block && cursorFocused && $0.x == cell.col && $0.y == cell.row } ?? false
             if isCursorCell { fg = defaultBg }
+            if cell.selected, !isCursorCell, let selected = theme.selectionForeground { fg = selected }
 
             if let bg {
                 backgrounds.append(RectInstance(rect: SIMD4(x, y, cw * span, ch), color: bg.simd()))

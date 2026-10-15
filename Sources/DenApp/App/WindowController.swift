@@ -131,12 +131,26 @@ final class DenWindow: NSWindow {
 @MainActor
 final class DenWindowController: NSWindowController, NSWindowDelegate {
     let model: AppModel
-    /// Behind-window blur used by Modern and Blended. The SwiftUI layers above
-    /// it carry the theme color at partial opacity, so the desktop's color
-    /// tints through while the window stays as dark (or light) as the theme.
-    /// (NSGlassEffectView reads as milky grey over dark themes, unlike Superlogical's Rex.)
+    /// Blended's behind-window blur. The SwiftUI layers above it carry the
+    /// theme color at partial opacity, so the blurred desktop shows through.
     private let backdropBlur = NSVisualEffectView()
-    private let backdropGlass = NSVisualEffectView()
+    /// Modern's Liquid Glass, tinted with the theme so dark themes don't
+    /// read milky grey. Before macOS 26 it falls back to a frosted blur.
+    private let backdropGlass: NSView = DenWindowController.makeGlass()
+
+    private static func makeGlass() -> NSView {
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.cornerRadius = 0
+            return glass
+        }
+        let blur = NSVisualEffectView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        return blur
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -175,11 +189,9 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
                 view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
         }
-        for blur in [backdropBlur, backdropGlass] {
-            blur.material = .underWindowBackground
-            blur.blendingMode = .behindWindow
-            blur.state = .active
-        }
+        backdropBlur.material = .hudWindow
+        backdropBlur.blendingMode = .behindWindow
+        backdropBlur.state = .active
         window.contentView = container
         if window.frame.origin == .zero { window.center() }
         super.init(window: window)
@@ -218,6 +230,9 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
             // Match the blur's light/dark rendering to the theme, not the system.
             backdropGlass.appearance = model.theme.nsAppearance
             backdropBlur.appearance = model.theme.nsAppearance
+            if #available(macOS 26, *), let glass = backdropGlass as? NSGlassEffectView {
+                glass.tintColor = model.theme.glassTint
+            }
             // Read so a layout switch also re-places the traffic lights.
             _ = model.tabStyle
             _ = model.density

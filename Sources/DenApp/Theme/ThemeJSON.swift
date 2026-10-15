@@ -12,6 +12,7 @@ import DenVT
 ///         "foreground": "#c9d7e3",   // required
 ///         "cursor": "#7aa2f7",       // optional; defaults to accent
 ///         "selection": "#1e3a5f",    // optional; background tinted with accent
+///         "selectionForeground": "#c9d7e3", // optional; selected text keeps its colors
 ///         "accent": "#7aa2f7",       // optional; defaults to ANSI blue
 ///         "ansi": ["#000000", …]     // optional; 16 colors, gaps filled in
 ///       },
@@ -140,7 +141,8 @@ enum ThemeJSON {
             cursor: (try color("cursor")) ?? accent,
             selection: (try color("selection")) ?? bg.mixed(with: accent, dark ? 0.32 : 0.22),
             ansi: ansi,
-            accentRGB: accent
+            accentRGB: accent,
+            selectionForeground: try color("selectionForeground")
         )
         theme.isCustom = true
         theme.fileURL = source
@@ -158,7 +160,7 @@ enum ThemeJSON {
 
     static func variantDict(_ theme: Theme) -> [String: Any] {
         func hex(_ c: RGB) -> String { String(format: "#%02x%02x%02x", c.r, c.g, c.b) }
-        return [
+        var dict: [String: Any] = [
             "background": hex(theme.background),
             "foreground": hex(theme.foreground),
             "cursor": hex(theme.cursor),
@@ -166,6 +168,8 @@ enum ThemeJSON {
             "accent": hex(theme.accentRGB),
             "ansi": theme.ansi.map(hex),
         ]
+        if let selected = theme.selectionForeground { dict["selectionForeground"] = hex(selected) }
+        return dict
     }
 
     static func serialize(_ theme: Theme) -> String {

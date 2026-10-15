@@ -1171,7 +1171,10 @@ final class AppModel {
     /// The window is key again (spaces, system gestures and other apps take
     /// it away): the focused pane takes the keyboard back, restoring a solid
     /// block cursor instead of a hollow one.
-    func windowBecameKey() { terminalFocusRequest &+= 1 }
+    func windowBecameKey() {
+        terminalFocusRequest &+= 1
+        reassertSizes(lastVisiblePanes)
+    }
 
     private func locate(_ pane: PaneID) -> (SessionID, TabLayout)? {
         for (sid, layout) in layouts {
@@ -1195,6 +1198,7 @@ final class AppModel {
     @ObservationIgnored private var lastVisiblePanes: [PaneID] = []
 
     func appBecameActive() {
+        reassertSizes(lastVisiblePanes)
         clearActivity()
         reloadConfig()
         reloadCustomThemes()
@@ -1338,7 +1342,20 @@ final class AppModel {
 
     func input(_ pane: PaneID, _ bytes: Data) {
         guard !bytes.isEmpty else { return }
+        reassertSizes([pane])
         send(.input(pane, bytes))
+    }
+
+    /// dend sizes a pane for whichever client asked last, so another client
+    /// on the same session (a second Den, the CLI) can leave it bigger than
+    /// this window: the bottom rows fall off the pane. Sends this window's
+    /// size again where the pane's current grid differs from it.
+    private func reassertSizes(_ panes: [PaneID]) {
+        for pane in panes {
+            guard let size = sentSizes[pane], let terminal = replicas[pane]?.terminal,
+                  terminal.cols != size.cols || terminal.rows != size.rows else { continue }
+            send(.resize(pane, size))
+        }
     }
 
     /// Requests a new grid size; the replica resizes when dend echoes it back
@@ -1718,11 +1735,8 @@ final class AppModel {
         themeFileErrors = loaded.errors
         guard previewTheme == nil else { return }
         let name = selectedThemeName
-        if let current = customThemes.first(where: { $0.name == name && $0.appearance == effectiveAppearance }) {
-            if current != theme {
-                theme = current
-                refreshReplicas()
-            }
+        if customThemes.contains(where: { $0.name == name && $0.appearance == effectiveAppearance }) {
+            applyTheme()
         } else if theme.isCustom, !customThemes.contains(where: { $0.name == theme.name && $0.appearance == theme.appearance }) {
             applyTheme()
         }
