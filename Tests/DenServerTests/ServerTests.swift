@@ -222,3 +222,59 @@ final class TestClient {
         #expect(try c.pump(timeout: 10) { try c.text(pane).contains("_______?:state") })
     }
 }
+
+/// Closing a pane, tab or session must leave none of its programs running,
+/// including ones that ignore SIGHUP or run in the background.
+@Suite(.serialized) struct PaneTerminationTests {
+    let size = GridSize(cols: 100, rows: 24, cellWidthPx: 8, cellHeightPx: 16)
+
+    func client() async throws -> (TestClient, SessionID, PaneID) {
+        let path = "/tmp/dend-test-\(UUID().uuidString.prefix(8)).sock"
+        let server = DenServer(socketPath: path, hostName: "Test Mac")
+        try await server.start()
+        let c = try TestClient(path: path)
+        let sid = SessionID()
+        c.send(.hello(version: protocolVersion, client: "test"))
+        c.send(.createSession(id: sid, name: "reap", size: size))
+        c.send(.subscribe)
+        #expect(try c.pump { c.layout?.tabs.first != nil && !c.replicas.isEmpty })
+        return (c, sid, try #require(c.layout?.tabs.first?.root.panes.first))
+    }
+
+    /// Types `command`, which must write a pid to `$PIDFILE`, and returns it.
+    func start(_ command: String, in pane: PaneID, _ c: TestClient) throws -> pid_t {
+        let file = "/tmp/den-pid-\(UUID().uuidString.prefix(8))"
+        defer { unlink(file) }
+        c.send(.input(pane, Data("PIDFILE=\(file) sh -c '\(command)'\r".utf8)))
+        var pid: pid_t = 0
+        #expect(try c.pump(timeout: 10) {
+            pid = (try? String(contentsOfFile: file, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            return pid > 0
+        })
+        return pid
+    }
+
+    func gone(_ pid: pid_t, within seconds: TimeInterval = 3) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if kill(pid, 0) == -1, errno == ESRCH { return true }
+            usleep(20_000)
+        }
+        kill(pid, SIGKILL)
+        return false
+    }
+
+    @Test func closingAPaneEndsAProgramThatIgnoresHangup() async throws {
+        let (c, _, pane) = try await client()
+        let pid = try start(#"trap "" HUP; echo $$ > $PIDFILE; exec sleep 300"#, in: pane, c)
+        c.send(.closePane(pane))
+        #expect(gone(pid))
+    }
+
+    @Test func killingASessionEndsItsBackgroundJobs() async throws {
+        let (c, sid, pane) = try await client()
+        let pid = try start(#"nohup sleep 300 >/dev/null 2>&1 & echo $! > $PIDFILE"#, in: pane, c)
+        c.send(.killSession(sid))
+        #expect(gone(pid))
+    }
+}
