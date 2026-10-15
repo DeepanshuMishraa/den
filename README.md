@@ -115,6 +115,17 @@ den config help                            # the config manual
 Inside a Den pane, `-s` and `-p` default to that pane (`DEN_PANE_ID`).
 `den help` lists every command.
 
+### Coding agents
+
+Agents running in a pane drive Den through the same CLI: open a dev server
+in a split beside them, read it with `den capture --trim`, type into it.
+`den agent guide` prints what they need to know (`AgentGuide.swift`).
+`den agent install` (or ⇧⌘P → **Install Agent Skill**) writes it as a
+`den` Agent Skill to `~/.agents/skills/den` and `~/.claude/skills/den`, where
+skill-aware agents pick it up. It rewrites only files that carry Den's
+marker, so run it again after an update. Agents without skills can be
+pointed at `den agent guide` from their instructions file.
+
 ## Shortcuts
 
 | | |

@@ -25,6 +25,8 @@ enum CLIHelp {
 
         \(section("Config", ["keybinds", "config"]))
 
+        \(section("Agents", ["agent"]))
+
         \(CLIOutput.bold("Targets"))
           -s SESSION  a session's name or ID. Inside a Den pane it defaults to that
                       pane's session; with one session running, to that one.
@@ -48,7 +50,8 @@ enum CLIHelp {
         guard let first = words.first, let command = CLICommands.all.first(where: { $0.names.contains(first) }) else { return nil }
         guard words.count > 1 else { return command.usage }
         let groups: [String: CLIGroup] = ["session": CLICommands.sessionGroup, "tab": CLICommands.tabGroup,
-                                          "pane": CLICommands.paneGroup, "config": CLICommands.configGroup]
+                                          "pane": CLICommands.paneGroup, "config": CLICommands.configGroup,
+                                          "agent": CLICommands.agentGroup]
         return groups[command.names[0]]?.verbs.first { $0.names.contains(words[1]) }?.usage
     }
 }

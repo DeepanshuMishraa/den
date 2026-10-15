@@ -13,6 +13,7 @@ enum CLICommands {
         command(["pane"], paneGroup, "List, inspect, label and close panes"),
         keybinds,
         command(["config"], configGroup, "Config manual, path and validation"),
+        command(["agent"], agentGroup, "Teach coding agents to drive Den"),
     ]
 
     private static func command(_ names: [String], _ group: CLIGroup, _ summary: String) -> CLICommand {
@@ -181,11 +182,12 @@ enum CLICommands {
     static let capture = CLICommand(
         names: ["capture"], summary: "Print a pane's screen and scrollback",
         usage: """
-        Usage: den capture [-s SESSION] [-p PANE] [--format text|vt|html] [--lines N]
+        Usage: den capture [-s SESSION] [-p PANE] [--format text|vt|html] [--lines N] [--trim]
 
         Prints what the pane shows, scrollback included, from dend's own copy of
         the terminal. text is plain; vt keeps colors as escape sequences; html is
-        a styled fragment. --lines keeps only the last N lines.
+        a styled fragment. --lines keeps only the last N lines. --trim drops
+        trailing spaces and the blank lines before and after the text.
         """
     ) { (args: inout CLIArgs, context: CLIContext) throws(CLIError) -> Int32 in
         let sessionRef = try args.option("-s", "--session")
@@ -196,6 +198,7 @@ enum CLICommands {
             guard let n = Int(value), n > 0 else { throw .usage("--lines takes a positive number, not “\(value)”.") }
             return n
         }
+        let trim = args.flag("--trim")
         try args.finish()
         let client = try context.connect()
         let targets = CLITargets(state: try client.state())
@@ -203,6 +206,7 @@ enum CLICommands {
         guard case .text(var text) = try client.request(.capture(pane: pane.id, format: format)) else {
             throw CLIError(message: "dend answered a capture with something else.")
         }
+        if trim { text = trimmed(text) }
         if let lines {
             var all = text.split(separator: "\n", omittingEmptySubsequences: false)
             while all.last?.isEmpty == true { all.removeLast() }
@@ -210,6 +214,16 @@ enum CLICommands {
         }
         print(text.hasSuffix("\n") ? String(text.dropLast()) : text)
         return 0
+    }
+
+    /// `capture --trim`: no trailing spaces, no blank lines around the text.
+    static func trimmed(_ text: String) -> String {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map {
+            String($0.reversed().drop(while: \.isWhitespace).reversed())
+        }
+        while lines.first?.isEmpty == true { lines.removeFirst() }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: Layout
@@ -689,6 +703,41 @@ enum CLICommands {
             case .failure(let error):
                 throw CLIError(message: "\(UserConfig.url.path): \(error.message) Den keeps the last config that worked until this is fixed.")
             }
+        },
+    ])
+
+    // MARK: Agents
+
+    static let agentGroup = CLIGroup(name: "agent", verbs: [
+        CLICommand(
+            names: ["guide"], summary: "Print what an agent needs to drive Den",
+            usage: "Usage: den agent guide\n\nMarkdown for a coding agent's context: how to open, read and type into panes."
+        ) { (args: inout CLIArgs, context: CLIContext) throws(CLIError) -> Int32 in
+            try args.finish()
+            print(AgentGuide.markdown)
+            return 0
+        },
+        CLICommand(
+            names: ["install"], summary: "Install the den skill for coding agents",
+            usage: """
+            Usage: den agent install
+
+            Writes the guide as an Agent Skill to \(AgentGuide.skillDirectories.map { "~/\($0)" }.joined(separator: " and ")),
+            where Claude Code, Codex, OpenCode and other skill-aware agents find it.
+            Rewrites only files Den wrote; run it again after updating Den.
+            """
+        ) { (args: inout CLIArgs, context: CLIContext) throws(CLIError) -> Int32 in
+            try args.finish()
+            var failed = false
+            for (path, outcome) in AgentGuide.install() {
+                switch outcome {
+                case .written: print("Wrote \(path)")
+                case .unchanged: print("Up to date: \(path)")
+                case .occupied: CLIOutput.error("\(path) is someone else's skill; left alone. Move it to install Den's.")
+                case .failed(let message): CLIOutput.error(message); failed = true
+                }
+            }
+            return failed ? 1 : 0
         },
     ])
 }
