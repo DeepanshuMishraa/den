@@ -184,6 +184,17 @@ struct FrameBuilder {
         self.contrastCorrection = contrastCorrection
     }
 
+    /// Underlines a link under the mouse, in the theme's foreground.
+    mutating func underline(_ link: TerminalLink) {
+        let cw = Float(metrics.cellWidth), ch = Float(metrics.cellHeight)
+        let thick = Float(metrics.underlineThickness)
+        for span in link.spans {
+            let x = origin.x + Float(span.columns.lowerBound) * cw
+            let y = origin.y + Float(span.row) * ch + Float(metrics.underlinePosition)
+            decorations.append(RectInstance(rect: SIMD4(x, y, Float(span.columns.count) * cw, thick), color: theme.foreground.simd()))
+        }
+    }
+
     mutating func build(_ state: VTRenderState) {
         let colors = state.colors
         let defaultBg = colors.background

@@ -182,6 +182,9 @@ Inside a Den pane, `-s` and `-p` default to that pane (`DEN_PANE_ID`).
   when Den comes to the front, or with Reload Config (⇧⌘,). Migrate from
   Ghostty Config brings over the theme, `macos-option-as-alt` and keybinds.
 - **Copy on select**: finishing a selection copies it and shows a toast.
+- **Links**: URLs and OSC 8 hyperlinks underline on hover; a click opens them
+  in the default browser (⌘-click when the program uses the mouse). Only
+  http(s), mailto and ftp links open.
 - Selection by drag, double-click word and triple-click line (rounded highlight), ⌘C/⌘V, native
   overlay scrollbar, keycap tooltips.
 

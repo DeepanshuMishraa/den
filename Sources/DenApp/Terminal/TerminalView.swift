@@ -24,6 +24,12 @@ final class TerminalView: MTKView {
     private var scrollRemainder: CGFloat = 0
     private var pressedButtons = 0
     private var selecting = false
+    /// The cell under the mouse while a click there would open a link.
+    private var linkCell: (col: Int, row: Int)?
+    /// The link under the mouse, underlined and opened by a click.
+    private var hoveredLink: TerminalLink?
+    /// The link pressed, opened on release if the click didn't drag.
+    private var pressedLink: TerminalLink?
     private let scroller = ScrollIndicator()
     var isFocusedPane = false {
         didSet {
@@ -203,6 +209,9 @@ final class TerminalView: MTKView {
             do {
                 try renderState.update(from: replica.terminal)
                 frame.build(renderState)
+                // Output may have moved or replaced the link under the mouse.
+                hoveredLink = linkCell.flatMap { replica.terminal.link(atCol: $0.col, row: $0.row) }
+                if let hoveredLink { frame.underline(hoveredLink) }
                 let (cols, rows) = renderState.size
                 gridSize = SIMD2(Float(cols) * Float(metrics.cellWidth), Float(rows) * Float(metrics.cellHeight))
             } catch {
@@ -471,13 +480,22 @@ final class TerminalView: MTKView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        pressedLink = nil
+        // ⌘-click opens a link even when the program has the mouse.
+        if mode == .interactive, event.modifierFlags.contains(.command), let link = link(at: event) {
+            open(link)
+            return
+        }
         // ⌘-drag picks the pane up to move it.
         if mode == .interactive, event.modifierFlags.contains(.command), let model, model.beginPaneDrag(paneID, at: windowPoint(event)) {
             draggingPane = true
             NSCursor.closedHand.set()
             return
         }
-        if wantsSelection(event) { return select(event, .press) }
+        if wantsSelection(event) {
+            pressedLink = mode == .interactive ? link(at: event) : nil
+            return select(event, .press)
+        }
         mouseReport(event, .press, .left)
     }
 
@@ -488,7 +506,15 @@ final class TerminalView: MTKView {
             updateCursor(event.modifierFlags)
             return
         }
-        if selecting { return select(event, .release) }
+        if selecting {
+            // Checked before the release, whose copy-on-select clears it.
+            let selected = replica?.terminal.selectedText() != nil
+            select(event, .release)
+            // A click that didn't select anything opens the link it hit.
+            if let link = pressedLink, !selected, self.link(at: event) == link { open(link) }
+            pressedLink = nil
+            return
+        }
         mouseReport(event, .release, .left)
     }
 
@@ -506,6 +532,7 @@ final class TerminalView: MTKView {
     override func otherMouseDown(with event: NSEvent) { mouseReport(event, .press, .middle) }
     override func otherMouseUp(with event: NSEvent) { mouseReport(event, .release, .middle) }
     override func mouseMoved(with event: NSEvent) {
+        updateHover(event, flags: event.modifierFlags)
         updateCursor(event.modifierFlags)
         // Nearing the right edge brings the scrollbar up to grab.
         let nearEdge = convert(event.locationInWindow, from: nil).x > bounds.width - ScrollIndicator.hitWidth
@@ -516,12 +543,15 @@ final class TerminalView: MTKView {
 
     override func mouseExited(with event: NSEvent) {
         scroller.setHovering(false)
+        setLinkCell(nil)
     }
 
-    /// Holding ⌘ over a pane shows it can be grabbed.
+    /// Holding ⌘ over a pane shows it can be grabbed, or that a link
+    /// under the mouse opens even while the program has the mouse.
     override func flagsChanged(with event: NSEvent) {
         super.flagsChanged(with: event)
         guard let window, bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+        updateHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), flags: event.modifierFlags)
         updateCursor(event.modifierFlags)
     }
 
@@ -529,8 +559,55 @@ final class TerminalView: MTKView {
 
     private func updateCursor(_ flags: NSEvent.ModifierFlags) {
         guard mode == .interactive, !draggingPane else { return }
+        if hoveredLink != nil { return NSCursor.pointingHand.set() }
         let movable = (model?.activeLayout?.root.panes.count ?? 0) > 1
         (flags.contains(.command) && movable ? NSCursor.openHand : NSCursor.iBeam).set()
+    }
+
+    // MARK: Links
+
+    /// The viewport cell under a point in view coordinates, if it's on the grid.
+    private func cell(at point: NSPoint) -> (col: Int, row: Int)? {
+        guard let replica else { return nil }
+        let x = (point.x - Self.padding.width) * metrics.scale, y = (point.y - Self.padding.height) * metrics.scale
+        guard x >= 0, y >= 0 else { return nil }
+        let col = Int(x / metrics.cellWidth), row = Int(y / metrics.cellHeight)
+        guard col < Int(replica.terminal.cols), row < Int(replica.terminal.rows) else { return nil }
+        return (col, row)
+    }
+
+    private func link(at event: NSEvent) -> TerminalLink? {
+        guard let replica, let cell = cell(at: convert(event.locationInWindow, from: nil)) else { return nil }
+        return replica.terminal.link(atCol: cell.col, row: cell.row)
+    }
+
+    private func updateHover(_ event: NSEvent, flags: NSEvent.ModifierFlags) {
+        updateHover(at: convert(event.locationInWindow, from: nil), flags: flags)
+    }
+
+    /// Links light up where a click would open them: anywhere the program
+    /// doesn't track the mouse, and with ⌘ where it does.
+    private func updateHover(at point: NSPoint, flags: NSEvent.ModifierFlags) {
+        guard mode == .interactive, let replica,
+              !replica.terminal.isMouseTracking || flags.contains(.command) || flags.contains(.shift),
+              let cell = cell(at: point) else { return setLinkCell(nil) }
+        setLinkCell(cell)
+    }
+
+    private func setLinkCell(_ cell: (col: Int, row: Int)?) {
+        let link = cell.flatMap { replica?.terminal.link(atCol: $0.col, row: $0.row) }
+        linkCell = link == nil ? nil : cell
+        guard link != hoveredLink else { return }
+        hoveredLink = link
+        needsDisplay = true
+    }
+
+    private func open(_ link: TerminalLink) {
+        guard let url = link.url else {
+            model?.showToast("Den doesn't open \(URL(string: link.target)?.scheme ?? "these") links")
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     /// The event's position in window coordinates with the origin top-left,

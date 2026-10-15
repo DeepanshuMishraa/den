@@ -60,6 +60,8 @@ final class FrameCache {
     private(set) var cells: [TermyEngineCell] = []
     /// Scalars after the first of each multi-scalar grapheme, by cell index.
     private(set) var clusters: [Int: [UInt32]] = [:]
+    /// OSC 8 hyperlink targets, by cell index.
+    private(set) var hyperlinks: [Int: String] = [:]
     private(set) var cursor = TermyEngineCursor()
     /// Rows the viewport is scrolled back.
     private(set) var displayOffset: UInt64 = 0
@@ -78,13 +80,23 @@ final class FrameCache {
             let start = Int(cell.grapheme_start)
             return Array(graphemes[start ..< start + Int(cell.grapheme_len)])
         }
+        let links = UnsafeBufferPointer(start: frame.hyperlinks_ptr, count: frame.hyperlinks_len)
+        func uri(_ cell: TermyEngineCell) -> String? {
+            let index = Int(cell.hyperlink) - 1
+            guard links.indices.contains(index), let ptr = links[index].uri_ptr else { return nil }
+            return String(decoding: UnsafeBufferPointer(start: ptr, count: links[index].uri_len), as: UTF8.self)
+        }
 
         if frame.damage == UInt32(TERMY_ENGINE_DAMAGE_FULL) {
             cols = Int(frame.cols)
             rows = Int(frame.rows)
             cells = Array(source)
             clusters.removeAll(keepingCapacity: true)
-            for (i, cell) in source.enumerated() where cell.grapheme_len > 0 { clusters[i] = cluster(cell) }
+            hyperlinks.removeAll(keepingCapacity: true)
+            for (i, cell) in source.enumerated() {
+                if cell.grapheme_len > 0 { clusters[i] = cluster(cell) }
+                if cell.hyperlink != 0 { hyperlinks[i] = uri(cell) }
+            }
         } else {
             var next = 0
             cells.withUnsafeMutableBufferPointer { grid in
@@ -98,6 +110,11 @@ final class FrameCache {
                             clusters[base + col] = cluster(cell)
                         } else if !clusters.isEmpty {
                             clusters[base + col] = nil
+                        }
+                        if cell.hyperlink != 0 {
+                            hyperlinks[base + col] = uri(cell)
+                        } else if !hyperlinks.isEmpty {
+                            hyperlinks[base + col] = nil
                         }
                     }
                 }
