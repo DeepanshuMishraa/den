@@ -3,11 +3,11 @@ import PackageDescription
 
 #if os(Linux)
 // Linux builds only dend (scripts/build-dend-linux.sh), against the static
-// libghostty-vt that script builds; it passes the per-arch -L.
-let ghosttyVt = Target.systemLibrary(name: "GhosttyVt", path: "Frameworks/linux/GhosttyVt")
+// libtermy_engine that script builds; it passes the per-arch -L.
+let termyEngine = Target.systemLibrary(name: "CTermyEngine", path: "Frameworks/linux/CTermyEngine")
 #else
-// Built by scripts/build-libghostty-vt.sh from vendor/ghostty.
-let ghosttyVt = Target.binaryTarget(name: "GhosttyVt", path: "Frameworks/ghostty-vt.xcframework")
+// Built by scripts/build-libtermy-engine.sh from vendor/termy.
+let termyEngine = Target.binaryTarget(name: "CTermyEngine", path: "Frameworks/TermyEngine.xcframework")
 #endif
 
 let package = Package(
@@ -21,9 +21,14 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
     ],
     targets: [
-        ghosttyVt,
+        termyEngine,
         .target(name: "CDenPTY"),
-        .target(name: "DenVT", dependencies: ["GhosttyVt"]),
+        .target(
+            name: "DenVT",
+            dependencies: ["CTermyEngine"],
+            // Rust's standard library, linked statically, needs libiconv on macOS.
+            linkerSettings: [.linkedLibrary("iconv", .when(platforms: [.macOS]))]
+        ),
         .target(name: "DenProtocol"),
         .target(name: "DenServer", dependencies: ["DenVT", "DenProtocol", "CDenPTY"]),
         .executableTarget(name: "dend", dependencies: ["DenServer", "DenProtocol", "CDenPTY"]),

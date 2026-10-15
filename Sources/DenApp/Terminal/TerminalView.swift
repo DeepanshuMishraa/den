@@ -203,7 +203,6 @@ final class TerminalView: MTKView {
             do {
                 try renderState.update(from: replica.terminal)
                 frame.build(renderState)
-                renderState.markClean()
                 let (cols, rows) = renderState.size
                 gridSize = SIMD2(Float(cols) * Float(metrics.cellWidth), Float(rows) * Float(metrics.cellHeight))
             } catch {

@@ -2,7 +2,8 @@
 
 A terminal, rebuilt from the demos of Superlogical's Rex: a native
 macOS client on top of a persistent multiplexing server. The VT engine on both
-sides is [libghostty-vt](https://github.com/ghostty-org/ghostty).
+sides is [libtermy_engine](https://github.com/lassejlv/termy/tree/main/crates/engine_ffi),
+Termy's engine-only C library.
 
 ## Architecture
 
@@ -18,8 +19,8 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 ```
 
 - **Replicated state machines.** dend feeds PTY output into its own
-  libghostty-vt terminal and forwards the same bytes to every attached client.
-  On attach a client gets a libghostty snapshot (screen, scrollback, modes,
+  libtermy terminal and forwards the same bytes to every attached client.
+  On attach a client gets a libtermy snapshot (screen, scrollback, modes,
   unfinished escape) and then the stream, so its replica matches byte for byte.
   Resizes go through dend and come back in-stream, so every replica reflows the
   same way. Only dend answers terminal queries.
@@ -42,7 +43,7 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 | Module | Role |
 | --- | --- |
 | `DenProtocol` | Framing, binary messages, split-tree model, socket helpers |
-| `DenVT` | Swift wrapper over libghostty-vt: terminal, snapshot, render state, input encoders |
+| `DenVT` | Swift wrapper over libtermy_engine: terminal, snapshot, render state, input encoders, selection |
 | `DenServer` / `dend` | Sessions, PTYs (`CDenPTY`), process metadata, broadcast |
 | `DenApp` | Window chrome, deck tabs, session switcher, Metal terminal view |
 
@@ -50,7 +51,7 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 
 ```sh
 git submodule update --init
-scripts/build-libghostty-vt.sh   # fetches Zig 0.16 into .tools/, builds the xcframework
+scripts/build-libtermy-engine.sh # builds vendor/termy's libtermy_engine with cargo into an xcframework
 swift test
 swift build && .build/debug/Den  # dev run (dend is started from next to the binary)
 scripts/build-dend-linux.sh       # static Linux dend (x86_64, aarch64) for remote hosts; needs Docker
@@ -181,7 +182,7 @@ Inside a Den pane, `-s` and `-p` default to that pane (`DEN_PANE_ID`).
   when Den comes to the front, or with Reload Config (⇧⌘,). Migrate from
   Ghostty Config brings over the theme, `macos-option-as-alt` and keybinds.
 - **Copy on select**: finishing a selection copies it and shows a toast.
-- Selection with Ghostty's gesture rules (rounded highlight), ⌘C/⌘V, native
+- Selection by drag, double-click word and triple-click line (rounded highlight), ⌘C/⌘V, native
   overlay scrollbar, keycap tooltips.
 
 ## Development

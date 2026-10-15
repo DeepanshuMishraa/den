@@ -1,5 +1,5 @@
 import Foundation
-import GhosttyVt
+import CTermyEngine
 
 public enum CellWidth: Sendable {
     case narrow, wide, spacerTail, spacerHead
@@ -52,156 +52,184 @@ public struct FrameColors: Sendable {
     public var palette: [RGB]
 }
 
-/// Snapshot of what to draw for one frame, refreshed from a `VTTerminal`.
+/// The viewport as libtermy last reported it, kept current by applying its
+/// damage. Lives on the terminal so every view of it sees the same cells.
+final class FrameCache {
+    private(set) var cols = 0
+    private(set) var rows = 0
+    private(set) var cells: [TermyEngineCell] = []
+    /// Scalars after the first of each multi-scalar grapheme, by cell index.
+    private(set) var clusters: [Int: [UInt32]] = [:]
+    private(set) var cursor = TermyEngineCursor()
+    /// Rows the viewport is scrolled back.
+    private(set) var displayOffset: UInt64 = 0
+    var colors = FrameColors(foreground: RGB(0, 0, 0), background: RGB(0, 0, 0), cursor: nil, palette: [])
+    /// The palette revision `colors` was read at; nil forces a reread.
+    var colorsRevision: UInt64?
+
+    func refresh(_ handle: OpaquePointer) throws(VTError) {
+        var frame = TermyEngineFrame()
+        try check(termy_engine_frame(handle, false, &frame), "frame")
+        cursor = frame.cursor
+        displayOffset = frame.display_offset
+        let source = UnsafeBufferPointer(start: frame.cells_ptr, count: frame.cells_len)
+        let graphemes = UnsafeBufferPointer(start: frame.graphemes_ptr, count: frame.graphemes_len)
+        func cluster(_ cell: TermyEngineCell) -> [UInt32] {
+            let start = Int(cell.grapheme_start)
+            return Array(graphemes[start ..< start + Int(cell.grapheme_len)])
+        }
+
+        if frame.damage == UInt32(TERMY_ENGINE_DAMAGE_FULL) {
+            cols = Int(frame.cols)
+            rows = Int(frame.rows)
+            cells = Array(source)
+            clusters.removeAll(keepingCapacity: true)
+            for (i, cell) in source.enumerated() where cell.grapheme_len > 0 { clusters[i] = cluster(cell) }
+        } else {
+            var next = 0
+            cells.withUnsafeMutableBufferPointer { grid in
+                for span in UnsafeBufferPointer(start: frame.spans_ptr, count: frame.spans_len) {
+                    let base = Int(span.row) * cols
+                    for col in Int(span.start_col) ..< Int(span.end_col) {
+                        let cell = source[next]
+                        next += 1
+                        grid[base + col] = cell
+                        if cell.grapheme_len > 0 {
+                            clusters[base + col] = cluster(cell)
+                        } else if !clusters.isEmpty {
+                            clusters[base + col] = nil
+                        }
+                    }
+                }
+            }
+        }
+
+        if colorsRevision != frame.palette_revision {
+            var c = TermyEngineColors()
+            try check(termy_engine_effective_colors(handle, &c), "effective_colors")
+            let palette = withUnsafeBytes(of: c.palette) { $0.bindMemory(to: UInt32.self).map(RGB.init(packed:)) }
+            colors = FrameColors(foreground: RGB(packed: c.foreground), background: RGB(packed: c.background),
+                                 cursor: c.cursor_set ? RGB(packed: c.cursor) : nil, palette: palette)
+            colorsRevision = frame.palette_revision
+        }
+    }
+}
+
+/// What to draw for one frame, refreshed from a `VTTerminal`.
 public final class VTRenderState {
-    private let state: GhosttyRenderState
-    private let rows: GhosttyRenderStateRowIterator
-    private let cells: GhosttyRenderStateRowCells
-    private var codepointBuffer = [UInt32](repeating: 0, count: 32)
+    private var terminal: VTTerminal?
+    /// The selection in viewport rows, for this frame.
+    private var selected: (start: (row: Int, col: Int), end: (row: Int, col: Int))?
+    private var scratch = [UInt32](repeating: 0, count: 32)
 
-    public init() throws(VTError) {
-        var s: GhosttyRenderState?
-        try check(ghostty_render_state_new(nil, &s), "render_state_new")
-        var it: GhosttyRenderStateRowIterator?
-        try check(ghostty_render_state_row_iterator_new(nil, &it), "row_iterator_new")
-        var c: GhosttyRenderStateRowCells?
-        try check(ghostty_render_state_row_cells_new(nil, &c), "row_cells_new")
-        guard let s, let it, let c else { throw VTError(operation: "render_state_new", code: GHOSTTY_INVALID_VALUE.rawValue) }
-        state = s
-        rows = it
-        cells = c
-    }
-
-    deinit {
-        ghostty_render_state_row_cells_free(cells)
-        ghostty_render_state_row_iterator_free(rows)
-        ghostty_render_state_free(state)
-    }
+    public init() throws(VTError) {}
 
     public func update(from terminal: VTTerminal) throws(VTError) {
-        try check(ghostty_render_state_update(state, terminal.handle), "render_state_update")
+        try terminal.frame.refresh(terminal.handle)
+        self.terminal = terminal
+        selected = terminal.selection.flatMap { selection in
+            // Viewport row v shows stable row firstRow + v.
+            let firstRow = Int64(terminal.state.scrolled_into_history) - Int64(terminal.frame.displayOffset)
+            let rows = Int64(terminal.frame.rows)
+            let start = selection.start.row - firstRow, end = selection.end.row - firstRow
+            guard end >= 0, start < rows else { return nil }
+            return (start < 0 ? (0, 0) : (Int(start), selection.start.col),
+                    end >= rows ? (Int(rows - 1), Int.max) : (Int(end), selection.end.col))
+        }
     }
 
     public var size: (cols: Int, rows: Int) {
-        var c: UInt16 = 0, r: UInt16 = 0
-        _ = ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_COLS, &c)
-        _ = ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_ROWS, &r)
-        return (Int(c), Int(r))
+        guard let frame = terminal?.frame else { return (0, 0) }
+        return (frame.cols, frame.rows)
     }
 
     public var colors: FrameColors {
-        var c = GhosttyRenderStateColors()
-        c.size = MemoryLayout<GhosttyRenderStateColors>.size
-        _ = ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_COLORS, &c)
-        let palette = withUnsafeBytes(of: c.palette) { raw in
-            raw.bindMemory(to: GhosttyColorRgb.self).map(RGB.init)
-        }
-        return FrameColors(foreground: RGB(c.foreground), background: RGB(c.background), cursor: c.cursor_has_value ? RGB(c.cursor) : nil, palette: palette)
+        terminal?.frame.colors ?? FrameColors(foreground: RGB(0, 0, 0), background: RGB(0, 0, 0), cursor: nil, palette: [])
     }
 
     /// Cursor position in viewport coordinates, nil when hidden or scrolled
     /// out of view.
     public var cursor: CursorState? {
-        var c = GhosttyRenderStateCursor()
-        c.size = MemoryLayout<GhosttyRenderStateCursor>.size
-        guard ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_CURSOR, &c) == GHOSTTY_SUCCESS,
-              c.visible, c.viewport_has_value else { return nil }
-        let shape: CursorShape = switch c.visual_style {
-        case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR: .bar
-        case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE: .underline
-        case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW: .hollowBlock
+        guard let c = terminal?.frame.cursor, c.visible, c.in_viewport else { return nil }
+        let shape: CursorShape = switch Int32(c.shape) {
+        case TERMY_ENGINE_CURSOR_BAR: .bar
+        case TERMY_ENGINE_CURSOR_UNDERLINE: .underline
         default: .block
         }
-        return CursorState(x: Int(c.viewport_x), y: Int(c.viewport_y), shape: shape, blinking: c.blinking, wideTail: c.wide_tail)
+        return CursorState(x: Int(c.col), y: Int(c.row), shape: shape, blinking: c.blinking, wideTail: c.on_wide_tail)
     }
 
-    /// Visits every cell that has text or a non-default background.
+    /// Visits every cell that has text, styling or a selection highlight.
     public func forEachCell(_ body: (CellView) -> Void) {
-        var iterator: GhosttyRenderStateRowIterator? = rows
-        guard ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &iterator) == GHOSTTY_SUCCESS else { return }
-        var y = 0
-        while ghostty_render_state_row_iterator_next(rows) {
-            defer { y += 1 }
-            var rowCells: GhosttyRenderStateRowCells? = cells
-            guard ghostty_render_state_row_get(rows, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &rowCells) == GHOSTTY_SUCCESS else { continue }
-            var x = 0
-            while ghostty_render_state_row_cells_next(cells) {
-                defer { x += 1 }
-                visitCell(row: y, col: x, body)
+        guard let frame = terminal?.frame, frame.cells.count == frame.cols * frame.rows else { return }
+        let palette = frame.colors.palette
+        func resolve(_ raw: UInt32) -> RGB? {
+            switch Int32(raw >> 24) {
+            case TERMY_ENGINE_COLOR_INDEXED: palette.indices.contains(Int(raw & 0xFF)) ? palette[Int(raw & 0xFF)] : nil
+            case TERMY_ENGINE_COLOR_RGB: RGB(packed: raw)
+            default: nil
+            }
+        }
+        let blank = UInt16(TERMY_ENGINE_CELL_BLANK)
+        frame.cells.withUnsafeBufferPointer { cells in
+            for row in 0 ..< frame.rows {
+                for col in 0 ..< frame.cols {
+                    let index = row * frame.cols + col
+                    let cell = cells[index]
+                    let selected = isSelected(row: row, col: col)
+                    if cell.flags & blank != 0, !selected { continue }
+                    let width: CellWidth = switch Int32(cell.width) {
+                    case TERMY_ENGINE_CELL_WIDE: .wide
+                    case TERMY_ENGINE_CELL_SPACER_TAIL: .spacerTail
+                    case TERMY_ENGINE_CELL_SPACER_HEAD: .spacerHead
+                    default: .narrow
+                    }
+                    let flags = UInt32(cell.flags)
+                    var style = CellStyle()
+                    style.bold = flags & TERMY_ENGINE_CELL_BOLD != 0
+                    style.italic = flags & TERMY_ENGINE_CELL_ITALIC != 0
+                    style.faint = flags & TERMY_ENGINE_CELL_FAINT != 0
+                    style.inverse = flags & TERMY_ENGINE_CELL_INVERSE != 0
+                    style.invisible = flags & TERMY_ENGINE_CELL_INVISIBLE != 0
+                    style.strikethrough = flags & TERMY_ENGINE_CELL_STRIKETHROUGH != 0
+                    style.underline = switch Int32(cell.underline) {
+                    case TERMY_ENGINE_UNDERLINE_SINGLE: .single
+                    case TERMY_ENGINE_UNDERLINE_DOUBLE: .double
+                    case TERMY_ENGINE_UNDERLINE_CURLY: .curly
+                    case TERMY_ENGINE_UNDERLINE_DOTTED: .dotted
+                    case TERMY_ENGINE_UNDERLINE_DASHED: .dashed
+                    default: .none
+                    }
+                    style.underlineColor = cell.underline_color == 0 ? nil : resolve(cell.underline_color)
+
+                    // Blanks and spacers carry ' '; they count as having no text.
+                    let extra = frame.clusters[index] ?? []
+                    let hasText = width != .spacerTail && width != .spacerHead && (cell.codepoint != 0x20 || !extra.isEmpty)
+                    let count = hasText ? 1 + extra.count : 0
+                    if scratch.count < count { scratch = [UInt32](repeating: 0, count: count) }
+                    scratch.withUnsafeMutableBufferPointer { buf in
+                        if hasText {
+                            buf[0] = cell.codepoint
+                            for (i, scalar) in extra.enumerated() { buf[i + 1] = scalar }
+                        }
+                        body(CellView(
+                            row: row, col: col,
+                            codepoints: UnsafeBufferPointer(start: buf.baseAddress, count: count),
+                            width: width, style: style,
+                            foreground: resolve(cell.foreground), background: resolve(cell.background),
+                            selected: selected
+                        ))
+                    }
+                }
             }
         }
     }
 
-    private func visitCell(row: Int, col: Int, _ body: (CellView) -> Void) {
-        var len: UInt32 = 0
-        _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &len)
-        var bg = GhosttyColorRgb()
-        let hasBg = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &bg) == GHOSTTY_SUCCESS
-        var selected = false
-        _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED, &selected)
-        var styled = false
-        _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING, &styled)
-        guard len > 0 || hasBg || selected || styled else { return }
-
-        var raw = GhosttyCell()
-        _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &raw)
-        var wide = GHOSTTY_CELL_WIDE_NARROW
-        _ = ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide)
-        let width: CellWidth = switch wide {
-        case GHOSTTY_CELL_WIDE_WIDE: .wide
-        case GHOSTTY_CELL_WIDE_SPACER_TAIL: .spacerTail
-        case GHOSTTY_CELL_WIDE_SPACER_HEAD: .spacerHead
-        default: .narrow
-        }
-
-        var style = CellStyle()
-        if styled {
-            var s = GhosttyStyle()
-            s.size = MemoryLayout<GhosttyStyle>.size
-            _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &s)
-            style.bold = s.bold
-            style.italic = s.italic
-            style.faint = s.faint
-            style.inverse = s.inverse
-            style.invisible = s.invisible
-            style.strikethrough = s.strikethrough
-            style.underline = switch s.underline {
-            case 1: .single
-            case 2: .double
-            case 3: .curly
-            case 4: .dotted
-            case 5: .dashed
-            default: .none
-            }
-            if s.underline_color.tag == GHOSTTY_STYLE_COLOR_RGB {
-                style.underlineColor = RGB(s.underline_color.value.rgb)
-            }
-        }
-
-        var fg = GhosttyColorRgb()
-        let hasFg = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &fg) == GHOSTTY_SUCCESS
-
-        let count = Int(min(len, UInt32(codepointBuffer.count)))
-        codepointBuffer.withUnsafeMutableBufferPointer { buf in
-            if len > 0, len <= UInt32(buf.count) {
-                _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, buf.baseAddress)
-            }
-            let view = CellView(
-                row: row,
-                col: col,
-                codepoints: UnsafeBufferPointer(start: buf.baseAddress, count: len <= UInt32(buf.count) ? count : 0),
-                width: width,
-                style: style,
-                foreground: hasFg ? RGB(fg) : nil,
-                background: hasBg ? RGB(bg) : nil,
-                selected: selected
-            )
-            body(view)
-        }
-    }
-
-    /// Marks the frame as drawn so the next update reports fresh dirty state.
-    public func markClean() {
-        _ = ghostty_render_state_clean(state)
+    private func isSelected(row: Int, col: Int) -> Bool {
+        guard let (start, end) = selected else { return false }
+        if row < start.row || row > end.row { return false }
+        if row == start.row, col < start.col { return false }
+        if row == end.row, col > end.col { return false }
+        return true
     }
 }

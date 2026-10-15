@@ -8,6 +8,7 @@ import Testing
     @Test func clientMessagesRoundTrip() throws {
         let messages: [ClientMessage] = [
             .hello(version: protocolVersion, client: "Den.app"),
+            .hello(version: protocolVersion, client: "Den.app", snapshotVersion: 2),
             .listSessions,
             .createSession(id: SessionID(), name: "dawn-summit", size: size),
             .subscribe,
@@ -29,6 +30,14 @@ import Testing
         for m in messages {
             #expect(try ClientMessage.decode(m.encode()) == m)
         }
+    }
+
+    /// Clients before protocol 7 end the hello after their name; dend still
+    /// reads it, to tell them they're too old.
+    @Test func helloWithoutSnapshotVersionDecodes() throws {
+        var w = BinaryWriter()
+        w.u8(0x01); w.u16(6); w.string("Den.app")
+        #expect(try ClientMessage.decode(w.data) == .hello(version: 6, client: "Den.app", snapshotVersion: 0))
     }
 
     @Test func controlFramesRoundTrip() throws {

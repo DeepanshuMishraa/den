@@ -2,7 +2,7 @@ import Foundation
 import DenVT
 
 /// A pane's authoritative terminal, parsed on its own serial queue so PTY
-/// reads and broadcasts never wait for libghostty. Work runs in submission
+/// reads and broadcasts never wait for the parser. Work runs in submission
 /// order: `sync` sees every byte written before it, so a snapshot taken
 /// there matches the point in the stream where it is sent.
 final class PaneEngine: @unchecked Sendable {
@@ -20,7 +20,24 @@ final class PaneEngine: @unchecked Sendable {
     func write(_ bytes: Data, done: @escaping @Sendable () -> Void) {
         queue.async { [self] in
             terminal.write(bytes)
+            scheduleSynchronizedCommit()
             done()
+        }
+    }
+
+    /// Touched only on `queue`.
+    private var commitScheduled = false
+
+    /// A synchronized update (?2026) the program never ends is applied at
+    /// its deadline anyway, answering any queries buffered in it. libtermy
+    /// has no timer of its own.
+    private func scheduleSynchronizedCommit() {
+        guard !commitScheduled, let remaining = terminal.synchronizedUpdateDeadline else { return }
+        commitScheduled = true
+        queue.asyncAfter(deadline: .now() + .milliseconds(Int(clamping: remaining) + 1)) { [self] in
+            commitScheduled = false
+            terminal.commitDueSynchronizedUpdate()
+            scheduleSynchronizedCommit()
         }
     }
 
@@ -39,7 +56,7 @@ final class PaneEngine: @unchecked Sendable {
     /// server state. `onTitle` gets the new OSC 0/2 title.
     func setEffects(_ effects: VTEffects, onTitle: @escaping @Sendable (String?) -> Void) {
         var effects = effects
-        effects.titleChanged = { [unowned self] in onTitle(terminal.title) }
+        effects.titleChanged = onTitle
         queue.sync { terminal.effects = effects }
     }
 }

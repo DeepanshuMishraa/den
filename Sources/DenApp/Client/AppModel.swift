@@ -475,7 +475,7 @@ final class AppModel {
         connections[host] = conn
         // The oldest version we speak, so an older running dend still
         // accepts us; its welcome says what it can do.
-        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app"), .subscribe])
+        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app", snapshotVersion: VTTerminal.snapshotVersion), .subscribe])
     }
 
     /// Sends to the dend that owns what the message is about.
@@ -551,10 +551,25 @@ final class AppModel {
     private func receive(_ batch: [Incoming], from host: HostID) {
         for incoming in batch {
             switch incoming {
+            case .message(.error(let message)) where protocols[host] == nil:
+                refused(host, message)
+            // Until dend welcomes us its stream isn't ours to read: a dend that
+            // refused the hello still answers the subscribe, in its own format.
+            case _ where protocols[host] == nil:
+                if case .message(let message) = incoming, case .welcome = message { handle(message, from: host) }
             case .message(let message): handle(message, from: host)
             case .snapshot(let id, let restored): restore(id, restored)
             }
         }
+    }
+
+    /// dend turned down the hello, almost always because it's a build from
+    /// before this Den that is still running.
+    private func refused(_ host: HostID, _ message: String) {
+        let fix = host == .local
+            ? "It's still running from before Den was updated. Your sessions are fine; to switch over, quit Den, run `pkill -x dend` in a terminal (this ends every session), then reopen Den."
+            : "Its dend is still running from an older Den. The sessions there are fine; to switch over, run `pkill -x dend` on \(hostLabel(host)) (this ends its sessions), then reconnect."
+        lastError = "\(host == .local ? "dend" : hostLabel(host)) refused this Den: \(message) \(fix)"
     }
 
     private func restore(_ id: PaneID, _ restored: Result<RestoredTerminal, VTError>) {
