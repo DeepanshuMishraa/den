@@ -38,29 +38,43 @@ extension VTTerminal {
         return hyperlink(atCol: col, row: row) ?? textLink(atCol: col, row: row)
     }
 
+    /// Whether a cell is drawn: renderers skip blanks and concealed text.
+    private func isShown(_ index: Int) -> Bool {
+        frame.cells[index].flags & UInt16(TERMY_ENGINE_CELL_BLANK | TERMY_ENGINE_CELL_INVISIBLE) == 0
+    }
+
+    private func isWrapped(_ index: Int) -> Bool {
+        frame.cells[index].flags & UInt16(TERMY_ENGINE_CELL_WRAPPED) != 0
+    }
+
     private func hyperlink(atCol col: Int, row: Int) -> TerminalLink? {
-        guard let target = frame.hyperlinks[row * frame.cols + col] else { return nil }
-        // Every run of cells with this target, so a link wrapped over
-        // rows lights up whole.
+        let cols = frame.cols, index = row * cols + col
+        guard isShown(index), let link = frame.hyperlinks[index] else { return nil }
+        func linked(_ i: Int) -> Bool { isShown(i) && frame.hyperlinks[i] == link }
+        // An id ties every run of it together. Without one, only the run
+        // through this cell belongs, followed across soft wraps.
+        var cells = 0 ..< frame.cells.count
+        if link.id.isEmpty {
+            var first = index, last = index
+            while first > 0, linked(first - 1), first % cols != 0 || isWrapped(first - 1) { first -= 1 }
+            while last + 1 < frame.cells.count, linked(last + 1), (last + 1) % cols != 0 || isWrapped(last) { last += 1 }
+            cells = first ..< last + 1
+        }
         var spans: [TerminalLink.Span] = []
-        for r in 0 ..< frame.rows {
-            var start: Int?
-            for c in 0 ... frame.cols {
-                let linked = c < frame.cols && frame.hyperlinks[r * frame.cols + c] == target
-                if linked, start == nil { start = c }
-                if !linked, let s = start {
-                    spans.append(.init(row: r, columns: s ... c - 1))
-                    start = nil
-                }
+        for i in cells where linked(i) {
+            let r = i / cols, c = i % cols
+            if let s = spans.indices.last, spans[s].row == r, spans[s].columns.upperBound == c - 1 {
+                spans[s].columns = spans[s].columns.lowerBound ... c
+            } else {
+                spans.append(.init(row: r, columns: c ... c))
             }
         }
-        return TerminalLink(target: target, spans: spans)
+        return TerminalLink(target: link.uri, spans: spans)
     }
 
     private func textLink(atCol col: Int, row: Int) -> TerminalLink? {
         let cols = frame.cols
-        let wrapFlag = UInt16(TERMY_ENGINE_CELL_WRAPPED)
-        func wraps(_ r: Int) -> Bool { frame.cells[r * cols + cols - 1].flags & wrapFlag != 0 }
+        func wraps(_ r: Int) -> Bool { isWrapped(r * cols + cols - 1) }
         // The logical line: rows joined across soft wraps.
         var top = row
         while top > 0, wraps(top - 1) { top -= 1 }
@@ -75,7 +89,9 @@ extension VTTerminal {
                 let width = Int32(cell.width)
                 if width == TERMY_ENGINE_CELL_SPACER_TAIL || width == TERMY_ENGINE_CELL_SPACER_HEAD { continue }
                 let last = width == TERMY_ENGINE_CELL_WIDE ? min(c + 1, cols - 1) : c
-                for value in [cell.codepoint] + (frame.clusters[r * cols + c] ?? []) {
+                // Concealed text reads as a space, so it ends any URL.
+                let shown = isShown(r * cols + c)
+                for value in shown ? [cell.codepoint] + (frame.clusters[r * cols + c] ?? []) : [0x20] {
                     scalars.append(Unicode.Scalar(value) ?? " ")
                     places.append((r, c, last))
                 }

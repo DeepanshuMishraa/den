@@ -52,6 +52,13 @@ public struct FrameColors: Sendable {
     public var palette: [RGB]
 }
 
+/// An OSC 8 hyperlink. libtermy gives links without an `id=` the empty id,
+/// so those to one target share an identity.
+struct Hyperlink: Equatable {
+    var id: String
+    var uri: String
+}
+
 /// The viewport as libtermy last reported it, kept current by applying its
 /// damage. Lives on the terminal so every view of it sees the same cells.
 final class FrameCache {
@@ -60,8 +67,8 @@ final class FrameCache {
     private(set) var cells: [TermyEngineCell] = []
     /// Scalars after the first of each multi-scalar grapheme, by cell index.
     private(set) var clusters: [Int: [UInt32]] = [:]
-    /// OSC 8 hyperlink targets, by cell index.
-    private(set) var hyperlinks: [Int: String] = [:]
+    /// OSC 8 hyperlinks, by cell index.
+    private(set) var hyperlinks: [Int: Hyperlink] = [:]
     private(set) var cursor = TermyEngineCursor()
     /// Rows the viewport is scrolled back.
     private(set) var displayOffset: UInt64 = 0
@@ -81,10 +88,11 @@ final class FrameCache {
             return Array(graphemes[start ..< start + Int(cell.grapheme_len)])
         }
         let links = UnsafeBufferPointer(start: frame.hyperlinks_ptr, count: frame.hyperlinks_len)
-        func uri(_ cell: TermyEngineCell) -> String? {
+        func hyperlink(_ cell: TermyEngineCell) -> Hyperlink? {
             let index = Int(cell.hyperlink) - 1
             guard links.indices.contains(index), let ptr = links[index].uri_ptr else { return nil }
-            return String(decoding: UnsafeBufferPointer(start: ptr, count: links[index].uri_len), as: UTF8.self)
+            let id = links[index].id_ptr.map { String(decoding: UnsafeBufferPointer(start: $0, count: links[index].id_len), as: UTF8.self) }
+            return Hyperlink(id: id ?? "", uri: String(decoding: UnsafeBufferPointer(start: ptr, count: links[index].uri_len), as: UTF8.self))
         }
 
         if frame.damage == UInt32(TERMY_ENGINE_DAMAGE_FULL) {
@@ -95,7 +103,7 @@ final class FrameCache {
             hyperlinks.removeAll(keepingCapacity: true)
             for (i, cell) in source.enumerated() {
                 if cell.grapheme_len > 0 { clusters[i] = cluster(cell) }
-                if cell.hyperlink != 0 { hyperlinks[i] = uri(cell) }
+                if cell.hyperlink != 0 { hyperlinks[i] = hyperlink(cell) }
             }
         } else {
             var next = 0
@@ -112,7 +120,7 @@ final class FrameCache {
                             clusters[base + col] = nil
                         }
                         if cell.hyperlink != 0 {
-                            hyperlinks[base + col] = uri(cell)
+                            hyperlinks[base + col] = hyperlink(cell)
                         } else if !hyperlinks.isEmpty {
                             hyperlinks[base + col] = nil
                         }

@@ -61,6 +61,31 @@ import Testing
         #expect(t.link(atCol: 11, row: 0) == nil)
     }
 
+    /// Concealed text (SGR 8) isn't drawn, so it can't be hovered or opened.
+    @Test func concealedLinksAreNotLinks() throws {
+        let t = try terminal("\u{1b}[8mhttps://hidden.example\u{1b}[0m \u{1b}[8m\u{1b}]8;;https://den.example\u{1b}\\osc\u{1b}]8;;\u{1b}\\\u{1b}[0m")
+        #expect(t.link(atCol: 3, row: 0) == nil)
+        #expect(t.link(atCol: 24, row: 0) == nil)
+    }
+
+    /// Without an id, two OSC 8 links to one target are separate links.
+    @Test func idlessHyperlinksToOneTargetStaySeparate() throws {
+        let link = "\u{1b}]8;;https://den.example\u{1b}\\here\u{1b}]8;;\u{1b}\\"
+        let t = try terminal("\(link) and \(link)")
+        #expect(try #require(t.link(atCol: 1, row: 0)).spans == [.init(row: 0, columns: 0 ... 3)])
+    }
+
+    /// An explicit id ties runs together, as a TUI does for a link split by redraws.
+    @Test func hyperlinksSharingAnIdAreOneLink() throws {
+        let t = try terminal("\u{1b}]8;id=a;https://den.example\u{1b}\\ab\u{1b}]8;;\u{1b}\\ \u{1b}]8;id=a;https://den.example\u{1b}\\cd\u{1b}]8;;\u{1b}\\ \u{1b}]8;id=b;https://den.example\u{1b}\\ef\u{1b}]8;;\u{1b}\\")
+        #expect(try #require(t.link(atCol: 0, row: 0)).spans == [.init(row: 0, columns: 0 ... 1), .init(row: 0, columns: 3 ... 4)])
+    }
+
+    @Test func idlessHyperlinkWrappedOverRowsIsOneLink() throws {
+        let t = try terminal("1234567\u{1b}]8;;https://den.example\u{1b}\\abcdef\u{1b}]8;;\u{1b}\\", cols: 10)
+        #expect(try #require(t.link(atCol: 1, row: 1)).spans == [.init(row: 0, columns: 7 ... 9), .init(row: 1, columns: 0 ... 2)])
+    }
+
     /// OSC 8 can name any scheme; only web and mail links open.
     @Test func onlySafeSchemesOpen() throws {
         let t = try terminal("\u{1b}]8;;file:///etc/passwd\u{1b}\\x\u{1b}]8;;\u{1b}\\")

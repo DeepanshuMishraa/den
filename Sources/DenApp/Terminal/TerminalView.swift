@@ -209,8 +209,7 @@ final class TerminalView: MTKView {
             do {
                 try renderState.update(from: replica.terminal)
                 frame.build(renderState)
-                // Output may have moved or replaced the link under the mouse.
-                hoveredLink = linkCell.flatMap { replica.terminal.link(atCol: $0.col, row: $0.row) }
+                refreshHover()
                 if let hoveredLink { frame.underline(hoveredLink) }
                 let (cols, rows) = renderState.size
                 gridSize = SIMD2(Float(cols) * Float(metrics.cellWidth), Float(rows) * Float(metrics.cellHeight))
@@ -481,9 +480,12 @@ final class TerminalView: MTKView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         pressedLink = nil
-        // ⌘-click opens a link even when the program has the mouse.
+        swallowingClick = false
+        // ⌘-click opens a link even when the program has the mouse. The
+        // program never saw the press, so it mustn't see the drag or release.
         if mode == .interactive, event.modifierFlags.contains(.command), let link = link(at: event) {
             open(link)
+            swallowingClick = true
             return
         }
         // ⌘-drag picks the pane up to move it.
@@ -493,13 +495,19 @@ final class TerminalView: MTKView {
             return
         }
         if wantsSelection(event) {
-            pressedLink = mode == .interactive ? link(at: event) : nil
+            // Shift-clicks while the program tracks the mouse only select.
+            let opensLinks = mode == .interactive && replica?.terminal.isMouseTracking == false
+            pressedLink = opensLinks ? link(at: event) : nil
             return select(event, .press)
         }
         mouseReport(event, .press, .left)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if swallowingClick {
+            swallowingClick = false
+            return
+        }
         if draggingPane {
             draggingPane = false
             model?.endPaneDrag()
@@ -519,6 +527,7 @@ final class TerminalView: MTKView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if swallowingClick { return }
         if draggingPane {
             NSCursor.closedHand.set()
             return model?.updatePaneDrag(at: windowPoint(event)) ?? ()
@@ -556,6 +565,8 @@ final class TerminalView: MTKView {
     }
 
     private var draggingPane = false
+    /// A ⌘-click opened a link on press; its drag and release go nowhere.
+    private var swallowingClick = false
 
     private func updateCursor(_ flags: NSEvent.ModifierFlags) {
         guard mode == .interactive, !draggingPane else { return }
@@ -589,9 +600,18 @@ final class TerminalView: MTKView {
     /// doesn't track the mouse, and with ⌘ where it does.
     private func updateHover(at point: NSPoint, flags: NSEvent.ModifierFlags) {
         guard mode == .interactive, let replica,
-              !replica.terminal.isMouseTracking || flags.contains(.command) || flags.contains(.shift),
+              !replica.terminal.isMouseTracking || flags.contains(.command),
               let cell = cell(at: point) else { return setLinkCell(nil) }
         setLinkCell(cell)
+    }
+
+    /// Output may have moved or replaced the link under a still mouse, or
+    /// turned mouse tracking on, so look again before drawing.
+    private func refreshHover() {
+        guard linkCell != nil, let window else { return }
+        let before = hoveredLink
+        updateHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), flags: NSEvent.modifierFlags)
+        if hoveredLink != before { updateCursor(NSEvent.modifierFlags) }
     }
 
     private func setLinkCell(_ cell: (col: Int, row: Int)?) {
