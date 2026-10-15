@@ -26,8 +26,10 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 - **Local-first UI.** Scrollback, mode-aware key encoding (kitty protocol,
   DECCKM), mouse reporting and bracketed paste all run against the replica,
   with no round trip.
-- **Persistent sessions.** The app starts dend in its own session (`setsid`), so
-  quitting Den keeps every shell running. The next launch reattaches to the
+- **Persistent sessions.** The app starts dend as its own launchd agent
+  (`launchctl bootstrap gui/<uid>`, from a plist in the support folder, so it
+  never starts at login), so quitting Den, even with the Dock's "Stop Running
+  in Background", keeps every shell running. The next launch reattaches to the
   last session. One dend owns the socket (an `flock`'d sidecar lock refuses a
   second dend even if the socket file was deleted); the reopened session is
   remembered in `~/Library/Application Support/Den/last-session`, shared by

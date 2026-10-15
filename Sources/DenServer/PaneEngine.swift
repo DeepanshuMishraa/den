@@ -29,6 +29,12 @@ final class PaneEngine: @unchecked Sendable {
         queue.sync { body(terminal) }
     }
 
+    /// Like `sync`, without waiting: `body` runs on the engine queue once
+    /// earlier writes are parsed. Hop before touching server state.
+    func async(_ body: @escaping @Sendable (VTTerminal) -> Void) {
+        queue.async { [self] in body(terminal) }
+    }
+
     /// Effects and `onTitle` fire on the engine queue; hop before touching
     /// server state. `onTitle` gets the new OSC 0/2 title.
     func setEffects(_ effects: VTEffects, onTitle: @escaping @Sendable (String?) -> Void) {

@@ -35,4 +35,35 @@ extension VTTerminal {
         defer { ghostty_free(nil, ptr, len) }
         return String(decoding: UnsafeBufferPointer(start: ptr, count: len), as: UTF8.self)
     }
+
+    /// Plain text of the active area (the rows the cursor can reach, no
+    /// scrollback), one line per row, trailing whitespace trimmed.
+    public func activeText() -> String {
+        func ref(_ x: UInt16, _ y: UInt32) -> GhosttyGridRef? {
+            var ref = GhosttyGridRef()
+            ref.size = MemoryLayout<GhosttyGridRef>.size
+            var point = GhosttyPoint()
+            point.tag = GHOSTTY_POINT_TAG_ACTIVE
+            point.value.coordinate = GhosttyPointCoordinate(x: x, y: y)
+            return ghostty_terminal_grid_ref(handle, point, &ref) == GHOSTTY_SUCCESS ? ref : nil
+        }
+        guard cols > 0, rows > 0, let start = ref(0, 0), let end = ref(cols - 1, UInt32(rows - 1)) else { return "" }
+        var selection = GhosttySelection()
+        selection.size = MemoryLayout<GhosttySelection>.size
+        selection.start = start
+        selection.end = end
+        var opts = GhosttyTerminalSelectionFormatOptions()
+        opts.size = MemoryLayout<GhosttyTerminalSelectionFormatOptions>.size
+        opts.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN
+        opts.trim = true
+        var ptr: UnsafeMutablePointer<UInt8>?
+        var len = 0
+        let result = withUnsafePointer(to: &selection) { sel in
+            opts.selection = sel
+            return ghostty_terminal_selection_format_alloc(handle, nil, opts, &ptr, &len)
+        }
+        guard result == GHOSTTY_SUCCESS, let ptr else { return "" }
+        defer { ghostty_free(nil, ptr, len) }
+        return String(decoding: UnsafeBufferPointer(start: ptr, count: len), as: UTF8.self)
+    }
 }

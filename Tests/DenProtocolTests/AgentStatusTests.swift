@@ -49,6 +49,30 @@ import Testing
         #expect(run([(true, "✦  Thinking"), (true, "✦  Thinking"), (false, "◇  Ready")]) == [.working(progress: nil), .done])
     }
 
+    /// Feeds (output, screen signal) ticks with no title.
+    private func run(screens: [(output: Bool, screen: ScreenSignal?)]) -> [ProgramPhase] {
+        var inference = AgentStatusInference()
+        return screens.compactMap { inference.tick(output: $0.output, title: nil, screen: $0.screen) }
+    }
+
+    /// A permission prompt is blocked at once, even mid-output; answering it
+    /// goes back to work.
+    @Test func screenPromptIsBlocked() {
+        let phases = run(screens: [(true, nil), (true, nil), (false, .blocked), (true, .working), (false, .idle)])
+        #expect(phases == [.idle, .working(progress: nil), .blocked(nil, progress: nil), .working(progress: nil), .done])
+    }
+
+    /// A transcript viewer hides the live state, so nothing changes.
+    @Test func viewerKeepsPhase() {
+        #expect(run(screens: [(false, .blocked), (false, .viewer), (false, .viewer)]) == [.blocked(nil, progress: nil)])
+    }
+
+    /// A screen signal outranks the title.
+    @Test func screenBeatsTitle() {
+        var inference = AgentStatusInference()
+        #expect(inference.tick(output: false, title: "⠹ work", screen: .blocked) == .blocked(nil, progress: nil))
+    }
+
     @Test func knowsMajorAgents() {
         for name in ["claude", "codex", "gemini", "opencode", "grok", "cursor-agent", "copilot", "amp", "aider", "qwen", "crush", "droid", "goose"] {
             #expect(AgentStatusInference.isAgent(name), "\(name)")

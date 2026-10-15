@@ -686,17 +686,33 @@ public actor DenServer {
     private func inferAgentStatus(of pane: Pane) {
         let output = pane.agentOutput
         pane.agentOutput = false
-        let isAgent = AgentStatusInference.isAgent(pane.meta.process)
-        if !isAgent { pane.reportsOwnStatus = false }
-        guard isAgent, !pane.reportsOwnStatus else {
+        let agent = CodingAgent(process: pane.meta.process)
+        if agent == nil { pane.reportsOwnStatus = false }
+        guard let agent, !pane.reportsOwnStatus else {
             pane.agentInference = nil
             if pane.status.records.contains(where: { $0.id == Self.inferredID }), pane.status.apply(.clear(id: Self.inferredID)) {
                 broadcast(.programStatus(pane.id, pane.status.records))
             }
             return
         }
+        guard agent.readsScreen else { return applyInference(to: pane, output: output, screen: nil) }
+        // The screen is read off the engine queue, after any output still
+        // being parsed, so a busy pane never stalls dend's queue.
+        let id = pane.id, queue = queue
+        pane.engine.async { [self] terminal in
+            let screen = agent.signal(screen: terminal.activeText(), title: terminal.title)
+            queue.async { [self] in
+                assumeIsolated { server in
+                    guard let pane = server.panes[id], CodingAgent(process: pane.meta.process) == agent, !pane.reportsOwnStatus else { return }
+                    server.applyInference(to: pane, output: output, screen: screen)
+                }
+            }
+        }
+    }
+
+    private func applyInference(to pane: Pane, output: Bool, screen: ScreenSignal?) {
         var inference = pane.agentInference ?? AgentStatusInference()
-        let phase = inference.tick(output: output, title: pane.title)
+        let phase = inference.tick(output: output, title: pane.title, screen: screen)
         pane.agentInference = inference
         guard let phase else { return }
         pane.status.apply(.update(StatusRecord(id: Self.inferredID, phase: phase, app: pane.meta.process)))
