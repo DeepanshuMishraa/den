@@ -98,10 +98,10 @@ import Testing
         let dir = FileManager.default.temporaryDirectory.appending(path: "den-theme-export-\(UUID().uuidString)")
         ThemeJSON.exportExamples(to: dir.appending(path: "examples"))
         let files = try FileManager.default.contentsOfDirectory(at: dir.appending(path: "examples"), includingPropertiesForKeys: nil)
-        // 36 dark + 19 light, with 11 dark/light pairs sharing a file
-        // (Gruvbox, One, Solarized, Monokai Pro…). The hidden manifest
-        // tracks what was generated; it isn't a theme.
-        #expect(files.filter { !$0.lastPathComponent.hasPrefix(".") }.count == 44)
+        // 63 dark + 33 light, with 13 dark/light pairs sharing a file
+        // (Gruvbox, One, Solarized, Merino, Silver Point…). The hidden
+        // manifest tracks what was generated; it isn't a theme.
+        #expect(files.filter { !$0.lastPathComponent.hasPrefix(".") }.count == 83)
         let gruvbox = try Data(contentsOf: dir.appending(path: "examples/Gruvbox.json"))
         let doc = try #require(JSONSerialization.jsonObject(with: gruvbox) as? [String: Any])
         #expect(doc["dark"] is [String: Any] && doc["light"] is [String: Any])
