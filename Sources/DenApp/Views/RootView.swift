@@ -46,6 +46,7 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.18), value: model.toast)
         .animation(.easeOut(duration: 0.12), value: model.leaderPending)
         .animation(.easeOut(duration: 0.18), value: model.loginRequest)
+        .animation(.easeOut(duration: 0.18), value: model.whatsNew)
         .animation(.easeInOut(duration: 0.25), value: theme)
     }
 
@@ -161,7 +162,12 @@ struct RootView: View {
             VStack(spacing: 10) {
                 Text("Not connected to dend").uiFont(size: 13, weight: .semibold)
                 Text(reason).uiFont(size: 12).foregroundStyle(theme.secondaryText).multilineTextAlignment(.center)
-                Button("Reconnect") { Task { await model.connect() } }
+                if model.outdatedDends.contains(.local) {
+                    Button("Restart dend") { Task { await model.restartOutdatedDends() } }
+                    Text("This ends the sessions it's running.").uiFont(size: 11).foregroundStyle(theme.tertiaryText)
+                } else {
+                    Button("Reconnect") { Task { await model.connect() } }
+                }
             }
             .padding(24)
             .frame(maxWidth: 420)
@@ -204,6 +210,16 @@ struct RootView: View {
                 .transition(.opacity)
             LoginForm(request: request)
                 .id("\(request.host)-\(request.message ?? "")")
+                .padding(.top, TitleBar.height + 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
+        }
+
+        if let whatsNew = model.whatsNew {
+            Color.black.opacity(0.18)
+                .onTapGesture { model.dismissWhatsNew() }
+                .transition(.opacity)
+            WhatsNewPanel(whatsNew: whatsNew)
                 .padding(.top, TitleBar.height + 40)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))

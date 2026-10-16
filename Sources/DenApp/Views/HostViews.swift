@@ -12,6 +12,7 @@ enum HostStatus {
         case .connected: "Connected"
         case .reconnecting(_, let retryIn): "Retrying in \(retryIn)s"
         case .failed: "Failed"
+        case .needsRestart: "Needs restart"
         case .disconnected: "Disconnected"
         }
     }
@@ -26,6 +27,7 @@ enum HostStatus {
         case .connected(let hostName): "Connected to \(hostName)"
         case .reconnecting(let reason, let retryIn): "\(reason) Retrying in \(retryIn)s."
         case .failed(let reason): reason
+        case .needsRestart: "dend on the host is from an older Den. Restarting it ends the sessions there; connect again to be asked."
         case .disconnected: "Disconnected. Sessions keep running on the host; connect again to pick them up."
         }
     }
@@ -33,7 +35,7 @@ enum HostStatus {
     static func color(_ state: RemoteState?, theme: Theme) -> Color {
         switch state {
         case .connected: .green
-        case .connecting, .uploading, .reconnecting: .orange
+        case .connecting, .uploading, .reconnecting, .needsRestart: .orange
         case .needsLogin, .failed: .red
         case .disconnected, nil: theme.tertiaryText
         }

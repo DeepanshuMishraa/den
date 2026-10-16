@@ -132,6 +132,9 @@ enum RemoteState: Equatable {
     /// The connection dropped; another attempt follows in `retryIn` seconds.
     case reconnecting(reason: String, retryIn: Int)
     case failed(String)
+    /// The host's dend is from an older Den and refused this one; it needs
+    /// restarting, which ends its sessions. No retries meanwhile.
+    case needsRestart
     /// You disconnected it; no retries until you connect again.
     case disconnected
 

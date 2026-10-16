@@ -41,7 +41,8 @@ struct SessionMenu: View {
                 rows += sessionRows(numbered.filter { model.sessionHosts[$0.element.id] == id })
                 switch model.remoteStates[host.id] {
                 case .needsLogin: rows.append(.logIn(host.id))
-                case .failed, .reconnecting, .disconnected: rows.append(.reconnect(host.id))
+                // Reconnecting a host that needs a restart asks again.
+                case .failed, .reconnecting, .disconnected, .needsRestart: rows.append(.reconnect(host.id))
                 case .connected: rows += [.newSessionOn(host.id), .disconnect(host.id)]
                 case .connecting, .uploading, nil: break
                 }

@@ -446,7 +446,49 @@ final class AppModel {
         themeWatcher = ThemeWatcher(directory: UserConfig.themesDirectory) { [weak self] in
             Task { @MainActor in self?.reloadCustomThemes() }
         }
+        // Before the updater, which marks this launch in the defaults.
+        announceUpdateIfNeeded(d)
         updateController = UpdateController(model: self)
+    }
+
+    // MARK: What's new
+
+    /// The release notes shown once after an update.
+    private(set) var whatsNew: WhatsNew?
+
+    /// On the first launch of a new version, shows its release notes; the
+    /// dialog opens at once and the notes fill in from GitHub.
+    private func announceUpdateIfNeeded(_ defaults: UserDefaults) {
+        let info = Bundle.main.infoDictionary
+        let current = info?["CFBundleShortVersionString"] as? String
+        let version = WhatsNew.versionToAnnounce(current: current,
+                                                 lastLaunched: defaults.string(forKey: WhatsNew.lastLaunchedKey),
+                                                 launchedBefore: defaults.bool(forKey: WhatsNew.sparkleLaunchedKey))
+        // Recorded now, so a crash on the way doesn't announce it twice.
+        if let current { defaults.set(current, forKey: WhatsNew.lastLaunchedKey) }
+        guard let version,
+              let repository = ReleaseNotes.repository(feed: (info?["SUFeedURL"] as? String).flatMap(URL.init(string:))) else { return }
+        showWhatsNew(version: version, repository: repository)
+    }
+
+    /// Opens the dialog for `version` and loads its notes.
+    func showWhatsNew(version: String, repository: String) {
+        guard let page = ReleaseNotes.page(repository: repository, version: version) else { return }
+        whatsNew = WhatsNew(version: version, page: page, notes: .loading)
+        Task { [weak self] in
+            let result = await ReleaseNotes.fetch(repository: repository, version: version)
+            guard let self, self.whatsNew?.version == version else { return }
+            switch result {
+            case .success(let blocks): self.whatsNew?.notes = .loaded(blocks)
+            case .failure(let error): self.whatsNew?.notes = .unavailable(error.description)
+            }
+        }
+    }
+
+    func dismissWhatsNew() {
+        guard whatsNew != nil else { return }
+        whatsNew = nil
+        terminalFocusRequest &+= 1
     }
 
     // MARK: Connection
@@ -566,10 +608,67 @@ final class AppModel {
     /// dend turned down the hello, almost always because it's a build from
     /// before this Den that is still running.
     private func refused(_ host: HostID, _ message: String) {
-        let fix = host == .local
-            ? "It's still running from before Den was updated. Your sessions are fine; to switch over, quit Den, run `pkill -x dend` in a terminal (this ends every session), then reopen Den."
-            : "Its dend is still running from an older Den. The sessions there are fine; to switch over, run `pkill -x dend` on \(hostLabel(host)) (this ends its sessions), then reconnect."
-        lastError = "\(host == .local ? "dend" : hostLabel(host)) refused this Den: \(message) \(fix)"
+        NSLog("Den: dend on %@ refused this Den: %@", hostLabel(host), message)
+        // Let go of it: the old dend and its sessions run on until you choose.
+        switch host {
+        case .local:
+            connections[.local]?.disconnect("dend is still running from an older Den, which can't talk to this one. Your sessions there keep running until you restart it.")
+        case .remote(let id):
+            disconnectRemote(id)
+            remoteStates[id] = .needsRestart
+        }
+        outdatedDends.insert(host)
+        promptDendRestart()
+    }
+
+    /// Hosts whose running dend is from an older Den and refused this one,
+    /// until restarted.
+    private(set) var outdatedDends: Set<HostID> = []
+
+    /// One prompt for every outdated dend. "Later" leaves them running; the
+    /// placeholder (this Mac) and Reconnect (remote hosts) ask again.
+    private func promptDendRestart() {
+        guard !outdatedDends.isEmpty else { return }
+        let remotes = outdatedDends.filter { $0 != .local }.map(hostLabel).sorted()
+        let places = (outdatedDends.contains(.local) ? ["this Mac"] : []) + remotes
+        let message = outdatedDends == [.local]
+            ? "dend is from an older Den. Restart it to connect; its sessions will end."
+            : "dend on \(places.joined(separator: ", ")) is from an older Den. Restart to connect; sessions there will end."
+        showActionToast(message, actions: [
+            ("Restart dend", nil, { [weak self] in Task { await self?.restartOutdatedDends() } }),
+            ("Later", nil, {}),
+        ])
+    }
+
+    /// Stops each outdated dend, ending its sessions, and connects to this
+    /// Den's in its place.
+    func restartOutdatedDends() async {
+        let hosts = outdatedDends
+        outdatedDends = []
+        for host in hosts {
+            switch host {
+            case .local:
+                connectionState = .connecting
+                do {
+                    try await DendLauncher.stopRunning()
+                } catch {
+                    outdatedDends.insert(.local)
+                    connectionState = .disconnected(error.description)
+                    continue
+                }
+                await connect()
+            case .remote(let id):
+                guard let remote = remoteHost(id) else { continue }
+                remoteStates[id] = .connecting(step: "Restarting dend on \(remote.address)…")
+                switch await SSH(host: remote).run(RemoteSetup.restartCommand) {
+                case .failure(let failure):
+                    outdatedDends.insert(host)
+                    remoteStates[id] = .failed("Restarting dend on \(remote.address) failed: \(failure). Its old dend may still be running with its sessions; try again from the session menu.")
+                case .success:
+                    connectRemote(id, reveal: false)
+                }
+            }
+        }
     }
 
     private func restore(_ id: PaneID, _ restored: Result<RestoredTerminal, VTError>) {
@@ -1092,6 +1191,7 @@ final class AppModel {
         case .needsLogin: "\(name) needs you to log in."
         case .reconnecting(let reason, let retryIn): "Lost \(name): \(reason) Retrying in \(retryIn)s; your sessions keep running there."
         case .failed(let reason): reason
+        case .needsRestart: "dend on \(name) is from an older Den. Restart it from the prompt, or reconnect from the session menu to be asked again; restarting ends its sessions."
         case .disconnected: "Disconnected from \(name). Your sessions keep running there; reconnect from the session menu."
         case .connected, nil: "Reattaching to \(name)…"
         }

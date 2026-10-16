@@ -80,6 +80,12 @@ fi
 
     static let streamCommand = sh(#"exec "$HOME/.den/bin/dend" --stdio"#)
 
+    /// Stops the host's dend (and its sessions), which an older Den left
+    /// running. The installed binary is already this Den's: the boot service
+    /// or the next stream starts it. Waits on the pids it stopped only, so
+    /// the new dend a service restarts meanwhile is left alone.
+    static let restartCommand = sh(#"pids=$(pgrep -u "$(id -u)" -x dend); [ -z "$pids" ] && exit 0; kill $pids 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do alive=0; for p in $pids; do kill -0 $p 2>/dev/null && alive=1; done; [ $alive = 0 ] && exit 0; sleep 0.3; done; kill -9 $pids 2>/dev/null; exit 0"#)
+
     /// Appends Den's public key to authorized_keys unless it's already there.
     static func authorizeCommand(publicKey: String) -> String {
         sh(#"umask 077; mkdir -p "$HOME/.ssh"; touch "$HOME/.ssh/authorized_keys"; grep -qxF "\#(publicKey)" "$HOME/.ssh/authorized_keys" || echo "\#(publicKey)" >> "$HOME/.ssh/authorized_keys""#)
