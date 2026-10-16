@@ -99,7 +99,7 @@ import Testing
         ThemeJSON.exportExamples(to: dir.appending(path: "examples"))
         let files = try FileManager.default.contentsOfDirectory(at: dir.appending(path: "examples"), includingPropertiesForKeys: nil)
         // 63 dark + 33 light, with 13 dark/light pairs sharing a file
-        // (Gruvbox, One, Solarized, Merino, Silver Point…). The hidden
+        // (Gruvbox, One, Solarized, Cool Ranch, Quicksilver…). The hidden
         // manifest tracks what was generated; it isn't a theme.
         #expect(files.filter { !$0.lastPathComponent.hasPrefix(".") }.count == 83)
         let gruvbox = try Data(contentsOf: dir.appending(path: "examples/Gruvbox.json"))

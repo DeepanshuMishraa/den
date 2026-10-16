@@ -16,6 +16,16 @@ import DenVT
         #expect(ThemeCatalog.named(ThemeCatalog.defaultLight)?.isDark == false)
     }
 
+    /// Themes saved under a generated theme's old name still load, as the renamed theme.
+    @Test func formerNamesResolveToRenamedThemes() {
+        let names = Set((ThemeCatalog.dark + ThemeCatalog.light).map(\.name))
+        #expect(ThemeCatalog.renamed.count == 41)
+        for (old, new) in ThemeCatalog.renamed {
+            #expect(!names.contains(old), "\(old) is still a theme name")
+            #expect(ThemeCatalog.named(old)?.name == new, "\(old)")
+        }
+    }
+
     /// Spot checks against the projects' own Ghostty ports.
     @Test func officialTokens() throws {
         let mocha = try #require(ThemeCatalog.named("Catppuccin Mocha"))

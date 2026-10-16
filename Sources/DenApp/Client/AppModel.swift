@@ -501,8 +501,11 @@ final class AppModel {
         fontFamily = d.string(forKey: "fontFamily") ?? FontMetrics.defaultFamily
         fontSize = CGFloat(d.object(forKey: "fontSize") as? Double ?? Double(FontMetrics.defaultSize))
         appearanceMode = AppearanceMode(rawValue: d.string(forKey: "appearance") ?? "") ?? .system
-        lightThemeName = d.string(forKey: "lightTheme") ?? ThemeCatalog.defaultLight
-        darkThemeName = d.string(forKey: "darkTheme") ?? ThemeCatalog.defaultDark
+        // Map names stored before Den's generated themes were renamed.
+        let storedLight = d.string(forKey: "lightTheme") ?? ThemeCatalog.defaultLight
+        let storedDark = d.string(forKey: "darkTheme") ?? ThemeCatalog.defaultDark
+        lightThemeName = ThemeCatalog.renamed[storedLight] ?? storedLight
+        darkThemeName = ThemeCatalog.renamed[storedDark] ?? storedDark
         theme = ThemeCatalog.named(ThemeCatalog.defaultDark) ?? ThemeCatalog.dark[0]
         ThemeJSON.exportExamples(to: UserConfig.themesDirectory.appending(path: "examples"))
         reloadCustomThemes()
