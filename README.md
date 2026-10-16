@@ -33,8 +33,9 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
   in Background", keeps every shell running. The next launch reattaches to the
   last session. One dend owns the socket (an `flock`'d sidecar lock refuses a
   second dend even if the socket file was deleted); the reopened session is
-  remembered in `~/Library/Application Support/Den/last-session`, shared by
-  dev and bundled builds.- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
+  remembered in `~/Library/Application Support/Den/last-session`. Dev builds
+  (run from outside a .app) use `~/Library/Application Support/Den Dev`, with
+  their own socket and launchd job, so they never touch an installed Den.- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
   the system `ssh`. Den runs `dend --stdio` there, which starts the host's dend
   if needed and relays the SSH channel to its socket, so a remote session
   speaks the same protocol and outlives dropped connections. See
@@ -53,7 +54,7 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 git submodule update --init
 scripts/build-libtermy-engine.sh # builds vendor/termy's libtermy_engine with cargo into an xcframework
 swift test
-swift build && .build/debug/Den  # dev run (dend is started from next to the binary)
+scripts/dev.sh                   # build and run the dev Den (own socket and sessions, apart from Den.app)
 scripts/build-dend-linux.sh       # static Linux dend (x86_64, aarch64) for remote hosts; needs Docker
 scripts/bundle.sh                # dist/Den.app (builds vendor/fsearch with cargo if present)
 ```

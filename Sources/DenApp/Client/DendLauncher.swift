@@ -123,7 +123,7 @@ struct LaunchdJob {
     let executable: URL
     let socket: String
 
-    static let baseLabel = "den.dipxsy.app.dend"
+    static let baseLabel = DenPaths.isDevBuild ? "den.dipxsy.app.dend.dev" : "den.dipxsy.app.dend"
 
     /// One job per socket, so a `DEN_SOCKET` test dend doesn't replace the
     /// real one's job.

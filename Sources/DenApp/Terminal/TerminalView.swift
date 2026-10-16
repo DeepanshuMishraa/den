@@ -35,8 +35,43 @@ final class TerminalView: MTKView {
         didSet {
             guard oldValue != isFocusedPane else { return }
             needsDisplay = true
+            cursorActivity()
             if isFocusedPane { claimFocus() }
         }
+    }
+
+    // MARK: Cursor blink
+
+    /// When typing, output or a click last touched this pane; the blink
+    /// rests solid for a moment after it.
+    private var lastActivity = Date()
+    private var blinkTimer: Timer?
+    /// The cursor opacity the last frame drew, so ticks redraw only on change.
+    private var drawnCursorOpacity: Float = 1
+
+    private var cursorOpacity: Float {
+        guard mode == .interactive, isFocusedPane, window?.isKeyWindow == true, let model, model.cursorBlink else { return 1 }
+        return model.cursorBlinkStyle.opacity(sinceActivity: Date().timeIntervalSince(lastActivity),
+                                              fades: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
+
+    /// Restarts the blink at solid, and runs its timer only where it blinks.
+    private func cursorActivity() {
+        lastActivity = Date()
+        guard model?.cursorBlink == true, mode == .interactive, isFocusedPane else {
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+            return
+        }
+        guard blinkTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, abs(self.cursorOpacity - self.drawnCursorOpacity) > 0.01 else { return }
+                self.needsDisplay = true
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        blinkTimer = timer
     }
 
     /// Inset of the grid inside the view, in points.
@@ -80,6 +115,7 @@ final class TerminalView: MTKView {
 
     isolated deinit {
         replica?.stopObserving(self)
+        blinkTimer?.invalidate()
     }
 
     /// Connects to the pane's replica once its snapshot has arrived.
@@ -87,7 +123,11 @@ final class TerminalView: MTKView {
         guard replica !== self.replica else { return }
         self.replica?.stopObserving(self)
         self.replica = replica
-        replica?.observe(self) { [weak self] in self?.needsDisplay = true }
+        // Output (and setting changes) show the cursor solid again.
+        replica?.observe(self) { [weak self] in
+            self?.needsDisplay = true
+            self?.cursorActivity()
+        }
         needsDisplay = true
         reportSize()
     }
@@ -203,8 +243,10 @@ final class TerminalView: MTKView {
             cursorFocused: mode == .interactive && isFocusedPane && window?.isKeyWindow == true,
             showCursor: mode == .interactive,
             contrastCorrection: replica?.contrastCorrection ?? false,
-            ligatures: model.fontLigatures
+            ligatures: model.fontLigatures,
+            cursorOpacity: cursorOpacity
         )
+        drawnCursorOpacity = frame.cursorOpacity
         var gridSize = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
         if let replica, let renderState {
             do {
@@ -279,6 +321,7 @@ final class TerminalView: MTKView {
         guard let replica, let keyEncoder, let model else { return }
         let bytes = keyEncoder.encode(keyInput(event, action: event.isARepeat ? .repeat : .press), terminal: replica.terminal, optionAsAlt: optionAsAlt)
         guard !bytes.isEmpty else { return }
+        cursorActivity()
         replica.terminal.clearSelection()
         replica.scroll(.bottom)
         model.input(paneID, bytes)
@@ -480,6 +523,7 @@ final class TerminalView: MTKView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        cursorActivity()
         pressedLink = nil
         swallowingClick = false
         // ⌘-click opens a link even when the program has the mouse. The

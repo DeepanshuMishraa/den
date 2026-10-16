@@ -165,6 +165,8 @@ struct FrameBuilder {
     let contrastCorrection: Bool
     /// Shape symbol runs with the font's ligatures (`->`, `!=`, `=>`).
     let ligatures: Bool
+    /// 1 solid, 0 hidden: where a blinking cursor is in its cycle.
+    let cursorOpacity: Float
 
     var backgrounds: [RectInstance] = []
     var selections: [RectInstance] = []
@@ -175,7 +177,7 @@ struct FrameBuilder {
     var clear: RGB?
 
     init(metrics: FontMetrics, atlas: GlyphAtlas, pipelines: RenderPipelines, origin: SIMD2<Float>, theme: Theme,
-         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool) {
+         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool, cursorOpacity: Float = 1) {
         self.metrics = metrics
         self.atlas = atlas
         self.pipelines = pipelines
@@ -185,6 +187,7 @@ struct FrameBuilder {
         self.showCursor = showCursor
         self.contrastCorrection = contrastCorrection
         self.ligatures = ligatures
+        self.cursorOpacity = cursorOpacity
     }
 
     /// Adjacent ASCII cells of one row and font style, drawn shaped when the
@@ -293,7 +296,9 @@ struct FrameBuilder {
                 bg = oldFg
             }
 
-            let isCursorCell = cursor.map { $0.shape == .block && cursorFocused && $0.x == cell.col && $0.y == cell.row } ?? false
+            // Past the middle of a blink's fade the text under a block
+            // cursor goes back to its own color.
+            let isCursorCell = cursor.map { $0.shape == .block && cursorFocused && cursorOpacity > 0.5 && $0.x == cell.col && $0.y == cell.row } ?? false
             if isCursorCell { fg = defaultBg }
             if cell.selected, !isCursorCell, let selected = theme.selectionForeground { fg = selected }
 
@@ -353,7 +358,7 @@ struct FrameBuilder {
         if let cursor {
             let x = origin.x + Float(cursor.x) * cw
             let y = origin.y + Float(cursor.y) * ch
-            let c = cursorColor.simd()
+            let c = cursorColor.simd(cursorOpacity)
             let t = max(Float(metrics.scale), 1) * 1.5
             let shape: CursorShape = cursorFocused ? cursor.shape : .hollowBlock
             switch shape {

@@ -389,6 +389,17 @@ final class AppModel {
     var fontLigatures: Bool { didSet { defaults.set(fontLigatures, forKey: "fontLigatures"); refreshReplicas() } }
     /// Core Text font smoothing for terminal text: heavier, softer strokes.
     var fontSmoothing: Bool { didSet { defaults.set(fontSmoothing, forKey: "fontSmoothing"); refreshReplicas() } }
+    /// The focused pane's cursor fades in and out while nothing happens.
+    var cursorBlink: Bool { didSet { defaults.set(cursorBlink, forKey: "cursorBlink"); refreshReplicas() } }
+    /// How it blinks: speed, transition and pause, each a preset.
+    var cursorBlinkStyle: CursorBlink {
+        didSet {
+            defaults.set(cursorBlinkStyle.speed.rawValue, forKey: "cursorBlinkSpeed")
+            defaults.set(cursorBlinkStyle.transition.rawValue, forKey: "cursorBlinkTransition")
+            defaults.set(cursorBlinkStyle.pause.rawValue, forKey: "cursorBlinkPause")
+            refreshReplicas()
+        }
+    }
     var interfaceStyle: InterfaceStyle { didSet { defaults.set(interfaceStyle.rawValue, forKey: "interfaceStyle") } }
     /// Set while hovering a style in the palette; reverted on dismiss.
     var previewInterfaceStyle: InterfaceStyle?
@@ -478,6 +489,12 @@ final class AppModel {
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
         fontLigatures = d.bool(forKey: "fontLigatures")
         fontSmoothing = d.bool(forKey: "fontSmoothing")
+        cursorBlink = d.bool(forKey: "cursorBlink")
+        cursorBlinkStyle = CursorBlink(
+            speed: CursorBlink.Speed(rawValue: d.string(forKey: "cursorBlinkSpeed") ?? "") ?? .normal,
+            transition: CursorBlink.Transition(rawValue: d.string(forKey: "cursorBlinkTransition") ?? "") ?? .smooth,
+            pause: CursorBlink.Pause(rawValue: d.string(forKey: "cursorBlinkPause") ?? "") ?? .normal
+        )
         interfaceStyle = InterfaceStyle(rawValue: d.string(forKey: "interfaceStyle") ?? "") ?? .themed
         density = Density(rawValue: d.string(forKey: "density") ?? "") ?? .comfortable
         fontFamily = d.string(forKey: "fontFamily") ?? FontMetrics.defaultFamily
