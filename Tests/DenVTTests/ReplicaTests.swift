@@ -58,6 +58,21 @@ func screenText(_ terminal: VTTerminal) throws -> [String] {
         #expect(String(decoding: responses, as: UTF8.self) == "\u{1b}[1;1R")
     }
 
+    /// Den doesn't draw kitty images yet, so it must not answer kitty
+    /// graphics commands: programs (OpenTUI, chafa, ...) take any reply as
+    /// support and would draw blank cells instead of falling back.
+    @Test func kittyGraphicsGetNoReply() throws {
+        let server = try VTTerminal(cols: 20, rows: 4)
+        var responses = Data()
+        server.effects = VTEffects(writeBack: { responses.append(contentsOf: $0) })
+
+        // OpenTUI's probe: a kitty query, then primary device attributes.
+        server.write(Data("\u{1b}_Gi=31337,s=1,v=1,a=q,t=d,f=24;AAAA\u{1b}\\\u{1b}[c".utf8))
+        // A real upload, which kitty would answer with OK.
+        server.write(Data("\u{1b}_Ga=t,i=7,s=1,v=1,f=24;AAAA\u{1b}\\\u{1b}[6n".utf8))
+        #expect(String(decoding: responses, as: UTF8.self) == "\u{1b}[?62;22c\u{1b}[1;1R")
+    }
+
     @Test func titleIsReplicated() throws {
         let server = try VTTerminal(cols: 20, rows: 4)
         server.write(Data("\u{1b}]2;Claude Code\u{07}".utf8))
