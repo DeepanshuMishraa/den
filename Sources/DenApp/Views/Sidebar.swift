@@ -151,7 +151,7 @@ private struct ActivityModeToggle: View {
                 .overlay(Circle().strokeBorder(on ? theme.activeTabBorder : .clear, lineWidth: 0.5))
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
         .overlay(alignment: .topTrailing) {
             if !on, model.anyTabWantsAttention {
@@ -208,7 +208,7 @@ struct SidebarRow: View {
                     Image(systemName: "xmark").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(theme.tertiaryText)
                         .frame(width: 18, height: 18).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hitArea)
             } else if let status {
                 StatusGlyph(indicator: status.indicator)
             }

@@ -141,7 +141,7 @@ struct HostActions: View {
                         .frame(height: 20)
                         .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.red.opacity(0.85)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hitArea)
                 .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
             } else {
                 if model.remoteStates[host]?.isConnected == true {
@@ -175,7 +175,7 @@ private struct HostActionButton: View {
                 .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(hovering ? theme.hover : .clear))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
     }
 }

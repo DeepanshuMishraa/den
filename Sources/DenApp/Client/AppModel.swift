@@ -1593,6 +1593,8 @@ final class AppModel {
     /// Re-reads the config. Unless `force`, does nothing when the file
     /// hasn't changed since the last read.
     func reloadConfig(force: Bool = false) {
+        syncStoredThemeNames()
+        applyTheme()
         let url = UserConfig.url
         let stamp = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
         guard force || stamp != configStamp else { return }
@@ -1915,6 +1917,7 @@ final class AppModel {
     /// Re-reads hand-written JSON themes (and Ghostty imports). Saved edits
     /// to the selected theme apply at once; a deleted one falls back.
     func reloadCustomThemes() {
+        syncStoredThemeNames()
         let loaded = ThemeImport.installedWithErrors()
         customThemes = loaded.themes
         themeFileErrors = loaded.errors
@@ -1925,6 +1928,14 @@ final class AppModel {
         } else if theme.isCustom, !customThemes.contains(where: { $0.name == theme.name && $0.appearance == theme.appearance }) {
             applyTheme()
         }
+    }
+
+    /// Adopts theme names another tool (such as Hued) wrote to the defaults
+    /// while Den runs; otherwise they would only be read at launch.
+    private func syncStoredThemeNames() {
+        func stored(_ key: String) -> String? { defaults.string(forKey: key).map { ThemeCatalog.renamed[$0] ?? $0 } }
+        if let dark = stored("darkTheme"), dark != darkThemeName { darkThemeName = dark }
+        if let light = stored("lightTheme"), light != lightThemeName { lightThemeName = light }
     }
 
     private func resolve(_ name: String, _ appearance: Appearance) -> Theme {

@@ -212,7 +212,7 @@ struct CommandPalette: View {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 12)).foregroundStyle(theme.tertiaryText)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hitArea)
             }
         }
         .padding(.horizontal, 9)

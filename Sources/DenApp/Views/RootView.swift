@@ -268,7 +268,7 @@ struct RootView: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
                     Text(error).uiFont(size: 12).fixedSize(horizontal: false, vertical: true)
-                    Button { model.dismissError() } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+                    Button { model.dismissError() } label: { Image(systemName: "xmark") }.buttonStyle(.hitArea)
                 }
                 .padding(12)
                 .frame(maxWidth: 520)

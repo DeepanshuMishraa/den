@@ -59,7 +59,7 @@ struct ExposeCard: View {
                         Image(systemName: "xmark").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(theme.tertiaryText)
                             .frame(width: 18, height: 18).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hitArea)
                 }
             }
             .padding(.horizontal, 6)

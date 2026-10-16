@@ -122,7 +122,7 @@ private struct ReleaseLink: View {
             .uiFont(size: 11.5)
             .foregroundStyle(hovering ? theme.secondaryText : theme.tertiaryText)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
     }
 }
@@ -144,7 +144,7 @@ private struct PillButton: View {
                 .background(Capsule().fill(theme.isDark ? Color.white.opacity(hovering ? 0.14 : 0.09) : Color.black.opacity(hovering ? 0.1 : 0.06)))
                 .overlay(Capsule().strokeBorder(theme.menuBorder, lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
     }
 }

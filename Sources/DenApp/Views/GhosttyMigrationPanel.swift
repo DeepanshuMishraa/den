@@ -161,7 +161,7 @@ private struct PanelButton: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
     }
 }

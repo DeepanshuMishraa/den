@@ -171,6 +171,19 @@ extension View {
     }
 }
 
+/// Plain button style whose entire label bounds are clickable.
+/// `.plain` hit-tests only opaque pixels, so clicks on padding, transparent
+/// gaps or a `Spacer` fall through; this style makes the full frame respond.
+struct HitAreaButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.contentShape(Rectangle())
+    }
+}
+
+extension ButtonStyle where Self == HitAreaButtonStyle {
+    static var hitArea: HitAreaButtonStyle { HitAreaButtonStyle() }
+}
+
 /// Borderless icon button with a rounded hover fill.
 struct IconButton: View {
     let symbol: String
@@ -191,7 +204,7 @@ struct IconButton: View {
                 .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hovering && enabled ? model.theme.hover : .clear))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .disabled(!enabled)
         .onHover { hovering = $0 }
     }
@@ -328,7 +341,7 @@ private struct ToastButton: View {
             .background(Capsule().fill(fill))
             .overlay(Capsule().strokeBorder(stroke, lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .foregroundStyle(foreground)
         .opacity(hovering ? 0.88 : 1)
         .onHover { hovering = $0 }

@@ -99,7 +99,7 @@ struct SessionButton: View {
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering || model.showSessionMenu ? theme.hover : .clear))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
         .denTooltip("Change Session", command: .changeSession)
         .animation(.denFast, value: model.currentSession)
@@ -247,7 +247,7 @@ struct TabItem: View {
                             .frame(width: 18, height: 18)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hitArea)
                     .transition(.opacity)
                 } else if !compact, let status {
                     StatusGlyph(indicator: status.indicator)
