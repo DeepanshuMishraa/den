@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A brand mark loaded from `Resources/ProgramIcons/<asset>.svg`.
 /// `template` marks render in the given tint; full-color marks keep their
-/// brand colors. Images are cached per asset.
+/// brand colors. Images are cached per file.
 struct BrandIcon: View {
     let asset: String
     let template: Bool
@@ -30,21 +30,36 @@ struct BrandIcon: View {
         .frame(width: size, height: size)
     }
 
-    static func image(named asset: String, template: Bool) -> NSImage? {
-        if let hit = cache[asset] { return hit }
+    static func image(named asset: String, ext: String = "svg", template: Bool) -> NSImage? {
+        let file = "\(asset).\(ext)"
+        if let hit = cache[file] { return hit }
         guard let url = Bundle.denResources.url(
-            forResource: asset, withExtension: "svg", subdirectory: "ProgramIcons"
+            forResource: asset, withExtension: ext, subdirectory: "ProgramIcons"
         ) else {
-            NSLog("Den: missing program icon %@", asset)
+            NSLog("Den: missing program icon %@", file)
             return nil
         }
         guard let raw = NSImage(contentsOf: url) else {
-            NSLog("Den: could not rasterize program icon %@", asset)
+            NSLog("Den: could not load program icon %@", file)
             return nil
         }
         raw.isTemplate = template
-        cache[asset] = raw
+        cache[file] = raw
         return raw
+    }
+}
+
+/// Artwork from `Resources/ProgramIcons/<asset>.png`, filling its frame.
+struct PictureIcon: View {
+    let asset: String
+
+    var body: some View {
+        if let image = BrandIcon.image(named: asset, ext: "png", template: false) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+        }
     }
 }
 
@@ -76,6 +91,10 @@ struct ProgramGlyph: View {
                 .foregroundStyle(tint)
         case .brand(let asset, let template):
             BrandIcon(asset: asset, template: template, size: size, tint: tint)
+        case .picture(let asset):
+            PictureIcon(asset: asset)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
         }
     }
 }
@@ -95,6 +114,9 @@ struct ProgramTile: View {
         let dark = scheme == .dark
         ZStack {
             shape.fill(LinearGradient(colors: [kind.tileTop, kind.tileBottom], startPoint: .top, endPoint: .bottom))
+            if case .picture(let asset) = kind.glyph {
+                PictureIcon(asset: asset).frame(width: width, height: height).clipShape(shape)
+            }
             // Glass: a soft sheen on the upper half and a crisp top edge.
             shape.fill(LinearGradient(colors: [.white.opacity(0.2), .white.opacity(0)], startPoint: .top, endPoint: .center))
             shape.strokeBorder(
@@ -119,6 +141,9 @@ struct ProgramTile: View {
             BrandIcon(asset: asset, template: false, size: height * 0.66)
         case .prompt:
             ProgramGlyph(kind: kind, size: height * 0.62).offset(x: -height * 0.08)
+        case .picture:
+            // Drawn full-bleed under the glass, above.
+            EmptyView()
         default:
             ProgramGlyph(kind: kind, size: height * 0.62)
         }

@@ -22,4 +22,14 @@ import Testing
     @Test func agyIsAnAgent() {
         #expect(ProgramKind.detect(process: "agy", title: nil).isAgent)
     }
+
+    /// The `den` CLI runs Den's own binary, as `den` or `Den`.
+    @Test func denCLIShowsTheAppIcon() {
+        for process in ["den", "Den"] {
+            let kind = ProgramKind.detect(process: process, title: nil)
+            #expect(kind.id == "den")
+            #expect(kind.glyph == .picture(asset: "den"))
+        }
+        #expect(BrandIcon.image(named: "den", ext: "png", template: false) != nil)
+    }
 }

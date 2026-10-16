@@ -24,6 +24,9 @@ struct ProgramKind: Equatable {
         /// `template` renders the mark in the tile's ink color; otherwise the
         /// mark keeps its own brand colors on a plate (the tile colors).
         case brand(asset: String, template: Bool)
+        /// Artwork from `Resources/ProgramIcons/<asset>.png` that fills the
+        /// whole tile instead of sitting on it, like Den's own app icon.
+        case picture(asset: String)
     }
 
     static func == (a: ProgramKind, b: ProgramKind) -> Bool { a.id == b.id }
@@ -227,6 +230,9 @@ extension ProgramKind {
         add(["openssl", "gpg", "age", "op", "pass"], "crypto", "Keys", 0xFACC15, 0xCA8A04, ink: 0x1A1A1A, .symbol("key.fill"))
         add(["ollama", "lms", "mlx_lm.generate"], "ollama", "Ollama", 0xFFFFFF, 0xE5E5E5, ink: 0x111111, .brand(asset: "ollama", template: true))
         add(["ngrok"], "ngrok", "ngrok", 0xE8ECF5, 0xC9D4EA, ink: 0x10239E, .brand(asset: "ngrok", template: true))
+
+        // Den's own CLI.
+        add(["den"], "den", "Den", 0x2F6BFF, 0x1A3FD1, .picture(asset: "den"))
         return table
     }()
 }
