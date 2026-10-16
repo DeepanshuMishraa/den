@@ -237,19 +237,43 @@ final class AppModel {
         updates.checkForUpdates()
     }
 
-    /// Writes the den Agent Skill (`den agent install`) so coding agents in
-    /// Den's panes know how to open, read and type into panes.
-    func installAgentSkill() {
+    /// Everything coding agents need to drive Den: the `den` command they
+    /// run, and the den Agent Skill telling them how (`den agent install`).
+    /// The toast follows each step as it happens.
+    func installDenForAgents() {
+        let steps = 1 + AgentGuide.skillDirectories.count
+        var problems: [String] = []
+        func step(_ index: Int, _ message: String) async {
+            showUpdateProgress(message, progress: Double(index) / Double(steps))
+            // Long enough to read; each step itself takes a few milliseconds.
+            try? await Task.sleep(for: .milliseconds(350))
+        }
         Task {
-            let results = await Task.detached(priority: .userInitiated) { AgentGuide.install() }.value
-            if let failure = results.lazy.compactMap({ if case .failed(let message) = $0.outcome { message } else { nil } }).first {
-                lastError = failure
-            } else if let taken = results.first(where: { $0.outcome == .occupied }) {
-                showToast("\(PathQuery.abbreviate(taken.path)) is another skill — left alone")
-            } else if results.allSatisfy({ $0.outcome == .unchanged }) {
-                showToast("Agent skill already installed")
+            await step(0, "Installing the den command…")
+            switch await Task.detached(priority: .userInitiated, operation: { CLIInstaller.install() }).value {
+            case .linked, .alreadyLinked:
+                if !Self.cliLinkWorks { problems.append("~/.local/bin/den is a broken link; remove it and run this again.") }
+            case .occupied: problems.append("Something else is at ~/.local/bin/den, so the den command wasn't linked.")
+            case .failed(let message): problems.append(message)
+            // Dev builds: the skill still installs; agents can run Den's own binary.
+            case .notBundled: problems.append("The den command installs from release builds.")
+            }
+            for (i, folder) in AgentGuide.skillDirectories.enumerated() {
+                await step(i + 1, "Writing the den skill to ~/\(folder)…")
+                let (path, outcome) = await Task.detached(priority: .userInitiated) { AgentGuide.install(into: folder) }.value
+                switch outcome {
+                case .written, .unchanged: break
+                case .occupied: problems.append("\(PathQuery.abbreviate(path)) is another skill; left alone.")
+                case .failed(let message): problems.append(message)
+                }
+            }
+            showUpdateProgress(nil, progress: 1)
+            try? await Task.sleep(for: .milliseconds(250))
+            dismissToast()
+            if problems.isEmpty {
+                showToast("Den is ready for agents: den command and skill installed")
             } else {
-                showToast("Installed the den skill for coding agents")
+                lastError = "Installing Den for agents finished with problems. " + problems.joined(separator: " ")
             }
         }
     }
@@ -361,6 +385,10 @@ final class AppModel {
     var activityMode: Bool { didSet { defaults.set(activityMode, forKey: "activityMode") } }
     var showPaneHeaders: Bool { didSet { defaults.set(showPaneHeaders, forKey: "showPaneHeaders") } }
     var contrastCorrection: Bool { didSet { defaults.set(contrastCorrection, forKey: "acc"); refreshReplicas() } }
+    /// Terminal text drawn with the font's ligatures (`->` as an arrow).
+    var fontLigatures: Bool { didSet { defaults.set(fontLigatures, forKey: "fontLigatures"); refreshReplicas() } }
+    /// Core Text font smoothing for terminal text: heavier, softer strokes.
+    var fontSmoothing: Bool { didSet { defaults.set(fontSmoothing, forKey: "fontSmoothing"); refreshReplicas() } }
     var interfaceStyle: InterfaceStyle { didSet { defaults.set(interfaceStyle.rawValue, forKey: "interfaceStyle") } }
     /// Set while hovering a style in the palette; reverted on dismiss.
     var previewInterfaceStyle: InterfaceStyle?
@@ -448,6 +476,8 @@ final class AppModel {
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
+        fontLigatures = d.bool(forKey: "fontLigatures")
+        fontSmoothing = d.bool(forKey: "fontSmoothing")
         interfaceStyle = InterfaceStyle(rawValue: d.string(forKey: "interfaceStyle") ?? "") ?? .themed
         density = Density(rawValue: d.string(forKey: "density") ?? "") ?? .comfortable
         fontFamily = d.string(forKey: "fontFamily") ?? FontMetrics.defaultFamily

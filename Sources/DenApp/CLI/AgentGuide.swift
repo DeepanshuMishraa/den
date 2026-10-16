@@ -80,10 +80,13 @@ enum AgentGuide {
     /// Writes SKILL.md into each skill folder under `home`. Never replaces a
     /// file without Den's marker.
     static func install(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [(path: String, outcome: Outcome)] {
-        skillDirectories.map { relative in
-            let file = home.appending(path: relative).appending(path: "SKILL.md")
-            return (file.path, install(at: file))
-        }
+        skillDirectories.map { install(into: $0, home: home) }
+    }
+
+    /// Writes SKILL.md into one skill folder (relative to `home`).
+    static func install(into relative: String, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> (path: String, outcome: Outcome) {
+        let file = home.appending(path: relative).appending(path: "SKILL.md")
+        return (file.path, install(at: file))
     }
 
     private static func install(at file: URL) -> Outcome {

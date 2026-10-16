@@ -121,9 +121,9 @@ final class RenderPipelines {
 
     private var atlases: [CGFloat: (FontMetrics, GlyphAtlas)] = [:]
 
-    func atlas(for metrics: FontMetrics) -> GlyphAtlas? {
-        if let (m, a) = atlases[metrics.scale], m == metrics { return a }
-        guard let a = GlyphAtlas(device: device, metrics: metrics) else { return nil }
+    func atlas(for metrics: FontMetrics, smoothing: Bool) -> GlyphAtlas? {
+        if let (m, a) = atlases[metrics.scale], m == metrics, a.smoothing == smoothing { return a }
+        guard let a = GlyphAtlas(device: device, metrics: metrics, smoothing: smoothing) else { return nil }
         atlases[metrics.scale] = (metrics, a)
         return a
     }
@@ -163,6 +163,8 @@ struct FrameBuilder {
     let cursorFocused: Bool
     let showCursor: Bool
     let contrastCorrection: Bool
+    /// Shape symbol runs with the font's ligatures (`->`, `!=`, `=>`).
+    let ligatures: Bool
 
     var backgrounds: [RectInstance] = []
     var selections: [RectInstance] = []
@@ -173,7 +175,7 @@ struct FrameBuilder {
     var clear: RGB?
 
     init(metrics: FontMetrics, atlas: GlyphAtlas, pipelines: RenderPipelines, origin: SIMD2<Float>, theme: Theme,
-         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool) {
+         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool) {
         self.metrics = metrics
         self.atlas = atlas
         self.pipelines = pipelines
@@ -182,6 +184,50 @@ struct FrameBuilder {
         self.cursorFocused = cursorFocused
         self.showCursor = showCursor
         self.contrastCorrection = contrastCorrection
+        self.ligatures = ligatures
+    }
+
+    /// Adjacent ASCII cells of one row and font style, drawn shaped when the
+    /// font makes ligatures of them.
+    private struct LigatureRun {
+        var row = -1, start = 0
+        var bold = false, italic = false
+        var scalars: [UInt32] = []
+        var colors: [SIMD4<Float>] = []
+
+        func continues(row: Int, col: Int, bold: Bool, italic: Bool) -> Bool {
+            row == self.row && col == start + scalars.count && bold == self.bold && italic == self.italic
+        }
+
+        /// Ligatures are made of symbols; letters and digits never form one.
+        var mayLigate: Bool {
+            scalars.count > 1 && scalars.contains { !(0x30 ... 0x39).contains($0) && !(0x41 ... 0x5A).contains($0) && !(0x61 ... 0x7A).contains($0) }
+        }
+    }
+
+    private static func instance(_ glyph: Glyph, x: Float, y: Float, color: SIMD4<Float>) -> GlyphInstance {
+        GlyphInstance(rect: SIMD4(x + glyph.offset.x, y + glyph.offset.y, glyph.region.z, glyph.region.w),
+                      uv: glyph.region, color: color, flags: SIMD4(glyph.isColor ? 1 : 0, 0, 0, 0))
+    }
+
+    /// The run's glyphs: shaped if the font ligates it, else cell by cell.
+    private static func glyphs(for run: LigatureRun, atlas: GlyphAtlas, origin: SIMD2<Float>, cellWidth cw: Float, cellHeight ch: Float) -> [GlyphInstance] {
+        guard !run.scalars.isEmpty else { return [] }
+        let y = origin.y + Float(run.row) * ch
+        func x(_ cell: Int) -> Float { origin.x + Float(run.start + cell) * cw }
+        if run.mayLigate {
+            let text = String(String.UnicodeScalarView(run.scalars.compactMap(Unicode.Scalar.init)))
+            if let shaped = atlas.shape(text, bold: run.bold, italic: run.italic) {
+                return shaped.compactMap { s in
+                    atlas.glyph(id: s.glyph, bold: run.bold, italic: run.italic)
+                        .map { instance($0, x: x(s.cell) + Float(s.offset), y: y, color: run.colors[s.cell]) }
+                }
+            }
+        }
+        return run.scalars.enumerated().compactMap { i, scalar in
+            atlas.glyph(GlyphKey(text: .scalar(scalar), bold: run.bold, italic: run.italic, wide: false))
+                .map { instance($0, x: x(i), y: y, color: run.colors[i]) }
+        }
     }
 
     /// Underlines a link under the mouse, in the theme's foreground.
@@ -209,6 +255,11 @@ struct FrameBuilder {
         var selectionEnd = 0
         // Local so the cell closure below doesn't overlap `self.selections`.
         var selectionRects: [RectInstance] = []
+        // Locals too, for the same reason: the run being collected, and the
+        // glyphs of runs already drawn.
+        var run = LigatureRun()
+        var shapedGlyphs: [GlyphInstance] = []
+        let atlas = atlas, origin = origin
         func flushSelection(_ rects: inout [RectInstance]) {
             guard selectionRow >= 0 else { return }
             let x = origin.x + Float(selectionStart) * cw
@@ -270,6 +321,18 @@ struct FrameBuilder {
 
             let first = cell.codepoints[0]
             if cell.codepoints.count == 1, first == 0x20 { return }
+            // Ligature candidates wait in a run; the cursor's cell breaks it
+            // so typing never draws into a ligature.
+            if ligatures, cell.codepoints.count == 1, (0x21 ... 0x7E).contains(first), cell.width == .narrow, !isCursorCell {
+                let bold = cell.style.bold, italic = cell.style.italic
+                if !run.continues(row: cell.row, col: cell.col, bold: bold, italic: italic) {
+                    shapedGlyphs += Self.glyphs(for: run, atlas: atlas, origin: origin, cellWidth: cw, cellHeight: ch)
+                    run = LigatureRun(row: cell.row, start: cell.col, bold: bold, italic: italic)
+                }
+                run.scalars.append(first)
+                run.colors.append(fg.simd(alpha))
+                return
+            }
             let text: GlyphKey.Text = cell.codepoints.count == 1
                 ? .scalar(first)
                 : .cluster(String(String.UnicodeScalarView(cell.codepoints.compactMap(Unicode.Scalar.init))))
@@ -282,6 +345,8 @@ struct FrameBuilder {
                 flags: SIMD4(glyph.isColor ? 1 : 0, 0, 0, 0)
             ))
         }
+        shapedGlyphs += Self.glyphs(for: run, atlas: atlas, origin: origin, cellWidth: cw, cellHeight: ch)
+        glyphs += shapedGlyphs
         flushSelection(&selectionRects)
         selections = selectionRects
 

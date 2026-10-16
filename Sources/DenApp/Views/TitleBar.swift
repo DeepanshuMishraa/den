@@ -74,7 +74,7 @@ struct SessionButton: View {
             model.showSessionMenu.toggle()
         } label: {
             HStack(spacing: 7) {
-                Image(systemName: model.currentHost == .local ? "laptopcomputer" : "server.rack")
+                Image(systemName: "square.stack")
                     .font(.system(size: 13.5, weight: .regular))
                     .foregroundStyle(theme.secondaryText)
                 if showsName {

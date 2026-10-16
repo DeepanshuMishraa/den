@@ -191,8 +191,8 @@ final class TerminalView: MTKView {
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let drawable = currentDrawable, let pass = currentRenderPassDescriptor,
-              let atlas = pipelines.atlas(for: metrics), let model,
+        guard let drawable = currentDrawable, let pass = currentRenderPassDescriptor, let model,
+              let atlas = pipelines.atlas(for: metrics, smoothing: model.fontSmoothing),
               let buffer = pipelines.queue.makeCommandBuffer() else { return }
 
         let pad = SIMD2(Float(Self.padding.width * metrics.scale), Float(Self.padding.height * metrics.scale))
@@ -202,7 +202,8 @@ final class TerminalView: MTKView {
             theme: replica?.theme ?? model.theme,
             cursorFocused: mode == .interactive && isFocusedPane && window?.isKeyWindow == true,
             showCursor: mode == .interactive,
-            contrastCorrection: replica?.contrastCorrection ?? false
+            contrastCorrection: replica?.contrastCorrection ?? false,
+            ligatures: model.fontLigatures
         )
         var gridSize = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
         if let replica, let renderState {

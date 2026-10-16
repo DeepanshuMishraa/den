@@ -35,19 +35,115 @@ final class GlyphAtlas {
     /// Bumped when the atlas is wiped so callers can drop stale frames.
     private(set) var epoch = 0
 
-    init?(device: MTLDevice, metrics: FontMetrics) {
+    /// Core Text font smoothing (heavier strokes), per the terminal setting.
+    let smoothing: Bool
+
+    init?(device: MTLDevice, metrics: FontMetrics, smoothing: Bool) {
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 2048, height: 2048, mipmapped: false)
         desc.usage = .shaderRead
         desc.storageMode = .shared
         guard let texture = device.makeTexture(descriptor: desc) else { return nil }
         self.texture = texture
         self.metrics = metrics
+        self.smoothing = smoothing
     }
 
     func glyph(_ key: GlyphKey) -> Glyph? {
         if let hit = cache[key] { return hit }
         let g = rasterize(key)
         cache[key] = g
+        return g
+    }
+
+    // MARK: Ligatures
+
+    /// One shaped glyph of a run: the glyph, and where it sits relative to
+    /// the cell of the character it starts at, in pixels.
+    struct ShapedGlyph {
+        let glyph: CGGlyph
+        /// Index into the run's characters (one per cell).
+        let cell: Int
+        let offset: CGFloat
+    }
+
+    private struct ShapeKey: Hashable {
+        let text: String
+        let bold: Bool
+        let italic: Bool
+    }
+
+    private struct GlyphIDKey: Hashable {
+        let glyph: CGGlyph
+        let bold: Bool
+        let italic: Bool
+    }
+
+    /// Shaped runs by text, nil when the font forms no ligature in it (the
+    /// cells then draw one by one). Screens repeat frame to frame.
+    private var shapes: [ShapeKey: [ShapedGlyph]?] = [:]
+    private var glyphsByID: [GlyphIDKey: Glyph?] = [:]
+
+    /// `text` (one ASCII character per cell) shaped with the font's
+    /// ligatures, or nil when shaping changes nothing.
+    func shape(_ text: String, bold: Bool, italic: Bool) -> [ShapedGlyph]? {
+        let key = ShapeKey(text: text, bold: bold, italic: italic)
+        if let hit = shapes[key] { return hit }
+        if shapes.count > 8192 { shapes.removeAll(keepingCapacity: true) }
+        let shaped = shapeUncached(text, font: metrics.font(bold: bold, italic: italic))
+        shapes[key] = shaped
+        return shaped
+    }
+
+    private func shapeUncached(_ text: String, font: CTFont) -> [ShapedGlyph]? {
+        let attributed = NSAttributedString(string: text, attributes: [
+            kCTFontAttributeName as NSAttributedString.Key: font,
+            // Standard and contextual ligatures (`liga`, `calt`).
+            kCTLigatureAttributeName as NSAttributedString.Key: 1,
+        ])
+        let line = CTLineCreateWithAttributedString(attributed)
+        let chars = Array(text.utf16)
+        var unshaped = [CGGlyph](repeating: 0, count: chars.count)
+        // Every character in the primary font, so Core Text falls back to
+        // none and the glyph ids below are this font's.
+        guard CTFontGetGlyphsForCharacters(font, chars, &unshaped, chars.count) else { return nil }
+        // The font's own advance: cells are rounded, positions are not.
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(font, .horizontal, unshaped, &advance, 1)
+
+        var out: [ShapedGlyph] = []
+        var changed = false
+        for run in (CTLineGetGlyphRuns(line) as? [CTRun]) ?? [] {
+            let count = CTRunGetGlyphCount(run)
+            var glyphs = [CGGlyph](repeating: 0, count: count)
+            var positions = [CGPoint](repeating: .zero, count: count)
+            var indices = [CFIndex](repeating: 0, count: count)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: count), &glyphs)
+            CTRunGetPositions(run, CFRange(location: 0, length: count), &positions)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
+            for i in 0 ..< count {
+                let cell = indices[i]
+                if glyphs[i] != unshaped[cell] { changed = true }
+                out.append(ShapedGlyph(glyph: glyphs[i], cell: cell, offset: positions[i].x - CGFloat(cell) * advance.width))
+            }
+        }
+        if out.count != chars.count { changed = true }
+        return changed ? out : nil
+    }
+
+    /// A glyph by its id in the primary font, as shaping produced it.
+    /// Ligature glyphs may overhang neighboring cells by up to a few cells.
+    func glyph(id: CGGlyph, bold: Bool, italic: Bool) -> Glyph? {
+        let key = GlyphIDKey(glyph: id, bold: bold, italic: italic)
+        if let hit = glyphsByID[key] { return hit }
+        let font = metrics.font(bold: bold, italic: italic)
+        let padX = metrics.cellWidth * 4
+        let padY = (metrics.cellHeight / 2).rounded()
+        let g = draw(width: Int(metrics.cellWidth + padX * 2), height: Int(metrics.cellHeight + padY * 2), padX: padX, padY: padY, isColor: false) { ctx, baselineY in
+            var glyph = id
+            var position = CGPoint(x: padX, y: baselineY)
+            CTFontDrawGlyphs(font, &glyph, &position, 1, ctx)
+        }
+        glyphsByID[key] = g
         return g
     }
 
@@ -71,8 +167,23 @@ final class GlyphAtlas {
         let span = key.wide ? 2.0 : 1.0
         let padX = metrics.cellWidth
         let padY = (metrics.cellHeight / 2).rounded()
-        let width = Int(metrics.cellWidth * span + padX * 2)
-        let height = Int(metrics.cellHeight + padY * 2)
+        return draw(width: Int(metrics.cellWidth * span + padX * 2), height: Int(metrics.cellHeight + padY * 2),
+                    padX: padX, padY: padY, isColor: isColor) { ctx, baselineY in
+            var x = padX
+            if isColor || key.wide {
+                // Center emoji and wide glyphs inside their cells.
+                let w = CTLineGetTypographicBounds(line, nil, nil, nil)
+                x += max(0, (metrics.cellWidth * span - w) / 2)
+            }
+            ctx.textPosition = CGPoint(x: x, y: baselineY)
+            CTLineDraw(line, ctx)
+        }
+    }
+
+    /// Renders `body` into a padded bitmap, trims it to the ink and stores it
+    /// in the atlas. `body` gets the baseline's y in CG's bottom-up space.
+    private func draw(width: Int, height: Int, padX: CGFloat, padY: CGFloat, isColor: Bool,
+                      _ body: (CGContext, CGFloat) -> Void) -> Glyph? {
         let bytesPerRow = width * 4
         var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
         let drawn: Bool = pixels.withUnsafeMutableBytes { raw in
@@ -81,19 +192,13 @@ final class GlyphAtlas {
                 space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
             ) else { return false }
-            ctx.setAllowsFontSmoothing(false)
+            ctx.setAllowsFontSmoothing(smoothing)
+            ctx.setShouldSmoothFonts(smoothing)
             ctx.setShouldAntialias(true)
             ctx.textMatrix = .identity
             // CG's origin is bottom-left: baseline sits `baseline` px below the
             // cell's top edge, which is `padY` px below the bitmap's top.
-            var x = padX
-            if isColor || key.wide {
-                // Center emoji and wide glyphs inside their cells.
-                let w = CTLineGetTypographicBounds(line, nil, nil, nil)
-                x += max(0, (metrics.cellWidth * span - w) / 2)
-            }
-            ctx.textPosition = CGPoint(x: x, y: CGFloat(height) - padY - metrics.baseline)
-            CTLineDraw(line, ctx)
+            body(ctx, CGFloat(height) - padY - metrics.baseline)
             return true
         }
         guard drawn else { return nil }
@@ -146,6 +251,7 @@ final class GlyphAtlas {
 
     private func reset() {
         cache.removeAll()
+        glyphsByID.removeAll()
         cursorX = 1
         cursorY = 1
         rowHeight = 0

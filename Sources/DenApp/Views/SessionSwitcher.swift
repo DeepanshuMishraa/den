@@ -154,7 +154,15 @@ struct SessionMenu: View {
                 Spacer()
                 if let label = model.config.shortcutLabel(.newSession) { Text(label).uiFont(size: 11.5).foregroundStyle(dim) }
             case .addHost:
-                Image(systemName: "network").font(.system(size: 11)).frame(width: 12)
+                // A globe with a plus: SF Symbols has no such badge.
+                Image(systemName: "globe")
+                    .font(.system(size: 11))
+                    .overlay(alignment: .bottomLeading) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 6.5, weight: .bold))
+                            .offset(x: -3, y: 2)
+                    }
+                    .frame(width: 12)
                 Text("Add Remote Host…").uiFont(size: 13)
                 Spacer()
             case .logIn:
