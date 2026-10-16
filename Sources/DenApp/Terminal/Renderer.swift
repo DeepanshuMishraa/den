@@ -121,9 +121,9 @@ final class RenderPipelines {
 
     private var atlases: [CGFloat: (FontMetrics, GlyphAtlas)] = [:]
 
-    func atlas(for metrics: FontMetrics) -> GlyphAtlas? {
-        if let (m, a) = atlases[metrics.scale], m == metrics { return a }
-        guard let a = GlyphAtlas(device: device, metrics: metrics) else { return nil }
+    func atlas(for metrics: FontMetrics, smoothing: Bool) -> GlyphAtlas? {
+        if let (m, a) = atlases[metrics.scale], m == metrics, a.smoothing == smoothing { return a }
+        guard let a = GlyphAtlas(device: device, metrics: metrics, smoothing: smoothing) else { return nil }
         atlases[metrics.scale] = (metrics, a)
         return a
     }
@@ -163,6 +163,10 @@ struct FrameBuilder {
     let cursorFocused: Bool
     let showCursor: Bool
     let contrastCorrection: Bool
+    /// Shape symbol runs with the font's ligatures (`->`, `!=`, `=>`).
+    let ligatures: Bool
+    /// 1 solid, 0 hidden: where a blinking cursor is in its cycle.
+    let cursorOpacity: Float
 
     var backgrounds: [RectInstance] = []
     var selections: [RectInstance] = []
@@ -173,7 +177,7 @@ struct FrameBuilder {
     var clear: RGB?
 
     init(metrics: FontMetrics, atlas: GlyphAtlas, pipelines: RenderPipelines, origin: SIMD2<Float>, theme: Theme,
-         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool) {
+         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool, cursorOpacity: Float = 1) {
         self.metrics = metrics
         self.atlas = atlas
         self.pipelines = pipelines
@@ -182,6 +186,63 @@ struct FrameBuilder {
         self.cursorFocused = cursorFocused
         self.showCursor = showCursor
         self.contrastCorrection = contrastCorrection
+        self.ligatures = ligatures
+        self.cursorOpacity = cursorOpacity
+    }
+
+    /// Adjacent ASCII cells of one row and font style, drawn shaped when the
+    /// font makes ligatures of them.
+    private struct LigatureRun {
+        var row = -1, start = 0
+        var bold = false, italic = false
+        var scalars: [UInt32] = []
+        var colors: [SIMD4<Float>] = []
+
+        /// A ligature glyph takes one color, so a color change ends the run.
+        func continues(row: Int, col: Int, bold: Bool, italic: Bool, color: SIMD4<Float>) -> Bool {
+            row == self.row && col == start + scalars.count && bold == self.bold && italic == self.italic && colors.last == color
+        }
+
+        /// Ligatures are made of symbols; letters and digits never form one.
+        var mayLigate: Bool {
+            scalars.count > 1 && scalars.contains { !(0x30 ... 0x39).contains($0) && !(0x41 ... 0x5A).contains($0) && !(0x61 ... 0x7A).contains($0) }
+        }
+    }
+
+    private static func instance(_ glyph: Glyph, x: Float, y: Float, color: SIMD4<Float>) -> GlyphInstance {
+        GlyphInstance(rect: SIMD4(x + glyph.offset.x, y + glyph.offset.y, glyph.region.z, glyph.region.w),
+                      uv: glyph.region, color: color, flags: SIMD4(glyph.isColor ? 1 : 0, 0, 0, 0))
+    }
+
+    /// The run's glyphs: shaped if the font ligates it, else cell by cell.
+    private static func glyphs(for run: LigatureRun, atlas: GlyphAtlas, origin: SIMD2<Float>, cellWidth cw: Float, cellHeight ch: Float) -> [GlyphInstance] {
+        guard !run.scalars.isEmpty else { return [] }
+        let y = origin.y + Float(run.row) * ch
+        func x(_ cell: Int) -> Float { origin.x + Float(run.start + cell) * cw }
+        if run.mayLigate {
+            let text = String(String.UnicodeScalarView(run.scalars.compactMap(Unicode.Scalar.init)))
+            if let shaped = atlas.shape(text, bold: run.bold, italic: run.italic) {
+                return shaped.compactMap { s in
+                    atlas.glyph(id: s.glyph, bold: run.bold, italic: run.italic)
+                        .map { instance($0, x: x(s.cell) + Float(s.offset), y: y, color: run.colors[s.cell]) }
+                }
+            }
+        }
+        return run.scalars.enumerated().compactMap { i, scalar in
+            atlas.glyph(GlyphKey(text: .scalar(scalar), bold: run.bold, italic: run.italic, wide: false))
+                .map { instance($0, x: x(i), y: y, color: run.colors[i]) }
+        }
+    }
+
+    /// Underlines a link under the mouse, in the theme's foreground.
+    mutating func underline(_ link: TerminalLink) {
+        let cw = Float(metrics.cellWidth), ch = Float(metrics.cellHeight)
+        let thick = Float(metrics.underlineThickness)
+        for span in link.spans {
+            let x = origin.x + Float(span.columns.lowerBound) * cw
+            let y = origin.y + Float(span.row) * ch + Float(metrics.underlinePosition)
+            decorations.append(RectInstance(rect: SIMD4(x, y, Float(span.columns.count) * cw, thick), color: theme.foreground.simd()))
+        }
     }
 
     mutating func build(_ state: VTRenderState) {
@@ -198,6 +259,15 @@ struct FrameBuilder {
         var selectionEnd = 0
         // Local so the cell closure below doesn't overlap `self.selections`.
         var selectionRects: [RectInstance] = []
+        // Locals too, for the same reason: the run being collected, and the
+        // glyphs of runs already drawn.
+        var run = LigatureRun()
+        // Runs flush in cell order, so later text draws over any overhang.
+        func flushRun() {
+            glyphs += Self.glyphs(for: run, atlas: atlas, origin: origin, cellWidth: cw, cellHeight: ch)
+            run = LigatureRun()
+        }
+        let atlas = atlas, origin = origin
         func flushSelection(_ rects: inout [RectInstance]) {
             guard selectionRow >= 0 else { return }
             let x = origin.x + Float(selectionStart) * cw
@@ -231,7 +301,9 @@ struct FrameBuilder {
                 bg = oldFg
             }
 
-            let isCursorCell = cursor.map { $0.shape == .block && cursorFocused && $0.x == cell.col && $0.y == cell.row } ?? false
+            // Past the middle of a blink's fade the text under a block
+            // cursor goes back to its own color.
+            let isCursorCell = cursor.map { $0.shape == .block && cursorFocused && cursorOpacity > 0.5 && $0.x == cell.col && $0.y == cell.row } ?? false
             if isCursorCell { fg = defaultBg }
             if cell.selected, !isCursorCell, let selected = theme.selectionForeground { fg = selected }
 
@@ -259,10 +331,23 @@ struct FrameBuilder {
 
             let first = cell.codepoints[0]
             if cell.codepoints.count == 1, first == 0x20 { return }
+            // Ligature candidates wait in a run; the cursor's cell breaks it
+            // so typing never draws into a ligature.
+            if ligatures, cell.codepoints.count == 1, (0x21 ... 0x7E).contains(first), cell.width == .narrow, !isCursorCell {
+                let bold = cell.style.bold, italic = cell.style.italic, color = fg.simd(alpha)
+                if !run.continues(row: cell.row, col: cell.col, bold: bold, italic: italic, color: color) {
+                    flushRun()
+                    run = LigatureRun(row: cell.row, start: cell.col, bold: bold, italic: italic)
+                }
+                run.scalars.append(first)
+                run.colors.append(color)
+                return
+            }
             let text: GlyphKey.Text = cell.codepoints.count == 1
                 ? .scalar(first)
                 : .cluster(String(String.UnicodeScalarView(cell.codepoints.compactMap(Unicode.Scalar.init))))
             let key = GlyphKey(text: text, bold: cell.style.bold, italic: cell.style.italic, wide: cell.width == .wide)
+            flushRun()
             guard let glyph = atlas.glyph(key) else { return }
             glyphs.append(GlyphInstance(
                 rect: SIMD4(x + glyph.offset.x, y + glyph.offset.y, glyph.region.z, glyph.region.w),
@@ -271,13 +356,14 @@ struct FrameBuilder {
                 flags: SIMD4(glyph.isColor ? 1 : 0, 0, 0, 0)
             ))
         }
+        flushRun()
         flushSelection(&selectionRects)
         selections = selectionRects
 
         if let cursor {
             let x = origin.x + Float(cursor.x) * cw
             let y = origin.y + Float(cursor.y) * ch
-            let c = cursorColor.simd()
+            let c = cursorColor.simd(cursorOpacity)
             let t = max(Float(metrics.scale), 1) * 1.5
             let shape: CursorShape = cursorFocused ? cursor.shape : .hollowBlock
             switch shape {

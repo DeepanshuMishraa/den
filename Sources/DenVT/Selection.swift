@@ -1,5 +1,5 @@
 import Foundation
-import GhosttyVt
+import CTermyEngine
 
 public struct Scrollbar: Equatable, Sendable {
     /// Total rows including scrollback.
@@ -10,81 +10,104 @@ public struct Scrollbar: Equatable, Sendable {
     public var length: UInt64
 }
 
+/// A cell in rows numbered from the first line output ever scrolled, so a
+/// point stays on its content while new output scrolls history.
+struct GridPoint: Comparable {
+    var row: Int64
+    var col: Int
+
+    static func < (a: GridPoint, b: GridPoint) -> Bool { (a.row, a.col) < (b.row, b.col) }
+}
+
+/// Selected text from `start` to `end`, both inclusive, in reading order.
+struct TextSelection: Equatable {
+    var start: GridPoint
+    var end: GridPoint
+}
+
 extension VTTerminal {
     public var scrollbar: Scrollbar {
-        var s = GhosttyTerminalScrollbar()
-        _ = ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &s)
+        var s = TermyEngineScrollbar()
+        _ = termy_engine_scrollbar(handle, &s)
         return Scrollbar(total: s.total, offset: s.offset, length: s.len)
     }
 
     public func scrollViewport(toRow row: UInt64) {
-        var behavior = GhosttyTerminalScrollViewport()
-        behavior.tag = GHOSTTY_SCROLL_VIEWPORT_ROW
-        behavior.value.row = Int(clamping: row)
-        ghostty_terminal_scroll_viewport(handle, behavior)
+        var changed = false
+        _ = termy_engine_scroll_viewport(handle, UInt32(TERMY_ENGINE_SCROLL_OFFSET), Int64(clamping: row), &changed)
     }
 
     public func clearSelection() {
-        _ = ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, nil)
+        selection = nil
     }
 
     /// Plain text of the active selection, nil when nothing is selected.
     public func selectedText() -> String? {
-        var selection = GhosttySelection()
-        selection.size = MemoryLayout<GhosttySelection>.size
-        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS else { return nil }
-        var opts = GhosttyTerminalSelectionFormatOptions()
-        opts.size = MemoryLayout<GhosttyTerminalSelectionFormatOptions>.size
-        opts.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN
-        opts.trim = true
-        opts.unwrap = true
-        var ptr: UnsafeMutablePointer<UInt8>?
-        var len = 0
-        let result = withUnsafePointer(to: &selection) { sel in
-            opts.selection = sel
-            return ghostty_terminal_selection_format_alloc(handle, nil, opts, &ptr, &len)
+        guard let selection else { return nil }
+        let s = state
+        let first = Int64(s.scrolled_into_history)
+        let oldest = -Int64(s.history_size)
+        var range = TermyEngineTextRange(
+            start_line: selection.start.row - first, start_col: UInt32(clamping: selection.start.col),
+            end_line: selection.end.row - first, end_col: UInt32(clamping: selection.end.col), rectangular: false
+        )
+        // Evicted history is gone; keep what remains.
+        guard range.end_line >= oldest else { return nil }
+        if range.start_line < oldest {
+            range.start_line = oldest
+            range.start_col = 0
         }
-        guard result == GHOSTTY_SUCCESS, let ptr else { return nil }
-        defer { ghostty_free(nil, ptr, len) }
-        let text = String(decoding: UnsafeBufferPointer(start: ptr, count: len), as: UTF8.self)
-        return text.isEmpty ? nil : text
+        let options = UInt32(TERMY_ENGINE_TEXT_UNWRAP) | UInt32(TERMY_ENGINE_TEXT_TRIM)
+        guard let bytes = try? takeBytes("read_text", { termy_engine_read_text(handle, &range, UInt32(TERMY_ENGINE_FORMAT_PLAIN), options, $0) }),
+              !bytes.isEmpty else { return nil }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// The stable point under a viewport cell.
+    func gridPoint(viewportCol col: Int, row: Int) -> GridPoint {
+        let s = state
+        let line = Int64(row) - Int64(s.display_offset)
+        return GridPoint(row: Int64(s.scrolled_into_history) + line, col: col)
+    }
+
+    /// The word (or run of one symbol) at `point`, across soft wraps.
+    func word(at point: GridPoint) -> TextSelection {
+        textUnit(at: point) { line, range in termy_engine_select_word(handle, line, UInt32(clamping: point.col), range) }
+    }
+
+    /// The logical line at `point`, across soft wraps.
+    func line(at point: GridPoint) -> TextSelection {
+        textUnit(at: point) { line, range in termy_engine_select_line(handle, line, range) }
+    }
+
+    private func textUnit(at point: GridPoint, _ select: (Int64, UnsafeMutablePointer<TermyEngineTextRange>) -> TermyEngineStatus) -> TextSelection {
+        let first = Int64(state.scrolled_into_history)
+        var range = TermyEngineTextRange()
+        guard select(point.row - first, &range) == TERMY_ENGINE_OK else { return TextSelection(start: point, end: point) }
+        return TextSelection(start: GridPoint(row: range.start_line + first, col: Int(range.start_col)),
+                             end: GridPoint(row: range.end_line + first, col: Int(range.end_col)))
     }
 }
 
-/// Click/drag/double/triple-click selection, using libghostty's gesture
-/// state machine so behavior matches Ghostty.
+/// Click/drag/double/triple-click selection: a drag selects cells, a
+/// double-click words and a triple-click lines, and dragging after either
+/// extends by that unit.
 public final class SelectionGesture {
-    private let gesture: GhosttySelectionGesture
-    private let press: GhosttySelectionGestureEvent
-    private let drag: GhosttySelectionGestureEvent
-    private let release: GhosttySelectionGestureEvent
+    private enum Unit { case cell, word, line }
 
-    public init() throws(VTError) {
-        var g: GhosttySelectionGesture?
-        try check(ghostty_selection_gesture_new(nil, &g), "selection_gesture_new")
-        func event(_ type: GhosttySelectionGestureEventType) throws(VTError) -> GhosttySelectionGestureEvent {
-            var e: GhosttySelectionGestureEvent?
-            try check(ghostty_selection_gesture_event_new(nil, &e, type), "selection_gesture_event_new")
-            guard let e else { throw VTError(operation: "selection_gesture_event_new", code: GHOSTTY_INVALID_VALUE.rawValue) }
-            return e
-        }
-        guard let g else { throw VTError(operation: "selection_gesture_new", code: GHOSTTY_INVALID_VALUE.rawValue) }
-        gesture = g
-        press = try event(GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS)
-        drag = try event(GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG)
-        release = try event(GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE)
-    }
+    /// Clicks closer together than this, on the same cell, count as one gesture.
+    static let multiClickNs: UInt64 = 500_000_000
 
-    deinit {
-        ghostty_selection_gesture_event_free(press)
-        ghostty_selection_gesture_event_free(drag)
-        ghostty_selection_gesture_event_free(release)
-        // Release tracked refs against the terminal they point into. Holding
-        // `lastTerminal` keeps that terminal alive until this point.
-        ghostty_selection_gesture_free(gesture, lastTerminal?.handle)
-    }
+    private var unit = Unit.cell
+    /// What the press selected; a drag extends from it.
+    private var anchor: TextSelection?
+    private var lastPress: (time: UInt64, point: GridPoint)?
+    private var clicks = 0
+    /// The terminal the gesture's state is about; a replaced replica starts
+    /// over. Weak, since a freed terminal's address can be reused.
+    private weak var current: VTTerminal?
 
-    private var lastTerminal: VTTerminal?
+    public init() throws(VTError) {}
 
     public enum Phase { case press, drag, release }
 
@@ -93,46 +116,57 @@ public final class SelectionGesture {
     @discardableResult
     public func handle(_ phase: Phase, col: Int, row: Int, x: Double, y: Double, timeNs: UInt64,
                        columns: Int, cellWidth: Int, screenHeight: Int, terminal: VTTerminal) -> Bool {
-        if let last = lastTerminal, last !== terminal {
-            // The replica was rebuilt from a snapshot; drop refs into the old one.
-            ghostty_selection_gesture_reset(gesture, last.handle)
+        if current !== terminal {
+            current = terminal
+            lastPress = nil
+            clicks = 0
+            anchor = nil
         }
-        lastTerminal = terminal
-        var ref = GhosttyGridRef()
-        ref.size = MemoryLayout<GhosttyGridRef>.size
-        var point = GhosttyPoint()
-        point.tag = GHOSTTY_POINT_TAG_VIEWPORT
-        point.value.coordinate = GhosttyPointCoordinate(x: UInt16(clamping: max(col, 0)), y: UInt32(clamping: max(row, 0)))
-        guard ghostty_terminal_grid_ref(terminal.handle, point, &ref) == GHOSTTY_SUCCESS else { return false }
-
-        let event: GhosttySelectionGestureEvent = switch phase {
-        case .press: press
-        case .drag: drag
-        case .release: release
+        let point = terminal.gridPoint(viewportCol: max(col, 0), row: max(row, 0))
+        let before = terminal.selection
+        switch phase {
+        case .press:
+            if let last = lastPress, last.point == point, timeNs >= last.time, timeNs - last.time <= Self.multiClickNs {
+                clicks = clicks % 3 + 1
+            } else {
+                clicks = 1
+            }
+            lastPress = (timeNs, point)
+            switch clicks {
+            case 2:
+                unit = .word
+                anchor = terminal.word(at: point)
+            case 3:
+                unit = .line
+                anchor = terminal.line(at: point)
+            default:
+                unit = .cell
+                anchor = TextSelection(start: point, end: point)
+            }
+            // A single click selects nothing until it drags.
+            terminal.selection = unit == .cell ? nil : anchor
+        case .drag:
+            guard let anchor else { return false }
+            // A drag off the pressed cell ends the multi-click: pressing
+            // there again starts a new selection.
+            if let last = lastPress, last.point != point { lastPress = nil }
+            let head = switch unit {
+            case .cell: TextSelection(start: point, end: point)
+            case .word: terminal.word(at: point)
+            case .line: terminal.line(at: point)
+            }
+            terminal.selection = unit == .cell && head == anchor
+                ? nil
+                : TextSelection(start: min(anchor.start, head.start), end: max(anchor.end, head.end))
+        case .release:
+            anchor = nil
         }
-        _ = ghostty_selection_gesture_event_set(event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref)
-        var position = GhosttySurfacePosition(x: x, y: y)
-        _ = ghostty_selection_gesture_event_set(event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &position)
-        var time = timeNs
-        _ = ghostty_selection_gesture_event_set(event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS, &time)
-        var geometry = GhosttySelectionGestureGeometry(
-            columns: UInt32(max(columns, 1)), cell_width: UInt32(max(cellWidth, 1)),
-            padding_left: 0, screen_height: UInt32(max(screenHeight, 1))
-        )
-        _ = ghostty_selection_gesture_event_set(event, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &geometry)
-
-        var selection = GhosttySelection()
-        selection.size = MemoryLayout<GhosttySelection>.size
-        let result = ghostty_selection_gesture_event(gesture, terminal.handle, event, &selection)
-        guard result == GHOSTTY_SUCCESS else {
-            if phase == .press { terminal.clearSelection() }
-            return phase == .press
-        }
-        _ = ghostty_terminal_set(terminal.handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection)
-        return true
+        return terminal.selection != before
     }
 
+    /// Ends the current drag. Click timing is kept, so a triple-click still
+    /// works after the double-click's selection was copied and cleared.
     public func reset(_ terminal: VTTerminal) {
-        ghostty_selection_gesture_reset(gesture, terminal.handle)
+        anchor = nil
     }
 }

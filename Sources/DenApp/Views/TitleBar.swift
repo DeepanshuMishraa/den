@@ -18,6 +18,8 @@ struct TitleBar: View {
             Color.clear.frame(width: Self.leadingInset, height: Self.height)
             SessionButton()
                 .frame(height: Self.height)
+                // Room between the session switcher and the first tab.
+                .padding(.trailing, 8)
             TabStrip()
             Spacer(minLength: 0)
             HStack(spacing: 2) {
@@ -74,7 +76,7 @@ struct SessionButton: View {
             model.showSessionMenu.toggle()
         } label: {
             HStack(spacing: 7) {
-                Image(systemName: model.currentHost == .local ? "laptopcomputer" : "server.rack")
+                Image(systemName: "square.stack")
                     .font(.system(size: 13.5, weight: .regular))
                     .foregroundStyle(theme.secondaryText)
                 if showsName {

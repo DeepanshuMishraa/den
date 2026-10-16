@@ -71,6 +71,11 @@ actor DenConnection {
         queue.async { [self] in assumeIsolated { $0.write(message) } }
     }
 
+    /// Ends the connection from this side; `closed` gets `reason`.
+    nonisolated func disconnect(_ reason: String) {
+        queue.async { [self] in assumeIsolated { $0.shutdown(reason) } }
+    }
+
     private func write(_ message: ClientMessage) {
         guard isOpen else { return }
         writer?.write(Frame.wrap(message.encode()))

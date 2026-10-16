@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Which list the palette shows. Submenus appear as a chip in the field.
 enum PaletteRoute: Equatable {
-    case root, theme, interfaceStyle, font, shell, changeSession, renameSession, renameTab, goToDirectory, addHost, deleteTheme
+    case root, theme, interfaceStyle, font, shell, cursorBlink, changeSession, renameSession, renameTab, goToDirectory, addHost, deleteTheme
     /// Not a list: shows the Ghostty migration's progress.
     case migrateGhostty
     case renameHost(RemoteHost.ID)
@@ -16,6 +16,7 @@ enum PaletteRoute: Equatable {
         case .theme: "Theme"
         case .font: "Font"
         case .shell: "Shell"
+        case .cursorBlink: "Cursor Blinking"
         case .interfaceStyle: "Interface Style"
         case .changeSession: "Session"
         case .renameSession, .renameTab: "Rename"
@@ -32,6 +33,7 @@ enum PaletteRoute: Equatable {
         case .theme: "Select Theme…"
         case .font: "Select Font…"
         case .shell: "Select Shell…"
+        case .cursorBlink: "Filter blink settings…"
         case .interfaceStyle: "Select Interface Style…"
         case .changeSession: "Filter sessions…"
         case .renameSession: "Session name"
@@ -336,7 +338,7 @@ struct CommandPalette: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         switch route {
         case .migrateGhostty: return []
-        case .root, .theme, .interfaceStyle, .font, .shell, .changeSession, .deleteTheme:
+        case .root, .theme, .interfaceStyle, .font, .shell, .cursorBlink, .changeSession, .deleteTheme:
             let all = items(for: route)
             guard !q.isEmpty else { return all }
             return Fuzzy.filter(all, query: q, key: \.title)
@@ -402,6 +404,35 @@ struct CommandPalette: View {
                                 model.previewInterfaceStyle = nil
                             })
             }
+        case .cursorBlink:
+            // Picks stay open and apply at once: the pane behind shows them.
+            var items = [PaletteItem(id: "blink-on", title: "Blinking", checked: model.cursorBlink, keepOpen: true,
+                                     action: .run { model.cursorBlink.toggle() })]
+            items += CursorBlink.Speed.allCases.map { speed in
+                PaletteItem(id: "blink-speed-\(speed.rawValue)", section: "Speed", title: speed.title,
+                            detail: String(format: "%.2gs cycle", speed.seconds),
+                            checked: model.cursorBlinkStyle.speed == speed, keepOpen: true, action: .run {
+                                model.cursorBlinkStyle.speed = speed
+                                model.cursorBlink = true
+                            })
+            }
+            items += CursorBlink.Transition.allCases.map { transition in
+                PaletteItem(id: "blink-transition-\(transition.rawValue)", section: "Transition", title: transition.title,
+                            detail: transition == .instant ? "No fade" : String(format: "%.2gs fade", transition.seconds),
+                            checked: model.cursorBlinkStyle.transition == transition, keepOpen: true, action: .run {
+                                model.cursorBlinkStyle.transition = transition
+                                model.cursorBlink = true
+                            })
+            }
+            items += CursorBlink.Pause.allCases.map { pause in
+                PaletteItem(id: "blink-pause-\(pause.rawValue)", section: "Pause After Typing", title: pause.title,
+                            detail: pause == .none ? "Blinks at once" : String(format: "%.2gs solid", pause.seconds),
+                            checked: model.cursorBlinkStyle.pause == pause, keepOpen: true, action: .run {
+                                model.cursorBlinkStyle.pause = pause
+                                model.cursorBlink = true
+                            })
+            }
+            return items
         case .shell:
             let current = model.defaultShell
             return model.availableShells.map { path in
@@ -497,6 +528,12 @@ struct CommandPalette: View {
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
             PaletteItem(id: "acc", title: "Automatic Contrast Correction", checked: model.contrastCorrection,
                         keepOpen: true, action: .run { model.contrastCorrection.toggle() }),
+            PaletteItem(id: "ligatures", title: model.fontLigatures ? "Disable Terminal Font Ligatures" : "Enable Terminal Font Ligatures",
+                        action: .run { model.fontLigatures.toggle() }),
+            PaletteItem(id: "smoothing", title: model.fontSmoothing ? "Disable Terminal Font Smoothing" : "Enable Terminal Font Smoothing",
+                        action: .run { model.fontSmoothing.toggle() }),
+            PaletteItem(id: "cursor-blink", title: "Cursor Blinking", detail: model.cursorBlink ? model.cursorBlinkStyle.summary : "Off",
+                        submenu: true, action: .push(.cursorBlink)),
             PaletteItem(id: "peek", title: "Peek at Tabs", shortcut: key(.peek), action: .run { withAnimation(.den) { model.overview = .peek } }),
             PaletteItem(id: "expose", title: "Show All Sessions", shortcut: key(.showAllSessions), action: .run { withAnimation(.den) { model.overview = .expose } }),
             PaletteItem(id: "import-theme", title: "Import Theme File…", action: .run { importTheme() }),
@@ -508,8 +545,8 @@ struct CommandPalette: View {
                         action: .run { model.reloadConfig(force: true) }),
             PaletteItem(id: "install-cli", icon: "terminal", title: "Install Command Line Tool…", detail: model.cliInstallDetail,
                         action: .run { model.installCommandLineTool() }),
-            PaletteItem(id: "install-agent-skill", icon: "sparkles", title: "Install Agent Skill", detail: "Teach coding agents to drive Den",
-                        action: .run { model.installAgentSkill() }),
+            PaletteItem(id: "install-for-agents", icon: "sparkles", title: "Install Den for Agents", detail: "den command and skill for Claude Code, Codex and others",
+                        action: .run { model.installDenForAgents() }),
             PaletteItem(id: "check-updates", icon: "arrow.down.circle", title: "Check for Updates…",
                         action: .run { model.checkForUpdates() }),
         ]

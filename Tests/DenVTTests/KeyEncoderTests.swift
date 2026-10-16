@@ -51,4 +51,13 @@ import Testing
         let bytes = try KeyEncoder().encode(optionSpace(right: false, text: "\u{a0}", consumed: [.alt]), terminal: terminal, optionAsAlt: .none)
         #expect(bytes == Data("\u{a0}".utf8))
     }
+
+    private let numpadEnter = KeyInput(macKeyCode: 0x4c, action: .press, mods: [], consumedMods: [], text: "\r", unshifted: 0x0d)
+
+    @Test func numpadEnterSendsSS3MInApplicationKeypadMode() throws {
+        let terminal = try VTTerminal(cols: 20, rows: 4)
+        #expect(try KeyEncoder().encode(numpadEnter, terminal: terminal, optionAsAlt: .none) == Data("\r".utf8))
+        terminal.write(Data("\u{1b}=".utf8))
+        #expect(try KeyEncoder().encode(numpadEnter, terminal: terminal, optionAsAlt: .none) == Data("\u{1b}OM".utf8))
+    }
 }

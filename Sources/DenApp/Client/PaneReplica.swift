@@ -23,6 +23,9 @@ final class PaneReplica {
         self.contrastCorrection = contrastCorrection
         self.terminal = terminal
         configure()
+        // A snapshot taken mid synchronized update shows at its deadline
+        // even if no more output comes.
+        scheduleSynchronizedCommit()
     }
 
     func observe(_ owner: AnyObject, _ onChange: @escaping () -> Void) {
@@ -36,6 +39,7 @@ final class PaneReplica {
     func reset(terminal: VTTerminal) {
         self.terminal = terminal
         configure()
+        scheduleSynchronizedCommit()
         changed()
     }
 
@@ -43,10 +47,7 @@ final class PaneReplica {
         terminal.setDefaultColors(foreground: theme.foreground, background: theme.background, cursor: theme.cursor, palette: theme.palette)
         terminal.effects = VTEffects(
             bell: { [weak self] in self?.onBell?() },
-            titleChanged: { [weak self] in
-                guard let self else { return }
-                self.onTitleChange?(self.terminal.title)
-            }
+            titleChanged: { [weak self] title in self?.onTitleChange?(title) }
         )
     }
 
@@ -59,7 +60,25 @@ final class PaneReplica {
 
     func write(_ bytes: Data) {
         terminal.write(bytes)
+        scheduleSynchronizedCommit()
         changed()
+    }
+
+    private var commitScheduled = false
+
+    /// A synchronized update (?2026) the program never ends is shown at its
+    /// deadline anyway. libtermy has no timer of its own.
+    private func scheduleSynchronizedCommit() {
+        guard !commitScheduled, let remaining = terminal.synchronizedUpdateDeadline else { return }
+        commitScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(clamping: remaining) + 1)) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.commitScheduled = false
+                if self.terminal.commitDueSynchronizedUpdate() { self.changed() }
+                self.scheduleSynchronizedCommit()
+            }
+        }
     }
 
     func resize(_ size: GridSize) throws(VTError) {

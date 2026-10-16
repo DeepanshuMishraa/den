@@ -16,6 +16,8 @@ final class TestClient {
     var status: [PaneID: [StatusRecord]] = [:]
     var replies: [UInt32: ControlReply] = [:]
     var events: [ControlEvent.Kind] = []
+    var errors: [String] = []
+    var snapshotVersions: [UInt32] = []
 
     init(path: String) throws {
         fd = try UnixSocket.connect(path)
@@ -48,7 +50,9 @@ final class TestClient {
         switch m {
         case .sessions(let list): sessions = list
         case .layout(let l): layout = l
-        case .paneSnapshot(let id, let bytes): replicas[id] = try VTTerminal(snapshot: bytes)
+        case .paneSnapshot(let id, let bytes):
+            snapshotVersions.append(try VTTerminal.snapshotVersion(of: bytes))
+            replicas[id] = try VTTerminal(snapshot: bytes)
         case .paneOutput(let id, let bytes): replicas[id]?.write(bytes)
         case .paneResized(let id, let s): try replicas[id]?.resize(cols: s.cols, rows: s.rows, cellWidthPx: s.cellWidthPx, cellHeightPx: s.cellHeightPx)
         case .paneMeta(let id, let meta): metas[id] = meta
@@ -56,7 +60,8 @@ final class TestClient {
         case .programStatus(let id, let records): status[id] = records
         case .controlReply(let id, let json): replies[id] = try ControlCoding.decode(ControlReply.self, from: json).get()
         case .controlEvent(let json): events.append(try ControlCoding.decode(ControlEvent.self, from: json).get().kind)
-        case .welcome, .sessionClosed, .directoryListing, .error: break
+        case .error(let message): errors.append(message)
+        case .welcome, .sessionClosed, .directoryListing: break
         }
     }
 
@@ -121,6 +126,29 @@ final class TestClient {
         #expect(try b.pump { !b.replicas.isEmpty })
         let pane = try #require(b.layout?.tabs.first?.root.panes.first)
         #expect(try b.text(pane).contains(marker))
+    }
+
+    /// Clients from before libtermy can't read its snapshots; dend says so
+    /// instead of sending them.
+    @Test func clientsBeforeProtocol7AreRefused() async throws {
+        let (_, path) = try await startServer()
+        let c = try TestClient(path: path)
+        c.send(.hello(version: 6, client: "old Den"))
+        #expect(try c.pump { !c.errors.isEmpty })
+        #expect(c.errors.first?.contains("sent 6") == true)
+    }
+
+    /// A client that reads only an older snapshot format gets that format.
+    @Test func snapshotsUseTheClientsVersion() async throws {
+        let (_, path) = try await startServer()
+        let c = try TestClient(path: path)
+        let sid = SessionID()
+        c.send(.hello(version: protocolVersion, client: "older", snapshotVersion: VTTerminal.minimumSnapshotVersion))
+        c.send(.subscribe)
+        c.send(.createSession(id: sid, name: "old-format", size: size))
+        #expect(try c.pump { !c.replicas.isEmpty })
+        #expect(c.snapshotVersions.allSatisfy { $0 == VTTerminal.minimumSnapshotVersion })
+        #expect(c.errors.isEmpty)
     }
 
     @Test func splitAndCloseUpdateLayout() async throws {

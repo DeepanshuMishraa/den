@@ -28,6 +28,38 @@ enum DendLauncher {
         throw LaunchError(description: "dend did not start listening on \(path) within 3 seconds. See \(DenPaths.log.path) for its output.")
     }
 
+    /// Stops the dend serving this Mac's socket, ending its sessions, so the
+    /// next `connect()` starts this build's. For a dend from an older Den,
+    /// which refuses this one.
+    static func stopRunning() async throws(LaunchError) {
+        guard let fd = connectExisting() else { return }
+        let pid = peerPID(fd)
+        Darwin.close(fd)
+        guard let pid, pid > 0 else {
+            throw LaunchError(description: "Den couldn't tell which process serves \(DenPaths.socket.path), so nothing was stopped. Quit Den, run `pkill -x dend` in a terminal (this ends every session), then reopen Den.")
+        }
+        kill(pid, SIGTERM)
+        // dend exits at once on SIGTERM; give a busy one 3s before forcing it.
+        for _ in 0 ..< 100 where kill(pid, 0) == 0 {
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        if kill(pid, 0) == 0 {
+            kill(pid, SIGKILL)
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        guard kill(pid, 0) != 0 else {
+            throw LaunchError(description: "dend (pid \(pid)) didn't exit when asked, so it still holds your sessions. Run `kill -9 \(pid)` in a terminal, then reconnect.")
+        }
+    }
+
+    /// The process on the other end of a Unix socket connection.
+    static func peerPID(_ fd: Int32) -> pid_t? {
+        var pid: pid_t = 0
+        var length = socklen_t(MemoryLayout<pid_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0 else { return nil }
+        return pid
+    }
+
     /// Also used by the `den` CLI, which polls the socket itself.
     static func spawn() throws(LaunchError) {
         guard let executable = Bundle.main.executableURL?.deletingLastPathComponent().appending(path: "dend"),
@@ -91,7 +123,7 @@ struct LaunchdJob {
     let executable: URL
     let socket: String
 
-    static let baseLabel = "den.dipxsy.app.dend"
+    static let baseLabel = DenPaths.isDevBuild ? "den.dipxsy.app.dend.dev" : "den.dipxsy.app.dend"
 
     /// One job per socket, so a `DEN_SOCKET` test dend doesn't replace the
     /// real one's job.

@@ -237,19 +237,44 @@ final class AppModel {
         updates.checkForUpdates()
     }
 
-    /// Writes the den Agent Skill (`den agent install`) so coding agents in
-    /// Den's panes know how to open, read and type into panes.
-    func installAgentSkill() {
+    /// Everything coding agents need to drive Den: the `den` command they
+    /// run, and the den Agent Skill telling them how (`den agent install`).
+    /// The toast follows each step as it happens.
+    func installDenForAgents() {
+        let steps = 1 + AgentGuide.skillDirectories.count
+        var problems: [String] = []
+        func step(_ index: Int, _ message: String) async {
+            showUpdateProgress(message, progress: Double(index) / Double(steps))
+            // Long enough to read; each step itself takes a few milliseconds.
+            try? await Task.sleep(for: .milliseconds(350))
+        }
         Task {
-            let results = await Task.detached(priority: .userInitiated) { AgentGuide.install() }.value
-            if let failure = results.lazy.compactMap({ if case .failed(let message) = $0.outcome { message } else { nil } }).first {
-                lastError = failure
-            } else if let taken = results.first(where: { $0.outcome == .occupied }) {
-                showToast("\(PathQuery.abbreviate(taken.path)) is another skill — left alone")
-            } else if results.allSatisfy({ $0.outcome == .unchanged }) {
-                showToast("Agent skill already installed")
+            await step(0, "Installing the den command…")
+            switch await Task.detached(priority: .userInitiated, operation: { CLIInstaller.install() }).value {
+            case .linked, .alreadyLinked:
+                if !Self.cliLinkWorks { problems.append("~/.local/bin/den is a broken link; remove it and run this again.") }
+            case .occupied: problems.append("Something else is at ~/.local/bin/den, so the den command wasn't linked.")
+            case .failed(let message): problems.append(message)
+            // Dev builds: the skill still installs; agents can run Den's own binary.
+            case .notBundled: problems.append("The den command installs from release builds.")
+            }
+            for (i, folder) in AgentGuide.skillDirectories.enumerated() {
+                await step(i + 1, "Writing the den skill to ~/\(folder)…")
+                let (path, outcome) = await Task.detached(priority: .userInitiated) { AgentGuide.install(into: folder) }.value
+                switch outcome {
+                case .written, .unchanged: break
+                case .occupied: problems.append("\(PathQuery.abbreviate(path)) is another skill; left alone.")
+                case .failed(let message): problems.append(message)
+                }
+            }
+            showUpdateProgress(nil, progress: 1)
+            try? await Task.sleep(for: .milliseconds(250))
+            // Only the progress toast: an update's Restart/Later prompt stays.
+            if toast?.actions.isEmpty == true { dismissToast() }
+            if problems.isEmpty {
+                showToast("Den is ready for agents: den command and skill installed")
             } else {
-                showToast("Installed the den skill for coding agents")
+                lastError = "Installing Den for agents finished with problems. " + problems.joined(separator: " ")
             }
         }
     }
@@ -361,6 +386,21 @@ final class AppModel {
     var activityMode: Bool { didSet { defaults.set(activityMode, forKey: "activityMode") } }
     var showPaneHeaders: Bool { didSet { defaults.set(showPaneHeaders, forKey: "showPaneHeaders") } }
     var contrastCorrection: Bool { didSet { defaults.set(contrastCorrection, forKey: "acc"); refreshReplicas() } }
+    /// Terminal text drawn with the font's ligatures (`->` as an arrow).
+    var fontLigatures: Bool { didSet { defaults.set(fontLigatures, forKey: "fontLigatures"); refreshReplicas() } }
+    /// Core Text font smoothing for terminal text: heavier, softer strokes.
+    var fontSmoothing: Bool { didSet { defaults.set(fontSmoothing, forKey: "fontSmoothing"); refreshReplicas() } }
+    /// The focused pane's cursor fades in and out while nothing happens.
+    var cursorBlink: Bool { didSet { defaults.set(cursorBlink, forKey: "cursorBlink"); refreshReplicas() } }
+    /// How it blinks: speed, transition and pause, each a preset.
+    var cursorBlinkStyle: CursorBlink {
+        didSet {
+            defaults.set(cursorBlinkStyle.speed.rawValue, forKey: "cursorBlinkSpeed")
+            defaults.set(cursorBlinkStyle.transition.rawValue, forKey: "cursorBlinkTransition")
+            defaults.set(cursorBlinkStyle.pause.rawValue, forKey: "cursorBlinkPause")
+            refreshReplicas()
+        }
+    }
     var interfaceStyle: InterfaceStyle { didSet { defaults.set(interfaceStyle.rawValue, forKey: "interfaceStyle") } }
     /// Set while hovering a style in the palette; reverted on dismiss.
     var previewInterfaceStyle: InterfaceStyle?
@@ -448,6 +488,14 @@ final class AppModel {
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
+        fontLigatures = d.bool(forKey: "fontLigatures")
+        fontSmoothing = d.bool(forKey: "fontSmoothing")
+        cursorBlink = d.bool(forKey: "cursorBlink")
+        cursorBlinkStyle = CursorBlink(
+            speed: CursorBlink.Speed(rawValue: d.string(forKey: "cursorBlinkSpeed") ?? "") ?? .normal,
+            transition: CursorBlink.Transition(rawValue: d.string(forKey: "cursorBlinkTransition") ?? "") ?? .smooth,
+            pause: CursorBlink.Pause(rawValue: d.string(forKey: "cursorBlinkPause") ?? "") ?? .normal
+        )
         interfaceStyle = InterfaceStyle(rawValue: d.string(forKey: "interfaceStyle") ?? "") ?? .themed
         density = Density(rawValue: d.string(forKey: "density") ?? "") ?? .comfortable
         fontFamily = d.string(forKey: "fontFamily") ?? FontMetrics.defaultFamily
@@ -463,7 +511,49 @@ final class AppModel {
         themeWatcher = ThemeWatcher(directory: UserConfig.themesDirectory) { [weak self] in
             Task { @MainActor in self?.reloadCustomThemes() }
         }
+        // Before the updater, which marks this launch in the defaults.
+        announceUpdateIfNeeded(d)
         updateController = UpdateController(model: self)
+    }
+
+    // MARK: What's new
+
+    /// The release notes shown once after an update.
+    private(set) var whatsNew: WhatsNew?
+
+    /// On the first launch of a new version, shows its release notes; the
+    /// dialog opens at once and the notes fill in from GitHub.
+    private func announceUpdateIfNeeded(_ defaults: UserDefaults) {
+        let info = Bundle.main.infoDictionary
+        let current = info?["CFBundleShortVersionString"] as? String
+        let version = WhatsNew.versionToAnnounce(current: current,
+                                                 lastLaunched: defaults.string(forKey: WhatsNew.lastLaunchedKey),
+                                                 launchedBefore: defaults.bool(forKey: WhatsNew.sparkleLaunchedKey))
+        // Recorded now, so a crash on the way doesn't announce it twice.
+        if let current { defaults.set(current, forKey: WhatsNew.lastLaunchedKey) }
+        guard let version,
+              let repository = ReleaseNotes.repository(feed: (info?["SUFeedURL"] as? String).flatMap(URL.init(string:))) else { return }
+        showWhatsNew(version: version, repository: repository)
+    }
+
+    /// Opens the dialog for `version` and loads its notes.
+    private func showWhatsNew(version: String, repository: String) {
+        guard let page = ReleaseNotes.page(repository: repository, version: version) else { return }
+        whatsNew = WhatsNew(version: version, page: page, notes: .loading)
+        Task { [weak self] in
+            let result = await ReleaseNotes.fetch(repository: repository, version: version)
+            guard let self, self.whatsNew?.version == version else { return }
+            switch result {
+            case .success(let blocks): self.whatsNew?.notes = .loaded(blocks)
+            case .failure(let error): self.whatsNew?.notes = .unavailable(error.description)
+            }
+        }
+    }
+
+    func dismissWhatsNew() {
+        guard whatsNew != nil else { return }
+        whatsNew = nil
+        terminalFocusRequest &+= 1
     }
 
     // MARK: Connection
@@ -491,8 +581,9 @@ final class AppModel {
         let conn = DenConnection(fd: fd, deliver: { [weak self] batch in self?.receive(batch, from: host) }, closed: closed)
         connections[host] = conn
         // The oldest version we speak, so an older running dend still
-        // accepts us; its welcome says what it can do.
-        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app"), .subscribe])
+        // accepts us; its welcome says what it can do. Subscribing waits for
+        // the welcome, so a dend that refuses us streams nothing.
+        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app", snapshotVersion: VTTerminal.snapshotVersion)])
     }
 
     /// Sends to the dend that owns what the message is about.
@@ -568,8 +659,80 @@ final class AppModel {
     private func receive(_ batch: [Incoming], from host: HostID) {
         for incoming in batch {
             switch incoming {
+            case .message(.error(let message)) where protocols[host] == nil:
+                refused(host, message)
+            // Until dend welcomes us its stream isn't ours to read: a dend that
+            // refused the hello still answers the subscribe, in its own format.
+            case _ where protocols[host] == nil:
+                if case .message(let message) = incoming, case .welcome = message { handle(message, from: host) }
             case .message(let message): handle(message, from: host)
             case .snapshot(let id, let restored): restore(id, restored)
+            }
+        }
+    }
+
+    /// dend turned down the hello, almost always because it's a build from
+    /// before this Den that is still running.
+    private func refused(_ host: HostID, _ message: String) {
+        NSLog("Den: dend on %@ refused this Den: %@", hostLabel(host), message)
+        // Let go of it: the old dend and its sessions run on until you choose.
+        switch host {
+        case .local:
+            connections[.local]?.disconnect("dend is still running from an older Den, which can't talk to this one. Your sessions there keep running until you restart it.")
+        case .remote(let id):
+            disconnectRemote(id)
+            remoteStates[id] = .needsRestart
+        }
+        outdatedDends.insert(host)
+        promptDendRestart()
+    }
+
+    /// Hosts whose running dend is from an older Den and refused this one,
+    /// until restarted.
+    private(set) var outdatedDends: Set<HostID> = []
+
+    /// One prompt for every outdated dend. "Later" leaves them running; the
+    /// placeholder (this Mac) and Reconnect (remote hosts) ask again.
+    private func promptDendRestart() {
+        guard !outdatedDends.isEmpty else { return }
+        let remotes = outdatedDends.filter { $0 != .local }.map(hostLabel).sorted()
+        let places = (outdatedDends.contains(.local) ? ["this Mac"] : []) + remotes
+        let message = outdatedDends == [.local]
+            ? "dend is from an older Den. Restart it to connect; its sessions will end."
+            : "dend on \(places.joined(separator: ", ")) is from an older Den. Restart to connect; sessions there will end."
+        showActionToast(message, actions: [
+            ("Restart dend", nil, { [weak self] in Task { await self?.restartOutdatedDends() } }),
+            ("Later", nil, {}),
+        ])
+    }
+
+    /// Stops each outdated dend, ending its sessions, and connects to this
+    /// Den's in its place.
+    func restartOutdatedDends() async {
+        let hosts = outdatedDends
+        outdatedDends = []
+        for host in hosts {
+            switch host {
+            case .local:
+                connectionState = .connecting
+                do {
+                    try await DendLauncher.stopRunning()
+                } catch {
+                    outdatedDends.insert(.local)
+                    connectionState = .disconnected(error.description)
+                    continue
+                }
+                await connect()
+            case .remote(let id):
+                guard let remote = remoteHost(id) else { continue }
+                remoteStates[id] = .connecting(step: "Restarting dend on \(remote.address)…")
+                switch await SSH(host: remote).run(RemoteSetup.restartCommand) {
+                case .failure(let failure):
+                    outdatedDends.insert(host)
+                    remoteStates[id] = .failed("Restarting dend on \(remote.address) failed: \(failure). Its old dend may still be running with its sessions; try again from the session menu.")
+                case .success:
+                    connectRemote(id, reveal: false)
+                }
             }
         }
     }
@@ -597,6 +760,7 @@ final class AppModel {
         switch message {
         case .welcome(let version, let name):
             protocols[host] = version
+            send(.subscribe, to: host)
             switch host {
             case .local:
                 connectionState = .connected(host: name)
@@ -1094,6 +1258,7 @@ final class AppModel {
         case .needsLogin: "\(name) needs you to log in."
         case .reconnecting(let reason, let retryIn): "Lost \(name): \(reason) Retrying in \(retryIn)s; your sessions keep running there."
         case .failed(let reason): reason
+        case .needsRestart: "dend on \(name) is from an older Den. Restart it from the prompt, or reconnect from the session menu to be asked again; restarting ends its sessions."
         case .disconnected: "Disconnected from \(name). Your sessions keep running there; reconnect from the session menu."
         case .connected, nil: "Reattaching to \(name)…"
         }

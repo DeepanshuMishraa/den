@@ -20,12 +20,25 @@ private let streamSocket = SOCK_STREAM
 
 /// Locations shared by dend and its clients.
 public enum DenPaths {
+    /// A macOS build run from outside a .app (`.build/debug/Den` and the dend
+    /// next to it). It keeps its own folder, socket and launchd job, so it
+    /// never attaches to, restarts or reopens an installed Den's sessions.
+    public static let isDevBuild: Bool = {
+        #if os(macOS)
+        let executable = Bundle.main.executableURL ?? URL(filePath: CommandLine.arguments[0])
+        return !executable.resolvingSymlinksInPath().path.contains(".app/Contents/MacOS/")
+        #else
+        return false
+        #endif
+    }()
+
     /// `~/Library/Application Support/Den` on macOS, `~/.den` on Linux (where
-    /// Den.app installs dend as `~/.den/bin/dend`).
+    /// Den.app installs dend as `~/.den/bin/dend`). Dev builds use `Den Dev`.
     public static var supportDirectory: URL {
         #if os(macOS)
         FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: "Library/Application Support/Den", directoryHint: .isDirectory)
+            .appending(path: isDevBuild ? "Library/Application Support/Den Dev" : "Library/Application Support/Den",
+                       directoryHint: .isDirectory)
         #else
         FileManager.default.homeDirectoryForCurrentUser.appending(path: ".den", directoryHint: .isDirectory)
         #endif
@@ -40,8 +53,7 @@ public enum DenPaths {
     }
     public static var log: URL { supportDirectory.appending(path: "dend.log") }
     public static var themes: URL { supportDirectory.appending(path: "themes", directoryHint: .isDirectory) }
-    /// Session reopened on launch, as a plain file so dev and bundled builds
-    /// (whose UserDefaults domains differ) remember the same one.
+    /// Session reopened on launch, as a plain file rather than UserDefaults.
     public static var lastSession: URL { supportDirectory.appending(path: "last-session") }
 }
 

@@ -41,7 +41,8 @@ struct SessionMenu: View {
                 rows += sessionRows(numbered.filter { model.sessionHosts[$0.element.id] == id })
                 switch model.remoteStates[host.id] {
                 case .needsLogin: rows.append(.logIn(host.id))
-                case .failed, .reconnecting, .disconnected: rows.append(.reconnect(host.id))
+                // Reconnecting a host that needs a restart asks again.
+                case .failed, .reconnecting, .disconnected, .needsRestart: rows.append(.reconnect(host.id))
                 case .connected: rows += [.newSessionOn(host.id), .disconnect(host.id)]
                 case .connecting, .uploading, nil: break
                 }
@@ -153,7 +154,15 @@ struct SessionMenu: View {
                 Spacer()
                 if let label = model.config.shortcutLabel(.newSession) { Text(label).uiFont(size: 11.5).foregroundStyle(dim) }
             case .addHost:
-                Image(systemName: "network").font(.system(size: 11)).frame(width: 12)
+                // A globe with a plus: SF Symbols has no such badge.
+                Image(systemName: "globe")
+                    .font(.system(size: 11))
+                    .overlay(alignment: .bottomLeading) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 6.5, weight: .bold))
+                            .offset(x: -3, y: 2)
+                    }
+                    .frame(width: 12)
                 Text("Add Remote Host…").uiFont(size: 13)
                 Spacer()
             case .logIn:

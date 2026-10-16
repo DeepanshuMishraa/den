@@ -4,7 +4,7 @@ import Testing
 
 /// Headless VT-parse microbench: feeds `scripts/bench/corpus/*` through
 /// `VTTerminal` in 64KB chunks (PTY-sized) and reports MB/s.
-/// This isolates libghostty-vt parse cost from dend IPC + Metal rendering,
+/// This isolates libtermy's parse cost from dend IPC + Metal rendering,
 /// so a Den-vs-Ghostty gap larger than this is overhead outside the parser.
 /// Run: `swift test --filter ParseBench`
 @Suite struct ParseBench {

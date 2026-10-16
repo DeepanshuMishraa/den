@@ -24,13 +24,54 @@ final class TerminalView: MTKView {
     private var scrollRemainder: CGFloat = 0
     private var pressedButtons = 0
     private var selecting = false
+    /// The cell under the mouse while a click there would open a link.
+    private var linkCell: (col: Int, row: Int)?
+    /// The link under the mouse, underlined and opened by a click.
+    private var hoveredLink: TerminalLink?
+    /// The link pressed, opened on release if the click didn't drag.
+    private var pressedLink: TerminalLink?
     private let scroller = ScrollIndicator()
     var isFocusedPane = false {
         didSet {
             guard oldValue != isFocusedPane else { return }
             needsDisplay = true
+            cursorActivity()
             if isFocusedPane { claimFocus() }
         }
+    }
+
+    // MARK: Cursor blink
+
+    /// When typing, output or a click last touched this pane; the blink
+    /// rests solid for a moment after it.
+    private var lastActivity = Date()
+    private var blinkTimer: Timer?
+    /// The cursor opacity the last frame drew, so ticks redraw only on change.
+    private var drawnCursorOpacity: Float = 1
+
+    private var cursorOpacity: Float {
+        guard mode == .interactive, isFocusedPane, window?.isKeyWindow == true, let model, model.cursorBlink else { return 1 }
+        return model.cursorBlinkStyle.opacity(sinceActivity: Date().timeIntervalSince(lastActivity),
+                                              fades: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    }
+
+    /// Restarts the blink at solid, and runs its timer only where it blinks.
+    private func cursorActivity() {
+        lastActivity = Date()
+        guard model?.cursorBlink == true, mode == .interactive, isFocusedPane else {
+            blinkTimer?.invalidate()
+            blinkTimer = nil
+            return
+        }
+        guard blinkTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, abs(self.cursorOpacity - self.drawnCursorOpacity) > 0.01 else { return }
+                self.needsDisplay = true
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        blinkTimer = timer
     }
 
     /// Inset of the grid inside the view, in points.
@@ -74,6 +115,7 @@ final class TerminalView: MTKView {
 
     isolated deinit {
         replica?.stopObserving(self)
+        blinkTimer?.invalidate()
     }
 
     /// Connects to the pane's replica once its snapshot has arrived.
@@ -81,7 +123,11 @@ final class TerminalView: MTKView {
         guard replica !== self.replica else { return }
         self.replica?.stopObserving(self)
         self.replica = replica
-        replica?.observe(self) { [weak self] in self?.needsDisplay = true }
+        // Output (and setting changes) show the cursor solid again.
+        replica?.observe(self) { [weak self] in
+            self?.needsDisplay = true
+            self?.cursorActivity()
+        }
         needsDisplay = true
         reportSize()
     }
@@ -185,8 +231,8 @@ final class TerminalView: MTKView {
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let drawable = currentDrawable, let pass = currentRenderPassDescriptor,
-              let atlas = pipelines.atlas(for: metrics), let model,
+        guard let drawable = currentDrawable, let pass = currentRenderPassDescriptor, let model,
+              let atlas = pipelines.atlas(for: metrics, smoothing: model.fontSmoothing),
               let buffer = pipelines.queue.makeCommandBuffer() else { return }
 
         let pad = SIMD2(Float(Self.padding.width * metrics.scale), Float(Self.padding.height * metrics.scale))
@@ -196,14 +242,18 @@ final class TerminalView: MTKView {
             theme: replica?.theme ?? model.theme,
             cursorFocused: mode == .interactive && isFocusedPane && window?.isKeyWindow == true,
             showCursor: mode == .interactive,
-            contrastCorrection: replica?.contrastCorrection ?? false
+            contrastCorrection: replica?.contrastCorrection ?? false,
+            ligatures: model.fontLigatures,
+            cursorOpacity: cursorOpacity
         )
+        drawnCursorOpacity = frame.cursorOpacity
         var gridSize = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
         if let replica, let renderState {
             do {
                 try renderState.update(from: replica.terminal)
                 frame.build(renderState)
-                renderState.markClean()
+                refreshHover()
+                if let hoveredLink { frame.underline(hoveredLink) }
                 let (cols, rows) = renderState.size
                 gridSize = SIMD2(Float(cols) * Float(metrics.cellWidth), Float(rows) * Float(metrics.cellHeight))
             } catch {
@@ -271,6 +321,7 @@ final class TerminalView: MTKView {
         guard let replica, let keyEncoder, let model else { return }
         let bytes = keyEncoder.encode(keyInput(event, action: event.isARepeat ? .repeat : .press), terminal: replica.terminal, optionAsAlt: optionAsAlt)
         guard !bytes.isEmpty else { return }
+        cursorActivity()
         replica.terminal.clearSelection()
         replica.scroll(.bottom)
         model.input(paneID, bytes)
@@ -472,28 +523,57 @@ final class TerminalView: MTKView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        cursorActivity()
+        pressedLink = nil
+        swallowingClick = false
+        // ⌘-click opens a link even when the program has the mouse. The
+        // program never saw the press, so it mustn't see the drag or release.
+        if mode == .interactive, event.modifierFlags.contains(.command), let link = link(at: event) {
+            open(link)
+            swallowingClick = true
+            return
+        }
         // ⌘-drag picks the pane up to move it.
         if mode == .interactive, event.modifierFlags.contains(.command), let model, model.beginPaneDrag(paneID, at: windowPoint(event)) {
             draggingPane = true
             NSCursor.closedHand.set()
             return
         }
-        if wantsSelection(event) { return select(event, .press) }
+        if wantsSelection(event) {
+            // Shift-clicks only select (and extend a selection).
+            let opensLinks = mode == .interactive && replica?.terminal.isMouseTracking == false
+                && !event.modifierFlags.contains(.shift)
+            pressedLink = opensLinks ? link(at: event) : nil
+            return select(event, .press)
+        }
         mouseReport(event, .press, .left)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if swallowingClick {
+            swallowingClick = false
+            return
+        }
         if draggingPane {
             draggingPane = false
             model?.endPaneDrag()
             updateCursor(event.modifierFlags)
             return
         }
-        if selecting { return select(event, .release) }
+        if selecting {
+            // Checked before the release, whose copy-on-select clears it.
+            let selected = replica?.terminal.selectedText() != nil
+            select(event, .release)
+            // A click that didn't select anything opens the link it hit.
+            if let link = pressedLink, !selected, self.link(at: event) == link { open(link) }
+            pressedLink = nil
+            return
+        }
         mouseReport(event, .release, .left)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if swallowingClick { return }
         if draggingPane {
             NSCursor.closedHand.set()
             return model?.updatePaneDrag(at: windowPoint(event)) ?? ()
@@ -507,6 +587,7 @@ final class TerminalView: MTKView {
     override func otherMouseDown(with event: NSEvent) { mouseReport(event, .press, .middle) }
     override func otherMouseUp(with event: NSEvent) { mouseReport(event, .release, .middle) }
     override func mouseMoved(with event: NSEvent) {
+        updateHover(event, flags: event.modifierFlags)
         updateCursor(event.modifierFlags)
         // Nearing the right edge brings the scrollbar up to grab.
         let nearEdge = convert(event.locationInWindow, from: nil).x > bounds.width - ScrollIndicator.hitWidth
@@ -517,21 +598,82 @@ final class TerminalView: MTKView {
 
     override func mouseExited(with event: NSEvent) {
         scroller.setHovering(false)
+        setLinkCell(nil)
     }
 
-    /// Holding ⌘ over a pane shows it can be grabbed.
+    /// Holding ⌘ over a pane shows it can be grabbed, or that a link
+    /// under the mouse opens even while the program has the mouse.
     override func flagsChanged(with event: NSEvent) {
         super.flagsChanged(with: event)
         guard let window, bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
+        updateHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), flags: event.modifierFlags)
         updateCursor(event.modifierFlags)
     }
 
     private var draggingPane = false
+    /// A ⌘-click opened a link on press; its drag and release go nowhere.
+    private var swallowingClick = false
 
     private func updateCursor(_ flags: NSEvent.ModifierFlags) {
         guard mode == .interactive, !draggingPane else { return }
+        if hoveredLink != nil { return NSCursor.pointingHand.set() }
         let movable = (model?.activeLayout?.root.panes.count ?? 0) > 1
         (flags.contains(.command) && movable ? NSCursor.openHand : NSCursor.iBeam).set()
+    }
+
+    // MARK: Links
+
+    /// The viewport cell under a point in view coordinates, if it's on the grid.
+    private func cell(at point: NSPoint) -> (col: Int, row: Int)? {
+        guard let replica else { return nil }
+        let x = (point.x - Self.padding.width) * metrics.scale, y = (point.y - Self.padding.height) * metrics.scale
+        guard x >= 0, y >= 0 else { return nil }
+        let col = Int(x / metrics.cellWidth), row = Int(y / metrics.cellHeight)
+        guard col < Int(replica.terminal.cols), row < Int(replica.terminal.rows) else { return nil }
+        return (col, row)
+    }
+
+    private func link(at event: NSEvent) -> TerminalLink? {
+        guard let replica, let cell = cell(at: convert(event.locationInWindow, from: nil)) else { return nil }
+        return replica.terminal.link(atCol: cell.col, row: cell.row)
+    }
+
+    private func updateHover(_ event: NSEvent, flags: NSEvent.ModifierFlags) {
+        updateHover(at: convert(event.locationInWindow, from: nil), flags: flags)
+    }
+
+    /// Links light up where a click would open them: anywhere the program
+    /// doesn't track the mouse, and with ⌘ where it does.
+    private func updateHover(at point: NSPoint, flags: NSEvent.ModifierFlags) {
+        guard mode == .interactive, let replica,
+              !replica.terminal.isMouseTracking || flags.contains(.command),
+              let cell = cell(at: point) else { return setLinkCell(nil) }
+        setLinkCell(cell)
+    }
+
+    /// Output may have moved, replaced or printed a link under a still
+    /// mouse, or turned mouse tracking on, so look again before drawing.
+    private func refreshHover() {
+        guard let window else { return }
+        let before = hoveredLink
+        updateHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), flags: NSEvent.modifierFlags)
+        if hoveredLink != before { updateCursor(NSEvent.modifierFlags) }
+    }
+
+    private func setLinkCell(_ cell: (col: Int, row: Int)?) {
+        let link = cell.flatMap { replica?.terminal.link(atCol: $0.col, row: $0.row) }
+        linkCell = link == nil ? nil : cell
+        guard link != hoveredLink else { return }
+        hoveredLink = link
+        needsDisplay = true
+    }
+
+    private func open(_ link: TerminalLink) {
+        guard let url = link.url else {
+            model?.showToast("Den doesn't open \(URL(string: link.target)?.scheme ?? "these") links")
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     /// The event's position in window coordinates with the origin top-left,

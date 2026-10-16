@@ -1,4 +1,5 @@
 import DenProtocol
+import DenVT
 import Foundation
 import Testing
 @testable import DenApp
@@ -7,7 +8,7 @@ import Testing
 /// Den's key) and `scripts/build-dend-linux.sh` already run. Walks the same
 /// steps as `AppModel.establish`: probe, install, stream, then speaks the
 /// protocol through the channel.
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["DEN_TEST_SSH"] != nil))
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["DEN_TEST_SSH"] != nil))
 struct RemoteIntegrationTests {
     let host = RemoteHost.parse(ProcessInfo.processInfo.environment["DEN_TEST_SSH"] ?? "")
 
@@ -90,6 +91,7 @@ struct RemoteIntegrationTests {
         var pane: PaneID?
         var output = ""
         var meta: PaneMeta?
+        var restored: Result<VTTerminal, VTError>?
         var sentCommand = false
         var sentExit = false
         var exited = false
@@ -103,6 +105,9 @@ struct RemoteIntegrationTests {
                 switch try ServerMessage.decode(payload) {
                 case .layout(let layout) where layout.session.id == session:
                     pane = layout.tabs.first?.root.panes.first
+                case .paneSnapshot(let id, let bytes) where id == pane:
+                    // Written by Linux dend, read here on macOS.
+                    restored = Result { () throws(VTError) in try VTTerminal(snapshot: bytes) }
                 case .paneOutput(let id, let bytes) where id == pane:
                     output += String(decoding: bytes, as: UTF8.self)
                 case .paneMeta(let id, let m) where id == pane:
@@ -127,5 +132,7 @@ struct RemoteIntegrationTests {
         #expect(output.contains("den-ok-42"), "output: \(output.suffix(300))")
         #expect(meta?.cwd == "/tmp")
         #expect(meta?.process == "bash")
+        let replica = try #require(try restored?.get(), "no snapshot of the pane arrived")
+        #expect(replica.cols == 80 && replica.rows == 24)
     }
 }

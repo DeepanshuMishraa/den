@@ -2,7 +2,8 @@
 
 A terminal, rebuilt from the demos of Superlogical's Rex: a native
 macOS client on top of a persistent multiplexing server. The VT engine on both
-sides is [libghostty-vt](https://github.com/ghostty-org/ghostty).
+sides is [libtermy_engine](https://github.com/lassejlv/termy/tree/main/crates/engine_ffi),
+Termy's engine-only C library.
 
 ## Architecture
 
@@ -18,8 +19,8 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 ```
 
 - **Replicated state machines.** dend feeds PTY output into its own
-  libghostty-vt terminal and forwards the same bytes to every attached client.
-  On attach a client gets a libghostty snapshot (screen, scrollback, modes,
+  libtermy terminal and forwards the same bytes to every attached client.
+  On attach a client gets a libtermy snapshot (screen, scrollback, modes,
   unfinished escape) and then the stream, so its replica matches byte for byte.
   Resizes go through dend and come back in-stream, so every replica reflows the
   same way. Only dend answers terminal queries.
@@ -32,8 +33,9 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
   in Background", keeps every shell running. The next launch reattaches to the
   last session. One dend owns the socket (an `flock`'d sidecar lock refuses a
   second dend even if the socket file was deleted); the reopened session is
-  remembered in `~/Library/Application Support/Den/last-session`, shared by
-  dev and bundled builds.- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
+  remembered in `~/Library/Application Support/Den/last-session`. Dev builds
+  (run from outside a .app) use `~/Library/Application Support/Den Dev`, with
+  their own socket and launchd job, so they never touch an installed Den.- **Remote hosts.** The same dend runs on a Linux (or Mac) host, reached over
   the system `ssh`. Den runs `dend --stdio` there, which starts the host's dend
   if needed and relays the SSH channel to its socket, so a remote session
   speaks the same protocol and outlives dropped connections. See
@@ -42,7 +44,7 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 | Module | Role |
 | --- | --- |
 | `DenProtocol` | Framing, binary messages, split-tree model, socket helpers |
-| `DenVT` | Swift wrapper over libghostty-vt: terminal, snapshot, render state, input encoders |
+| `DenVT` | Swift wrapper over libtermy_engine: terminal, snapshot, render state, input encoders, selection |
 | `DenServer` / `dend` | Sessions, PTYs (`CDenPTY`), process metadata, broadcast |
 | `DenApp` | Window chrome, deck tabs, session switcher, Metal terminal view |
 
@@ -50,9 +52,9 @@ Den.app (AppKit + SwiftUI + Metal)            dend (Swift)
 
 ```sh
 git submodule update --init
-scripts/build-libghostty-vt.sh   # fetches Zig 0.16 into .tools/, builds the xcframework
+scripts/build-libtermy-engine.sh # builds vendor/termy's libtermy_engine with cargo into an xcframework
 swift test
-swift build && .build/debug/Den  # dev run (dend is started from next to the binary)
+scripts/dev.sh                   # build and run the dev Den (own socket and sessions, apart from Den.app)
 scripts/build-dend-linux.sh       # static Linux dend (x86_64, aarch64) for remote hosts; needs Docker
 scripts/bundle.sh                # dist/Den.app (builds vendor/fsearch with cargo if present)
 ```
@@ -192,7 +194,10 @@ pointed at `den agent guide` from their instructions file.
   when Den comes to the front, or with Reload Config (⇧⌘,). Migrate from
   Ghostty Config brings over the theme, `macos-option-as-alt` and keybinds.
 - **Copy on select**: finishing a selection copies it and shows a toast.
-- Selection with Ghostty's gesture rules (rounded highlight), ⌘C/⌘V, native
+- **Links**: URLs and OSC 8 hyperlinks underline on hover; a click opens them
+  in the default app for their scheme. When the program uses the mouse, hold
+  ⌘ to underline and click them. Only http(s), mailto and ftp links open.
+- Selection by drag, double-click word and triple-click line (rounded highlight), ⌘C/⌘V, native
   overlay scrollbar, keycap tooltips.
 
 ## Development
