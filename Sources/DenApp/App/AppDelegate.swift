@@ -88,9 +88,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let handled = e.map { NSApp.mainMenu?.performKeyEquivalent(with: $0) ?? false } ?? false
                     NSLog("Den keytest \(chars) handled=\(handled) fontSize=\(model.fontSize)")
                 }
-            case _ where part.hasPrefix("whatsnew:"):
-                // `whatsnew:1.0.6` shows that release's notes, as after an update.
-                model.showWhatsNew(version: String(part.dropFirst("whatsnew:".count)), repository: "DeepanshuMishraa/den")
             case "palette": model.palette = .root
             case "themes": model.palette = .theme
             case "sessions": model.showSessionMenu = true

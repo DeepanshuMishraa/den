@@ -519,7 +519,7 @@ final class AppModel {
     }
 
     /// Opens the dialog for `version` and loads its notes.
-    func showWhatsNew(version: String, repository: String) {
+    private func showWhatsNew(version: String, repository: String) {
         guard let page = ReleaseNotes.page(repository: repository, version: version) else { return }
         whatsNew = WhatsNew(version: version, page: page, notes: .loading)
         Task { [weak self] in

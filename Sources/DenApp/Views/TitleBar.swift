@@ -18,6 +18,8 @@ struct TitleBar: View {
             Color.clear.frame(width: Self.leadingInset, height: Self.height)
             SessionButton()
                 .frame(height: Self.height)
+                // Room between the session switcher and the first tab.
+                .padding(.trailing, 8)
             TabStrip()
             Spacer(minLength: 0)
             HStack(spacing: 2) {
