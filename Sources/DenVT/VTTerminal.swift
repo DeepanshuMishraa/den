@@ -270,8 +270,9 @@ public final class VTTerminal {
         let (kind, value): (Int32, Int64) = switch scroll {
         case .top: (TERMY_ENGINE_SCROLL_TOP, 0)
         case .bottom: (TERMY_ENGINE_SCROLL_BOTTOM, 0)
-        // libtermy's positive delta scrolls back.
-        case .delta(let n): (TERMY_ENGINE_SCROLL_DELTA, -Int64(n))
+        // libtermy's positive delta scrolls back. Int.min saturates rather
+        // than overflowing the negation.
+        case .delta(let n): (TERMY_ENGINE_SCROLL_DELTA, n == .min ? .max : -Int64(n))
         }
         var changed = false
         _ = termy_engine_scroll_viewport(handle, UInt32(kind), value, &changed)

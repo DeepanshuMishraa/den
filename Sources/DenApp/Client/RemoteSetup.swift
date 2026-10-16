@@ -83,8 +83,10 @@ fi
     /// Stops the host's dend (and its sessions), which an older Den left
     /// running. The installed binary is already this Den's: the boot service
     /// or the next stream starts it. Waits on the pids it stopped only, so
-    /// the new dend a service restarts meanwhile is left alone.
-    static let restartCommand = sh(#"pids=$(pgrep -u "$(id -u)" -x dend); [ -z "$pids" ] && exit 0; kill $pids 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do alive=0; for p in $pids; do kill -0 $p 2>/dev/null && alive=1; done; [ $alive = 0 ] && exit 0; sleep 0.3; done; kill -9 $pids 2>/dev/null; exit 0"#)
+    /// the new dend a service restarts meanwhile is left alone. Fails when
+    /// pgrep can't run or a dend outlives SIGKILL, so Den doesn't reconnect
+    /// to the old one.
+    static let restartCommand = sh(#"pids=$(pgrep -u "$(id -u)" -x dend); s=$?; if [ $s -gt 1 ]; then echo "pgrep failed (status $s), so the running dend was not found or stopped" >&2; exit 1; fi; [ -z "$pids" ] && exit 0; kill $pids 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do alive=0; for p in $pids; do kill -0 $p 2>/dev/null && alive=1; done; [ $alive = 0 ] && exit 0; sleep 0.3; done; kill -9 $pids 2>/dev/null; sleep 0.3; for p in $pids; do if kill -0 $p 2>/dev/null; then echo "dend (pid $p) did not exit after SIGKILL" >&2; exit 1; fi; done; exit 0"#)
 
     /// Appends Den's public key to authorized_keys unless it's already there.
     static func authorizeCommand(publicKey: String) -> String {

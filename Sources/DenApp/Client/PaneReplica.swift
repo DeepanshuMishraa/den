@@ -23,6 +23,9 @@ final class PaneReplica {
         self.contrastCorrection = contrastCorrection
         self.terminal = terminal
         configure()
+        // A snapshot taken mid synchronized update shows at its deadline
+        // even if no more output comes.
+        scheduleSynchronizedCommit()
     }
 
     func observe(_ owner: AnyObject, _ onChange: @escaping () -> Void) {
@@ -36,6 +39,7 @@ final class PaneReplica {
     func reset(terminal: VTTerminal) {
         self.terminal = terminal
         configure()
+        scheduleSynchronizedCommit()
         changed()
     }
 

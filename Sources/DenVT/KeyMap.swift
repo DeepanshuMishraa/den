@@ -1,9 +1,11 @@
+let numpadEnterKeyCode: UInt16 = 0x004c
+
 /// macOS virtual keycode → libtermy key name, for keys that aren't text.
 /// Text keys (letters, digits, punctuation, the numpad) are left out:
 /// libtermy names them by the character the layout produces.
 let macKeyNames: [UInt16: String] = [
     0x0024: "enter",
-    0x004c: "enter", // numpad enter
+    numpadEnterKeyCode: "enter", // SS3 M in application keypad mode (KeyEncoder)
     0x0035: "escape",
     0x0033: "backspace",
     0x0030: "tab",

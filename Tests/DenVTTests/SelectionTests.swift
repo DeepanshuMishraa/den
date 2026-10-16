@@ -30,6 +30,24 @@ import Testing
         #expect(t.selectedText() == "world\nsecond")
     }
 
+    /// A drag ends the multi-click: pressing where it began starts afresh.
+    @Test func clickAfterADragIsASingleClick() throws {
+        let t = try terminal("hello world")
+        let g = try SelectionGesture()
+        drag(g, t, from: (1, 0), to: (8, 0))
+        click(g, t, col: 1, row: 0, at: 100 * ms)
+        #expect(t.selectedText() == nil)
+    }
+
+    /// A replaced replica (a new snapshot) doesn't inherit the last click.
+    @Test func newTerminalStartsANewClickCount() throws {
+        let g = try SelectionGesture()
+        click(g, try terminal("hello world"), col: 1, row: 0, at: 0)
+        let fresh = try terminal("hello world")
+        click(g, fresh, col: 1, row: 0, at: 100 * ms)
+        #expect(fresh.selectedText() == nil)
+    }
+
     @Test func singleClickSelectsNothing() throws {
         let t = try terminal("hello world")
         let g = try SelectionGesture()

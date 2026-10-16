@@ -89,6 +89,14 @@ public final class KeyEncoder {
     }
 
     public func encode(_ input: KeyInput, terminal: VTTerminal, optionAsAlt: OptionAsAlt) -> Data {
+        // libtermy has no keypad key names, so numpad Enter would encode as
+        // Return. In application keypad mode (DECKPAM, legacy keyboard) it
+        // sends SS3 M.
+        if input.macKeyCode == numpadEnterKeyCode, input.action != .release,
+           input.mods.subtracting([.capsLock, .altRight]).isEmpty {
+            let state = terminal.state
+            if state.application_keypad, state.kitty_keyboard_flags == 0 { return Data("\u{1b}OM".utf8) }
+        }
         // Text keys go by the character the layout gives them (libtermy
         // reads `unshifted`), so non-US layouts send what they type.
         var key = macKeyNames[input.macKeyCode] ?? ""
@@ -159,12 +167,16 @@ public final class MouseEncoder {
         if mods.contains(.shift) { event.mods |= UInt32(TERMY_ENGINE_MOD_SHIFT) }
         if mods.contains(.alt) { event.mods |= UInt32(TERMY_ENGINE_MOD_ALT) }
         if mods.contains(.ctrl) { event.mods |= UInt32(TERMY_ENGINE_MOD_CTRL) }
-        // Outside the grid (dragging past an edge) reports the nearest cell.
-        let px = max(x, 0), py = max(y, 0)
-        event.col = min(UInt32(px) / max(cellWidth, 1), UInt32(max(cols, 1) - 1))
-        event.row = min(UInt32(py) / max(cellHeight, 1), UInt32(max(rows, 1) - 1))
-        event.x_px = UInt32(px)
-        event.y_px = UInt32(py)
+        // Outside the grid (dragging past an edge) reports the nearest cell,
+        // and in pixel mode the nearest pixel inside the grid.
+        let width = max(cellWidth, 1), height = max(cellHeight, 1)
+        let maxX = width * UInt32(max(cols, 1)) - 1, maxY = height * UInt32(max(rows, 1)) - 1
+        func clamp(_ v: Float, _ upper: UInt32) -> UInt32 { v > 0 ? (v < Float(upper) ? UInt32(v) : upper) : 0 }
+        let px = clamp(x, maxX), py = clamp(y, maxY)
+        event.col = px / width
+        event.row = py / height
+        event.x_px = px
+        event.y_px = py
         return (try? takeBytes("encode_mouse") { termy_engine_encode_mouse(terminal.handle, &event, $0) }) ?? Data()
     }
 }
@@ -187,9 +199,11 @@ extension VTTerminal {
     public func encodePaste(_ text: String) -> Data {
         var text = text
         let bracketed = bracketedPaste
+        // If libtermy can't encode it, paste the text as is rather than
+        // dropping the clipboard.
         return (try? text.withUTF8 { buf in
             try takeBytes("encode_paste") { termy_engine_encode_paste(buf.baseAddress, buf.count, bracketed, $0) }
-        }) ?? Data()
+        }) ?? Data(text.utf8)
     }
 
     public static func encodeFocus(_ gained: Bool) -> Data {

@@ -82,6 +82,14 @@ enum ReleaseNotes {
     /// Headings, bullets and paragraphs from release-note Markdown, with
     /// inline styling (bold, code, links) kept. Wrapped lines join the
     /// block above them.
+    /// An ATX heading: one to six `#` then a space (or nothing), so a line
+    /// starting with an issue reference like `#123` stays text.
+    private static func isHeading(_ line: String) -> Bool {
+        let rest = line.drop { $0 == "#" }
+        let hashes = line.count - rest.count
+        return (1 ... 6).contains(hashes) && (rest.isEmpty || rest.first == " ")
+    }
+
     static func parse(_ markdown: String) -> [Block] {
         func inline(_ text: String) -> AttributedString {
             (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
@@ -99,7 +107,7 @@ enum ReleaseNotes {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty {
                 flush()
-            } else if line.hasPrefix("#") {
+            } else if isHeading(line) {
                 flush()
                 let title = line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
                 if !title.isEmpty { blocks.append(.heading(title)) }

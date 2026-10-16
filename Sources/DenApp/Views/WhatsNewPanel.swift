@@ -72,7 +72,10 @@ struct WhatsNewPanel: View {
 
     /// The release's own "What's new" heading repeats the title.
     private func shown(_ blocks: [ReleaseNotes.Block]) -> [ReleaseNotes.Block] {
-        if case .heading(let title) = blocks.first, title.lowercased().hasPrefix("what") { return Array(blocks.dropFirst()) }
+        if case .heading(let title) = blocks.first,
+           ["what's new", "whats new"].contains(title.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")) {
+            return Array(blocks.dropFirst())
+        }
         return blocks
     }
 

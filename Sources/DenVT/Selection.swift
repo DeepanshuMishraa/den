@@ -103,6 +103,9 @@ public final class SelectionGesture {
     private var anchor: TextSelection?
     private var lastPress: (time: UInt64, point: GridPoint)?
     private var clicks = 0
+    /// The terminal the gesture's state is about; a replaced replica starts
+    /// over. Weak, since a freed terminal's address can be reused.
+    private weak var current: VTTerminal?
 
     public init() throws(VTError) {}
 
@@ -113,6 +116,12 @@ public final class SelectionGesture {
     @discardableResult
     public func handle(_ phase: Phase, col: Int, row: Int, x: Double, y: Double, timeNs: UInt64,
                        columns: Int, cellWidth: Int, screenHeight: Int, terminal: VTTerminal) -> Bool {
+        if current !== terminal {
+            current = terminal
+            lastPress = nil
+            clicks = 0
+            anchor = nil
+        }
         let point = terminal.gridPoint(viewportCol: max(col, 0), row: max(row, 0))
         let before = terminal.selection
         switch phase {
@@ -138,6 +147,9 @@ public final class SelectionGesture {
             terminal.selection = unit == .cell ? nil : anchor
         case .drag:
             guard let anchor else { return false }
+            // A drag off the pressed cell ends the multi-click: pressing
+            // there again starts a new selection.
+            if let last = lastPress, last.point != point { lastPress = nil }
             let head = switch unit {
             case .cell: TextSelection(start: point, end: point)
             case .word: terminal.word(at: point)

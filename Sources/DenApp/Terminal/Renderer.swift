@@ -198,8 +198,9 @@ struct FrameBuilder {
         var scalars: [UInt32] = []
         var colors: [SIMD4<Float>] = []
 
-        func continues(row: Int, col: Int, bold: Bool, italic: Bool) -> Bool {
-            row == self.row && col == start + scalars.count && bold == self.bold && italic == self.italic
+        /// A ligature glyph takes one color, so a color change ends the run.
+        func continues(row: Int, col: Int, bold: Bool, italic: Bool, color: SIMD4<Float>) -> Bool {
+            row == self.row && col == start + scalars.count && bold == self.bold && italic == self.italic && colors.last == color
         }
 
         /// Ligatures are made of symbols; letters and digits never form one.
@@ -261,7 +262,11 @@ struct FrameBuilder {
         // Locals too, for the same reason: the run being collected, and the
         // glyphs of runs already drawn.
         var run = LigatureRun()
-        var shapedGlyphs: [GlyphInstance] = []
+        // Runs flush in cell order, so later text draws over any overhang.
+        func flushRun() {
+            glyphs += Self.glyphs(for: run, atlas: atlas, origin: origin, cellWidth: cw, cellHeight: ch)
+            run = LigatureRun()
+        }
         let atlas = atlas, origin = origin
         func flushSelection(_ rects: inout [RectInstance]) {
             guard selectionRow >= 0 else { return }
@@ -329,19 +334,20 @@ struct FrameBuilder {
             // Ligature candidates wait in a run; the cursor's cell breaks it
             // so typing never draws into a ligature.
             if ligatures, cell.codepoints.count == 1, (0x21 ... 0x7E).contains(first), cell.width == .narrow, !isCursorCell {
-                let bold = cell.style.bold, italic = cell.style.italic
-                if !run.continues(row: cell.row, col: cell.col, bold: bold, italic: italic) {
-                    shapedGlyphs += Self.glyphs(for: run, atlas: atlas, origin: origin, cellWidth: cw, cellHeight: ch)
+                let bold = cell.style.bold, italic = cell.style.italic, color = fg.simd(alpha)
+                if !run.continues(row: cell.row, col: cell.col, bold: bold, italic: italic, color: color) {
+                    flushRun()
                     run = LigatureRun(row: cell.row, start: cell.col, bold: bold, italic: italic)
                 }
                 run.scalars.append(first)
-                run.colors.append(fg.simd(alpha))
+                run.colors.append(color)
                 return
             }
             let text: GlyphKey.Text = cell.codepoints.count == 1
                 ? .scalar(first)
                 : .cluster(String(String.UnicodeScalarView(cell.codepoints.compactMap(Unicode.Scalar.init))))
             let key = GlyphKey(text: text, bold: cell.style.bold, italic: cell.style.italic, wide: cell.width == .wide)
+            flushRun()
             guard let glyph = atlas.glyph(key) else { return }
             glyphs.append(GlyphInstance(
                 rect: SIMD4(x + glyph.offset.x, y + glyph.offset.y, glyph.region.z, glyph.region.w),
@@ -350,8 +356,7 @@ struct FrameBuilder {
                 flags: SIMD4(glyph.isColor ? 1 : 0, 0, 0, 0)
             ))
         }
-        shapedGlyphs += Self.glyphs(for: run, atlas: atlas, origin: origin, cellWidth: cw, cellHeight: ch)
-        glyphs += shapedGlyphs
+        flushRun()
         flushSelection(&selectionRects)
         selections = selectionRects
 

@@ -20,7 +20,8 @@ import Testing
     @Test func graphemeClustersKeepEveryScalar() throws {
         let t = try VTTerminal(cols: 20, rows: 2)
         t.write(Data("e\u{301}x".utf8))
-        #expect(try screenText(t)[0].hasPrefix("e\u{301}x"))
+        // Scalars, not String's canonical equivalence: a precomposed é would pass that.
+        #expect(try Array(screenText(t)[0].unicodeScalars.prefix(3)) == Array("e\u{301}x".unicodeScalars))
     }
 
     @Test func indexedColorsResolveThroughThePalette() throws {
@@ -142,6 +143,21 @@ import Testing
         let bytes = try MouseEncoder().encode(action: .press, button: .left, mods: [], x: 25, y: 40, cellWidth: 8, cellHeight: 16,
                                                cols: 20, rows: 5, anyButtonPressed: true, terminal: t)
         #expect(bytes == Data("\u{1b}[<0;4;3M".utf8))
+    }
+
+    /// Dragging past the bottom-right edge reports the last cell.
+    @Test func dragPastTheGridReportsTheLastCell() throws {
+        let t = try VTTerminal(cols: 20, rows: 5)
+        t.write(Data("\u{1b}[?1002h\u{1b}[?1006h".utf8))
+        let bytes = try MouseEncoder().encode(action: .motion, button: .left, mods: [], x: 999, y: 999, cellWidth: 8, cellHeight: 16,
+                                               cols: 20, rows: 5, anyButtonPressed: true, terminal: t)
+        #expect(bytes == Data("\u{1b}[<32;20;5M".utf8))
+    }
+
+    @Test func scrollingByIntMinDoesNotTrap() throws {
+        let t = try VTTerminal(cols: 10, rows: 2)
+        t.scrollViewport(.delta(.min))
+        t.scrollViewport(.delta(.max))
     }
 
     @Test func noMouseReportsWithoutTracking() throws {

@@ -11,7 +11,7 @@ version="${DEN_VERSION:-1.0.0}"
 sparkle_key="${DEN_SPARKLE_PUBLIC_KEY:-}"
 sparkle_feed="https://github.com/DeepanshuMishraa/den/releases/latest/download/appcast.xml"
 
-[[ -d "$root/Frameworks/TermyEngine.xcframework" ]] || "$root/scripts/build-libtermy-engine.sh"
+"$root/scripts/build-libtermy-engine.sh" --if-stale
 
 swift build --package-path "$root" -c "$config" --product Den
 swift build --package-path "$root" -c "$config" --product dend

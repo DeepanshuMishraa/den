@@ -6,7 +6,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
-[[ -d "$root/Frameworks/TermyEngine.xcframework" ]] || "$root/scripts/build-libtermy-engine.sh"
+"$root/scripts/build-libtermy-engine.sh" --if-stale
 
 swift build --package-path "$root" --product Den
 swift build --package-path "$root" --product dend

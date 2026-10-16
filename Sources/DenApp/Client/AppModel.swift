@@ -269,7 +269,8 @@ final class AppModel {
             }
             showUpdateProgress(nil, progress: 1)
             try? await Task.sleep(for: .milliseconds(250))
-            dismissToast()
+            // Only the progress toast: an update's Restart/Later prompt stays.
+            if toast?.actions.isEmpty == true { dismissToast() }
             if problems.isEmpty {
                 showToast("Den is ready for agents: den command and skill installed")
             } else {
@@ -580,8 +581,9 @@ final class AppModel {
         let conn = DenConnection(fd: fd, deliver: { [weak self] batch in self?.receive(batch, from: host) }, closed: closed)
         connections[host] = conn
         // The oldest version we speak, so an older running dend still
-        // accepts us; its welcome says what it can do.
-        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app", snapshotVersion: VTTerminal.snapshotVersion), .subscribe])
+        // accepts us; its welcome says what it can do. Subscribing waits for
+        // the welcome, so a dend that refuses us streams nothing.
+        conn.open(greeting: [.hello(version: minimumProtocolVersion, client: "Den.app", snapshotVersion: VTTerminal.snapshotVersion)])
     }
 
     /// Sends to the dend that owns what the message is about.
@@ -758,6 +760,7 @@ final class AppModel {
         switch message {
         case .welcome(let version, let name):
             protocols[host] = version
+            send(.subscribe, to: host)
             switch host {
             case .local:
                 connectionState = .connected(host: name)

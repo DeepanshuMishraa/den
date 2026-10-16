@@ -38,6 +38,9 @@ final class ClientConnection {
     /// The newest snapshot format the client reads, from its hello; 0 for
     /// this build's own.
     var snapshotVersion: UInt32 = 0
+    /// Its hello was refused: later requests (a queued `.subscribe`) are
+    /// ignored, so it gets nothing it can't read.
+    var refused = false
     let connectedAt = Date()
 
     init(id: Int, fd: Int32, queue: DispatchQueue) {
@@ -191,10 +194,12 @@ public actor DenServer {
     // MARK: Messages
 
     private func handle(_ message: ClientMessage, from conn: ClientConnection) {
+        guard !conn.refused else { return }
         switch message {
         case .hello(let version, let client, let snapshotVersion):
             conn.name = client
             guard (minimumProtocolVersion ... protocolVersion).contains(version) else {
+                conn.refused = true
                 send(.error("dend speaks protocol \(minimumProtocolVersion)–\(protocolVersion) but \(client) sent \(version). Restart dend or update the client."), to: conn)
                 return
             }
@@ -202,6 +207,7 @@ public actor DenServer {
             // older one gets its own format, if this build can still write it.
             if snapshotVersion != 0, snapshotVersion < VTTerminal.snapshotVersion {
                 guard snapshotVersion >= VTTerminal.minimumSnapshotVersion else {
+                    conn.refused = true
                     send(.error("""
                     \(client) reads pane snapshots up to version \(snapshotVersion), but this dend writes \(VTTerminal.minimumSnapshotVersion)–\(VTTerminal.snapshotVersion). \
                     Update \(client) to the Den version that installed this dend; the sessions keep running.

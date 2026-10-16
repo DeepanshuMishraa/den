@@ -540,8 +540,9 @@ final class TerminalView: MTKView {
             return
         }
         if wantsSelection(event) {
-            // Shift-clicks while the program tracks the mouse only select.
+            // Shift-clicks only select (and extend a selection).
             let opensLinks = mode == .interactive && replica?.terminal.isMouseTracking == false
+                && !event.modifierFlags.contains(.shift)
             pressedLink = opensLinks ? link(at: event) : nil
             return select(event, .press)
         }
@@ -650,10 +651,10 @@ final class TerminalView: MTKView {
         setLinkCell(cell)
     }
 
-    /// Output may have moved or replaced the link under a still mouse, or
-    /// turned mouse tracking on, so look again before drawing.
+    /// Output may have moved, replaced or printed a link under a still
+    /// mouse, or turned mouse tracking on, so look again before drawing.
     private func refreshHover() {
-        guard linkCell != nil, let window else { return }
+        guard let window else { return }
         let before = hoveredLink
         updateHover(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), flags: NSEvent.modifierFlags)
         if hoveredLink != before { updateCursor(NSEvent.modifierFlags) }

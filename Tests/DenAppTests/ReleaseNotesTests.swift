@@ -46,6 +46,15 @@ import Testing
         #expect(String(closing.characters) == "A closing line that wraps.")
     }
 
+    @Test func issueReferenceIsNotAHeading() {
+        #expect(ReleaseNotes.parse("#123 fixes a crash").count == 1)
+        guard case .paragraph(let text) = ReleaseNotes.parse("#123 fixes a crash").first else {
+            Issue.record("expected a paragraph")
+            return
+        }
+        #expect(String(text.characters) == "#123 fixes a crash")
+    }
+
     @Test func emptyNotesHaveNoBlocks() {
         #expect(ReleaseNotes.parse("\n  \n").isEmpty)
     }
