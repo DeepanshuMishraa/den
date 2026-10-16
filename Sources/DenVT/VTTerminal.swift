@@ -165,37 +165,7 @@ public final class VTTerminal {
     private func deliver(_ replies: inout TermyEngineBytes) {
         defer { termy_engine_bytes_free(&replies) }
         guard let ptr = replies.ptr, replies.len > 0 else { return }
-        let bytes = UnsafeBufferPointer(start: ptr, count: replies.len)
-        guard bytes.contains(0x1B) else {
-            effects.writeBack?(UnsafeRawBufferPointer(bytes))
-            return
-        }
-        let kept = Self.droppingKittyGraphicsReplies(bytes)
-        guard !kept.isEmpty else { return }
-        kept.withUnsafeBytes { effects.writeBack?($0) }
-    }
-
-    /// libtermy parses kitty graphics and answers them, but Den doesn't draw
-    /// images yet. Programs treat any `ESC _ G ... ESC \` reply as support
-    /// and would draw blank cells, so the replies are dropped: to a program
-    /// probing with a query and then DA1, Den looks like a terminal without
-    /// kitty graphics, and it falls back to text.
-    static func droppingKittyGraphicsReplies(_ bytes: UnsafeBufferPointer<UInt8>) -> [UInt8] {
-        var kept: [UInt8] = []
-        kept.reserveCapacity(bytes.count)
-        var i = 0
-        while i < bytes.count {
-            if bytes[i] == 0x1B, i + 2 < bytes.count, bytes[i + 1] == UInt8(ascii: "_"), bytes[i + 2] == UInt8(ascii: "G") {
-                // Skip to just past the ST (ESC \); an unterminated reply runs to the end.
-                var j = i + 3
-                while j + 1 < bytes.count, !(bytes[j] == 0x1B && bytes[j + 1] == UInt8(ascii: "\\")) { j += 1 }
-                i = j + 2
-                continue
-            }
-            kept.append(bytes[i])
-            i += 1
-        }
-        return kept
+        effects.writeBack?(UnsafeRawBufferPointer(start: ptr, count: replies.len))
     }
 
     /// Bell and title effects. Without handlers the events stay in

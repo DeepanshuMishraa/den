@@ -18,6 +18,8 @@ final class TerminalView: MTKView {
     private let pipelines: RenderPipelines
     private var metrics: FontMetrics
     private var renderState: VTRenderState?
+    /// Textures for the replica's kitty images.
+    private lazy var images = ImageTextures(device: pipelines.device, queue: pipelines.queue)
     private let keyEncoder = try? KeyEncoder()
     private let mouseEncoder = try? MouseEncoder()
     private let selection = try? SelectionGesture()
@@ -248,10 +250,14 @@ final class TerminalView: MTKView {
         )
         drawnCursorOpacity = frame.cursorOpacity
         var gridSize = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
+        // Laid out for the current cell size each frame, so images follow
+        // font size and display scale changes.
+        var placements: [VTImagePlacement] = []
         if let replica, let renderState {
             do {
                 try renderState.update(from: replica.terminal)
                 frame.build(renderState)
+                placements = try replica.terminal.imagePlacements(cellWidth: Float(metrics.cellWidth), cellHeight: Float(metrics.cellHeight))
                 refreshHover()
                 if let hoveredLink { frame.underline(hoveredLink) }
                 let (cols, rows) = renderState.size
@@ -285,15 +291,32 @@ final class TerminalView: MTKView {
             encoder.setVertexBuffer(b, offset: 0, index: 1)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: rects.count)
         }
+        if let terminal = replica?.terminal { images.beginFrame(terminal) }
+        let origin = SIMD4(frame.origin.x, frame.origin.y, 0, 0)
+        func drawImages(_ layer: VTImagePlacement.Layer) {
+            guard let terminal = replica?.terminal else { return }
+            for placement in placements where placement.layer == layer {
+                guard let texture = images.texture(for: placement, in: terminal) else { continue }
+                var instance = (placement.clip + origin, placement.image + origin)
+                encoder.setRenderPipelineState(pipelines.image)
+                encoder.setVertexBytes(&instance, length: MemoryLayout<(SIMD4<Float>, SIMD4<Float>)>.size, index: 1)
+                encoder.setFragmentTexture(texture, index: 0)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            }
+        }
+        drawImages(.belowBackgrounds)
         drawRects(frame.backgrounds)
         drawRects(frame.selections)
+        drawImages(.belowText)
         if !frame.glyphs.isEmpty, let b = pipelines.device.makeBuffer(bytes: frame.glyphs, length: MemoryLayout<GlyphInstance>.stride * frame.glyphs.count) {
             encoder.setRenderPipelineState(pipelines.glyph)
             encoder.setVertexBuffer(b, offset: 0, index: 1)
             encoder.setFragmentTexture(atlas.texture, index: 0)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: frame.glyphs.count)
         }
+        drawImages(.aboveText)
         drawRects(frame.decorations)
+        images.endFrame()
         encoder.endEncoding()
         buffer.present(drawable)
         buffer.commit()

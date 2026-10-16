@@ -80,6 +80,28 @@ fragment float4 glyph_fragment(GlyphOut in [[stage_in]], texture2d<float> atlas 
     float a = texel.a * in.color.a;
     return float4(in.color.rgb * a, a);
 }
+
+// A kitty image: the quad covers clip, and the texture is stretched over
+// image, so only the part inside clip shows.
+struct ImageInstance { float4 clip; float4 image; };
+struct ImageOut { float4 position [[position]]; float2 uv; };
+
+vertex ImageOut image_vertex(uint vid [[vertex_id]],
+                             constant Uniforms &u [[buffer(0)]],
+                             constant ImageInstance &i [[buffer(1)]]) {
+    float2 corner = float2(vid & 1, vid >> 1);
+    float2 px = i.clip.xy + corner * i.clip.zw;
+    ImageOut out;
+    out.position = toClip(px, u.viewport);
+    out.uv = (px - i.image.xy) / i.image.zw;
+    return out;
+}
+
+// Textures hold premultiplied alpha and mipmaps, for downscaled photos.
+fragment float4 image_fragment(ImageOut in [[stage_in]], texture2d<float> image [[texture(0)]]) {
+    constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
+    return image.sample(s, in.uv);
+}
 """
 
 /// Pipelines shared by every terminal view.
@@ -89,6 +111,7 @@ final class RenderPipelines {
     let queue: MTLCommandQueue
     let rect: MTLRenderPipelineState
     let glyph: MTLRenderPipelineState
+    let image: MTLRenderPipelineState
 
     static let shared: RenderPipelines? = RenderPipelines()
 
@@ -111,6 +134,7 @@ final class RenderPipelines {
             }
             rect = try pipeline("rect_vertex", "rect_fragment")
             glyph = try pipeline("glyph_vertex", "glyph_fragment")
+            image = try pipeline("image_vertex", "image_fragment")
         } catch {
             NSLog("Den: Metal pipeline setup failed: \(error)")
             return nil
