@@ -55,6 +55,11 @@ jobs:
       - name: Select latest Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
 
+      # Before the cache: restoring a submodule's target/ first leaves its
+      # folder non-empty, and the clone into it fails.
+      - name: Check out submodules
+        run: git submodule update --init vendor/termy vendor/fsearch
+
       # libtermy_engine (vendor/termy) and fsearch (vendor/fsearch) are Rust.
       - uses: dtolnay/rust-toolchain@stable
 
@@ -63,9 +68,6 @@ jobs:
           workspaces: |
             vendor/termy
             vendor/fsearch
-
-      - name: Check out submodules
-        run: git submodule update --init vendor/termy vendor/fsearch
 
       # Same as a local release build: the TermyEngine xcframework, then
       # Den.app. Version is stamped into the Info.plist before signing, so
