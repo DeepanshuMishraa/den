@@ -237,6 +237,23 @@ final class AppModel {
         updates.checkForUpdates()
     }
 
+    /// Writes the den Agent Skill (`den agent install`) so coding agents in
+    /// Den's panes know how to open, read and type into panes.
+    func installAgentSkill() {
+        Task {
+            let results = await Task.detached(priority: .userInitiated) { AgentGuide.install() }.value
+            if let failure = results.lazy.compactMap({ if case .failed(let message) = $0.outcome { message } else { nil } }).first {
+                lastError = failure
+            } else if let taken = results.first(where: { $0.outcome == .occupied }) {
+                showToast("\(PathQuery.abbreviate(taken.path)) is another skill — left alone")
+            } else if results.allSatisfy({ $0.outcome == .unchanged }) {
+                showToast("Agent skill already installed")
+            } else {
+                showToast("Installed the den skill for coding agents")
+            }
+        }
+    }
+
     /// Installs the `den` command line tool (`~/.local/bin/den`), narrating
     /// each step in a toast. Explicit only: launching the app never links it.
     func installCommandLineTool() {

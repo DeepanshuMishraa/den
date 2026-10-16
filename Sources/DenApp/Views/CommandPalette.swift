@@ -508,6 +508,8 @@ struct CommandPalette: View {
                         action: .run { model.reloadConfig(force: true) }),
             PaletteItem(id: "install-cli", icon: "terminal", title: "Install Command Line Tool…", detail: model.cliInstallDetail,
                         action: .run { model.installCommandLineTool() }),
+            PaletteItem(id: "install-agent-skill", icon: "sparkles", title: "Install Agent Skill", detail: "Teach coding agents to drive Den",
+                        action: .run { model.installAgentSkill() }),
             PaletteItem(id: "check-updates", icon: "arrow.down.circle", title: "Check for Updates…",
                         action: .run { model.checkForUpdates() }),
         ]

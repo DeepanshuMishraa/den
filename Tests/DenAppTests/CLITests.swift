@@ -134,3 +134,41 @@ import DenProtocol
         #expect(ConfigManual.text(topic: "nonsense") == nil)
     }
 }
+
+@Suite struct AgentGuideTests {
+    @Test func everyCommandTheGuideUsesExists() {
+        let words = AgentGuide.markdown.split(whereSeparator: \.isWhitespace)
+        let used = zip(words, words.dropFirst()).compactMap { $0 == "den" ? String($1) : nil }.filter { $0.first?.isLetter == true }
+        #expect(!used.isEmpty)
+        for name in used { #expect(CLICommands.all.contains { $0.names.contains(name) }, "guide uses `den \(name)`") }
+    }
+
+    @Test func installWritesBothSkillsAndIsIdempotent() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "den-agent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(AgentGuide.install(home: home).map(\.outcome) == [.written, .written])
+        let file = home.appending(path: ".claude/skills/den/SKILL.md")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        #expect(text.hasPrefix("---\nname: den\ndescription: "))
+        #expect(AgentGuide.install(home: home).map(\.outcome) == [.unchanged, .unchanged])
+        // An older skill Den wrote is replaced.
+        try (AgentGuide.marker + "\nold").write(to: file, atomically: true, encoding: .utf8)
+        #expect(AgentGuide.install(home: home).map(\.outcome) == [.unchanged, .written])
+    }
+
+    @Test func installLeavesSomeoneElsesSkillAlone() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "den-agent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let file = home.appending(path: ".agents/skills/den/SKILL.md")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "mine".write(to: file, atomically: true, encoding: .utf8)
+        #expect(AgentGuide.install(home: home).map(\.outcome) == [.occupied, .written])
+        #expect(try String(contentsOf: file, encoding: .utf8) == "mine")
+    }
+
+    @Test func captureTrimDropsTrailingSpaceAndBlankEdges() {
+        #expect(CLICommands.trimmed("\n  \nfoo   \n  bar\t\n\n   \n") == "foo\n  bar")
+        #expect(CLICommands.trimmed("") == "")
+        #expect(CLICommands.trimmed("a\n\nb") == "a\n\nb")
+    }
+}

@@ -182,7 +182,9 @@ final class Pane {
     }
     #endif
 
-    /// Safe to call more than once: only the first call signals.
+    /// Ends every process the pane started, including jobs that ignore
+    /// SIGHUP or run in the background. Safe to call more than once: only
+    /// the first call signals.
     func terminate() {
         guard !stopped else { return }
         stopped = true
@@ -191,6 +193,7 @@ final class Pane {
         ptyWriter.cancel()
         kill(-pid, SIGHUP)
         kill(pid, SIGHUP)
+        ProcessSession.end(pid)
     }
 
     /// The child and the terminal's foreground process, for `den pane inspect`.
