@@ -522,8 +522,15 @@ struct CommandPalette: View {
                         action: .run { withAnimation(.den) { model.tabStyle = model.tabStyle == .horizontal ? .vertical : .horizontal } }),
             PaletteItem(id: "sidebar", title: model.tabStyle == .vertical && !model.sidebarCollapsed ? "Hide Sidebar" : "Show Sidebar", shortcut: key(.toggleSidebar),
                         action: .run { withAnimation(.den) { model.toggleSidebar() } }),
+            PaletteItem(id: "sidebar-side", title: model.sidebarSide == .left ? "Move Sidebar to the Right" : "Move Sidebar to the Left",
+                        action: .run { withAnimation(.den) {
+                            model.sidebarSide = model.sidebarSide == .left ? .right : .left
+                            model.showSidebar()
+                        } }),
             PaletteItem(id: "activity", title: model.activityMode ? "Leave Activity Mode" : "Activity Mode", shortcut: key(.toggleActivityMode),
                         action: .run { withAnimation(.den) { model.toggleActivityMode() } }),
+            PaletteItem(id: "zen", title: model.zenMode ? "Leave Zen Mode" : "Zen Mode", shortcut: key(.toggleZenMode),
+                        action: .run { withAnimation(.den) { model.zenMode.toggle() } }),
             PaletteItem(id: "headers", title: model.showPaneHeaders ? "Hide Pane Headers" : "Show Pane Headers",
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
             PaletteItem(id: "acc", title: "Automatic Contrast Correction", checked: model.contrastCorrection,
@@ -539,6 +546,8 @@ struct CommandPalette: View {
             PaletteItem(id: "import-theme", title: "Import Theme File…", action: .run { importTheme() }),
             PaletteItem(id: "migrate-ghostty", icon: "arrow.down.doc", title: "Migrate from Ghostty Config", detail: "Theme, option key, key bindings",
                         keepOpen: true, action: .run { model.migrateFromGhostty() }),
+            PaletteItem(id: "settings", icon: "gearshape", title: "Settings…", shortcut: key(.openSettings),
+                        action: .run { model.showSettings?() }),
             PaletteItem(id: "open-config", icon: "doc.text", title: "Open Config File", detail: PathQuery.abbreviate(UserConfig.url.path),
                         shortcut: key(.openConfig), action: .run { model.openConfigFile() }),
             PaletteItem(id: "reload-config", icon: "arrow.clockwise", title: "Reload Config", shortcut: key(.reloadConfig),

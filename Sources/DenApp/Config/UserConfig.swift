@@ -468,6 +468,16 @@ struct KeyChord: Equatable {
         return .success(KeyChord(modifiers: modifiers, key: .character(keyName)))
     }
 
+    /// The chord a key press makes, for recording shortcuts in Settings.
+    /// Named keys (arrows, F-keys, return…) keep their keycode; anything
+    /// else is the character it types unmodified.
+    static func pressed(keyCode: UInt16, unmodified: String?, flags: NSEvent.ModifierFlags) -> KeyChord? {
+        let modifiers = modifiers(of: flags)
+        if namedKeys.values.contains(keyCode) { return KeyChord(modifiers: modifiers, key: .code(keyCode)) }
+        guard let unmodified, unmodified.count == 1 else { return nil }
+        return KeyChord(modifiers: modifiers, key: .character(unmodified.lowercased()))
+    }
+
     static func modifiers(of flags: NSEvent.ModifierFlags) -> Set<Modifier> {
         Set(Modifier.allCases.filter { flags.contains($0.flag) })
     }

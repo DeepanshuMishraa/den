@@ -13,7 +13,8 @@ struct Sidebar: View {
         let theme = model.theme
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 2) {
-                Color.clear.frame(width: TitleBar.leadingInset - 4)
+                // On the right, the traffic lights sit over the panes' bar.
+                Color.clear.frame(width: model.sidebarSide == .left ? TitleBar.leadingInset - 4 : 6)
                 SidebarToggle()
                 Spacer()
                 ActivityModeToggle()
@@ -171,19 +172,27 @@ struct SidebarToggle: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        IconButton(symbol: "sidebar.left", size: 14) { withAnimation(.den) { model.toggleSidebar() } }
+        IconButton(symbol: model.sidebarSide == .left ? "sidebar.left" : "sidebar.right", size: 14) { withAnimation(.den) { model.toggleSidebar() } }
             .denTooltip(model.sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar", command: .toggleSidebar)
     }
 }
 
 /// What stays of a collapsed sidebar: room for the traffic lights, the
-/// toggle to bring it back, and a strip to drag the window by.
+/// toggle to bring it back, and a strip to drag the window by. With the
+/// sidebar on the right it tops the panes, without the toggle (the
+/// sidebar has its own).
 struct CollapsedSidebarBar: View {
+    var showsToggle = true
+    @Environment(AppModel.self) private var model
+
     var body: some View {
+        // The toggle sits on the side the sidebar comes back on.
+        let right = model.sidebarSide == .right
         HStack(spacing: 2) {
             Color.clear.frame(width: TitleBar.leadingInset - 4)
-            SidebarToggle()
+            if showsToggle, !right { SidebarToggle() }
             Spacer()
+            if showsToggle, right { SidebarToggle().padding(.trailing, 8) }
         }
         .frame(height: TitleBar.height)
         .background(TitleBarBackground())

@@ -231,30 +231,38 @@ struct ToastView: View {
             : Color(red: 0.03, green: 0.48, blue: 0.24)
     }
 
+    /// The toast's color: green for confirmations, the theme's accent for
+    /// notices.
+    private var tint: Color {
+        switch toast.tone {
+        case .success: green
+        case .notice: theme.accent
+        }
+    }
+
     var body: some View {
         let font = Font.custom(fontFamily, size: fontSize)
+        let buttons = toast.actions.filter { $0.role == .button }
+        let dismiss = toast.actions.first { $0.role == .dismiss }
         ToastLayout(spacing: 5, maxWidth: 636) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(green)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9.5, weight: .heavy))
-                        .foregroundStyle(theme.isDark ? Color.black.opacity(0.75) : Color.white)
-                }
-                .frame(width: 18, height: 18)
-                .padding(.leading, 2)
-                TickerText(text: toast.message, font: font.weight(.semibold), color: toast.actions.isEmpty ? theme.chromeText : green)
+                badge.padding(.leading, 2)
+                TickerText(text: toast.message, font: font.weight(.semibold), color: toast.actions.isEmpty ? theme.chromeText : tint)
                     // Beside buttons the message gets a short window and
                     // ticks through it, keeping the pill compact.
-                    .frame(maxWidth: toast.actions.isEmpty ? nil : 170, alignment: .leading)
+                    .frame(maxWidth: toast.actions.isEmpty ? nil : 240, alignment: .leading)
                     .layoutPriority(1)
                 if !toast.actions.isEmpty {
                     HStack(spacing: 8) {
-                        ForEach(Array(toast.actions.enumerated()), id: \.element.id) { index, action in
+                        ForEach(Array(buttons.enumerated()), id: \.element.id) { index, action in
                             ToastButton(label: action.label, shortcut: action.shortcut,
-                                        primary: index == 0, theme: theme, green: green, font: font) {
+                                        primary: index == 0, theme: theme, tint: tint, font: font) {
                                 onAction(action.id)
                             }
+                        }
+                        if let dismiss {
+                            ToastDismissButton(theme: theme, tint: tint) { onAction(dismiss.id) }
+                                .help(dismiss.shortcut.map { "Dismiss (\($0))" } ?? "Dismiss")
                         }
                     }
                 }
@@ -262,7 +270,7 @@ struct ToastView: View {
             if let progress = toast.progress {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
-                    .tint(green)
+                    .tint(tint)
                     .frame(height: 3)
                     .clipShape(Capsule())
             } else if toast.isPersistent, toast.actions.isEmpty {
@@ -270,7 +278,7 @@ struct ToastView: View {
                 // under the message keeps the pill visibly alive.
                 ProgressView()
                     .progressViewStyle(.linear)
-                    .tint(green)
+                    .tint(tint)
                     .frame(height: 3)
                     .clipShape(Capsule())
             }
@@ -282,33 +290,73 @@ struct ToastView: View {
         .background(toastGlass)
     }
 
-    /// The glass capsule: blur plus a theme tint whose strength follows the
-    /// interface style, a hairline border and a top highlight.
+    @ViewBuilder
+    private var badge: some View {
+        switch toast.tone {
+        case .success:
+            ZStack {
+                Circle().fill(green)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9.5, weight: .heavy))
+                    .foregroundStyle(theme.isDark ? Color.black.opacity(0.75) : Color.white)
+            }
+            .frame(width: 18, height: 18)
+        case .notice(let symbol):
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous).fill(tint.gradient)
+                Image(systemName: symbol)
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 20, height: 20)
+        }
+    }
+
+    /// The capsule behind the toast follows the interface style: opaque
+    /// for Themed, theme-tinted Liquid Glass for Modern, a frosted blur for
+    /// Blended. Each gets a hairline border and a glossy top highlight.
     @ViewBuilder
     private var toastGlass: some View {
         let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
         switch style {
+        case .modern:
+            if #available(macOS 26, *) {
+                Color.clear
+                    .glassEffect(.regular.tint(Color(nsColor: theme.glassTint)), in: shape)
+                    .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
+                    .overlay(gloss(shape))
+                    .shadow(color: .black.opacity(theme.isDark ? 0.4 : 0.15), radius: 20, y: 8)
+            } else {
+                frosted(shape)
+            }
+        case .blended:
+            frosted(shape)
         case .themed:
             shape
                 .fill(theme.isDark ? theme.background.lightened(0.06).color : Color.white)
                 .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
                 .overlay(shape.strokeBorder(highlight, lineWidth: 0.5).padding(0.5).opacity(0.6))
                 .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)
-        case .modern, .blended:
-            let tint = theme.isDark
-                ? theme.background.darkened(0.25).color.opacity(style == .modern ? 0.55 : 0.82)
-                : Color.white.opacity(style == .modern ? 0.55 : 0.85)
-            shape
-                .fill(.ultraThinMaterial)
-                .overlay(shape.fill(tint))
-                .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
-                .overlay(
-                    shape.strokeBorder(highlight, lineWidth: 1)
-                        .padding(0.5)
-                        .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: .center))
-                )
-                .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)
         }
+    }
+
+    private func frosted(_ shape: RoundedRectangle) -> some View {
+        let tint = theme.isDark
+            ? theme.background.darkened(0.25).color.opacity(style == .modern ? 0.55 : 0.82)
+            : Color.white.opacity(style == .modern ? 0.55 : 0.85)
+        return shape
+            .fill(.ultraThinMaterial)
+            .overlay(shape.fill(tint))
+            .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
+            .overlay(gloss(shape))
+            .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)
+    }
+
+    /// A bright rim fading down from the top edge.
+    private func gloss(_ shape: RoundedRectangle) -> some View {
+        shape.strokeBorder(highlight, lineWidth: 1)
+            .padding(0.5)
+            .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: .center))
     }
 
     private var highlight: Color {
@@ -316,14 +364,15 @@ struct ToastView: View {
     }
 }
 
-/// One pill button inside the toast. The first button is the green primary
-/// action; the rest are neutral. A shortcut hint prints inside, dimmed.
+/// One pill button inside the toast. The first button is the primary
+/// action in the toast's color; the rest are neutral. A shortcut hint
+/// prints inside, dimmed.
 private struct ToastButton: View {
     let label: String
     let shortcut: String?
     let primary: Bool
     let theme: Theme
-    let green: Color
+    let tint: Color
     let font: Font
     let action: () -> Void
     @State private var hovering = false
@@ -348,17 +397,38 @@ private struct ToastButton: View {
     }
 
     private var fill: Color {
-        if primary { return green.opacity(theme.isDark ? 0.22 : 0.14) }
+        if primary { return tint.opacity(theme.isDark ? 0.22 : 0.14) }
         return theme.isDark ? Color.white.opacity(hovering ? 0.13 : 0.08) : Color.black.opacity(hovering ? 0.09 : 0.06)
     }
 
     private var stroke: Color {
-        if primary { return green.opacity(0.45) }
+        if primary { return tint.opacity(0.45) }
         return theme.menuBorder
     }
 
     private var foreground: Color {
-        primary ? green : theme.chromeText
+        primary ? tint : theme.chromeText
+    }
+}
+
+/// The round ✕ at a toast's end.
+private struct ToastDismissButton: View {
+    let theme: Theme
+    let tint: Color
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(tint.opacity(hovering ? 0.26 : 0.16)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.hitArea)
+        .onHover { hovering = $0 }
     }
 }
 

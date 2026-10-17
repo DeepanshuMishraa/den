@@ -3,15 +3,15 @@ import Foundation
 import Sparkle
 
 /// Sparkle updates with Den's toast as the UI instead of Sparkle's windows:
-/// "Checking for updates…" while the feed loads, a progress toast for the
-/// download, and a persistent toast with a Restart button once the update is
-/// ready to install.
+/// "Checking for updates…" while the feed loads, "An update is available"
+/// with a Download button, a progress toast for the download, and a
+/// persistent toast with a Restart button once the update is ready.
 ///
 /// Flow: Sparkle detects a new version (manual check, on-launch background
-/// check, or the daily schedule), the driver returns `.install` straight
-/// away so it downloads, then `showReadyToInstallAndRelaunch` waits for the
-/// Restart tap. "Later" dismisses; Sparkle keeps the staged update and
-/// installs it on the next quit.
+/// check, or the daily schedule) and `showUpdateFound` waits for the
+/// Download tap; ✕ skips it until the next check. Then
+/// `showReadyToInstallAndRelaunch` waits for the Restart tap. ✕ there means
+/// later: Sparkle keeps the staged update and installs it on the next quit.
 ///
 /// The app is ad-hoc signed, which is fine: update authenticity comes from
 /// the EdDSA signature (`SUPublicEDKey`), not an Apple certificate. What
@@ -90,15 +90,16 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
     /// What the toast is currently showing, so `showUpdateInFocus` (a second
     /// "Check for Updates" while one is in flight) can resurface it.
     private var phase: Phase = .idle
-    /// The Restart/Later choice Sparkle is waiting on, if any. Single-resume
-    /// guarded: re-showing the prompt (focus, toast churn) must not resume
-    /// the same continuation twice.
-    private var readyContinuation: CheckedContinuation<SPUUserUpdateChoice, Never>?
-    private var readyResumed = false
+    /// The Download or Restart choice Sparkle is waiting on, if any.
+    /// Single-resume guarded: re-showing the prompt (focus, toast churn)
+    /// must not resume the same continuation twice.
+    private var choiceContinuation: CheckedContinuation<SPUUserUpdateChoice, Never>?
+    private var choiceResumed = false
 
     private enum Phase {
         case idle
         case checking
+        case available(version: String)
         case downloading(message: String, progress: Double?)
         case extracting(progress: Double?)
         case ready
@@ -139,14 +140,17 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
             }
             return .dismiss
         }
+        NSLog("Den: update found (%@, background=%@)", version, state.userInitiated ? "no" : "yes")
+        phase = .available(version: version)
+        let choice = await awaitChoice { self.showAvailablePrompt(version) }
+        guard choice == .install else {
+            phase = .idle
+            return choice
+        }
         resetProgress()
         let message = "Downloading Den \(version)…"
         phase = .downloading(message: message, progress: 0)
         model?.showUpdateProgress(message, progress: 0)
-        NSLog("Den: update found (%@, background=%@), downloading", version, state.userInitiated ? "no" : "yes")
-        // Straight to downloading: the feed is ours, and the restart prompt
-        // comes after the download. Applies to background finds too, so a
-        // new version is already downloaded by the time the user is asked.
         return .install
     }
 
@@ -201,23 +205,10 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         // Wait for the Restart tap. Dismissing means "later": Sparkle keeps
         // the staged update and installs it on the next quit.
         phase = .ready
-        readyResumed = false
-        let choice: SPUUserUpdateChoice = await withCheckedContinuation { continuation in
-            readyContinuation = continuation
-            model?.showActionToast("Update ready — restart Den to finish",
-                                   actions: [
-                                       ("Restart", "cmd+shift+u", { [weak self] in self?.resumeReady(with: .install) }),
-                                       ("Later", "cmd+shift+.", { [weak self] in self?.resumeReady(with: .dismiss) }),
-                                   ])
-        }
-        readyContinuation = nil
-        if choice == .install {
-            phase = .idle
-        } else {
-            // "Later": the prompt is gone but the staged update remains;
-            // stay idle so a later check starts fresh.
-            phase = .idle
-        }
+        let choice = await awaitChoice { self.showReadyPrompt() }
+        // After "later" the staged update remains; stay idle so a later
+        // check starts fresh.
+        phase = .idle
         return choice
     }
 
@@ -238,7 +229,7 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         // updater with no UI on screen).
         phase = .idle
         model?.dismissToast()
-        resumeReady(with: .dismiss)
+        resumeChoice(with: .dismiss)
     }
 
     func showUpdateInFocus() {
@@ -249,6 +240,8 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
             break
         case .checking:
             model?.showUpdateProgress("Checking for updates…", progress: nil)
+        case .available(let version):
+            showAvailablePrompt(version)
         case .downloading(let message, let progress):
             model?.showUpdateProgress(message, progress: progress)
         case .extracting(let progress):
@@ -256,12 +249,33 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         case .ready:
             // Re-show the prompt without minting a second continuation: the
             // buttons resume the one Sparkle is already waiting on.
-            model?.showActionToast("Update ready — restart Den to finish",
-                                   actions: [
-                                       ("Restart", "cmd+shift+u", { [weak self] in self?.resumeReady(with: .install) }),
-                                       ("Later", "cmd+shift+.", { [weak self] in self?.resumeReady(with: .dismiss) }),
-                                   ])
+            showReadyPrompt()
         }
+    }
+
+    // MARK: Prompts
+
+    private func showAvailablePrompt(_ version: String) {
+        model?.showActionToast("Den \(version) is available", tone: .notice(symbol: "arrow.down"),
+                               actions: [("Download", "cmd+shift+u", { [weak self] in self?.resumeChoice(with: .install) })],
+                               dismiss: ("cmd+shift+.", { [weak self] in self?.resumeChoice(with: .dismiss) }))
+    }
+
+    private func showReadyPrompt() {
+        model?.showActionToast("Update ready — restart Den to finish", tone: .notice(symbol: "arrow.clockwise"),
+                               actions: [("Restart", "cmd+shift+u", { [weak self] in self?.resumeChoice(with: .install) })],
+                               dismiss: ("cmd+shift+.", { [weak self] in self?.resumeChoice(with: .dismiss) }))
+    }
+
+    /// Shows a prompt and waits for its Download/Restart or ✕.
+    private func awaitChoice(_ prompt: @escaping () -> Void) async -> SPUUserUpdateChoice {
+        choiceResumed = false
+        let choice: SPUUserUpdateChoice = await withCheckedContinuation { continuation in
+            choiceContinuation = continuation
+            prompt()
+        }
+        choiceContinuation = nil
+        return choice
     }
 
     // MARK: Helpers
@@ -277,12 +291,12 @@ private final class ToastUserDriver: NSObject, SPUUserDriver {
         lastProgressPush = .distantPast
     }
 
-    /// Resume the pending restart choice exactly once. Late taps (a
-    /// re-shown prompt racing dismissal) are ignored.
-    private func resumeReady(with choice: SPUUserUpdateChoice) {
-        guard !readyResumed, let continuation = readyContinuation else { return }
-        readyResumed = true
-        readyContinuation = nil
+    /// Resume the pending choice exactly once. Late taps (a re-shown
+    /// prompt racing dismissal) are ignored.
+    private func resumeChoice(with choice: SPUUserUpdateChoice) {
+        guard !choiceResumed, let continuation = choiceContinuation else { return }
+        choiceResumed = true
+        choiceContinuation = nil
         continuation.resume(returning: choice)
     }
 }

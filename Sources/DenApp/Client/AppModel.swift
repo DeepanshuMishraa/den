@@ -20,6 +20,11 @@ enum TabStyle: String {
     case horizontal, vertical
 }
 
+/// Which side of the window vertical tabs sit on.
+enum SidebarSide: String {
+    case left, right
+}
+
 enum AppearanceMode: String, CaseIterable {
     case system, light, dark
 
@@ -127,15 +132,27 @@ final class AppModel {
         /// didn't parse. Checked in `handleKey` so the buttons work from
         /// the keyboard exactly as shown.
         let chord: KeyChord?
+        /// A labelled button, or the round ✕ that closes the toast.
+        var role: Role = .button
+
+        enum Role: Equatable { case button, dismiss }
     }
 
     struct Toast: Equatable {
+        /// Green with a check for confirmations; the theme's accent with a
+        /// symbol badge for notices that ask something (an update).
+        enum Tone: Equatable {
+            case success
+            case notice(symbol: String)
+        }
+
         let id = UUID()
         var message: String
         /// Download/install fraction 0…1, if one is in flight.
         var progress: Double?
         /// Buttons the toast offers; empty for plain confirmations.
         var actions: [ToastAction] = []
+        var tone = Tone.success
         /// Plain confirmations vanish on their own; progress and action
         /// toasts stay until replaced or dismissed.
         var isPersistent: Bool { progress != nil || !actions.isEmpty }
@@ -195,21 +212,26 @@ final class AppModel {
     /// A toast that stays until one of its buttons is tapped. Each action
     /// may name a `cmd+shift+u`-style shortcut: it is shown in the button
     /// (as "⇧⌘U") and fires the button from `handleKey`.
-    func showActionToast(_ message: String, actions: [(label: String, shortcut: String?, handler: () -> Void)]) {
+    /// `dismiss` adds a round ✕ after the buttons, running its handler too.
+    func showActionToast(_ message: String, tone: Toast.Tone = .success,
+                         actions: [(label: String, shortcut: String?, handler: () -> Void)],
+                         dismiss: (shortcut: String?, handler: () -> Void)? = nil) {
         toastHandlers = [:]
         var toastActions: [ToastAction] = []
-        for (label, shortcut, handler) in actions {
+        func add(_ label: String, _ shortcut: String?, _ role: ToastAction.Role, _ handler: @escaping () -> Void) {
             let chord: KeyChord?
             if let shortcut, case .success(let parsed) = KeyChord.parse(shortcut) {
                 chord = parsed
             } else {
                 chord = nil
             }
-            let action = ToastAction(label: label, shortcut: chord?.label ?? shortcut, chord: chord)
+            let action = ToastAction(label: label, shortcut: chord?.label ?? shortcut, chord: chord, role: role)
             toastActions.append(action)
             toastHandlers[action.id] = handler
         }
-        toast = Toast(message: message, actions: toastActions)
+        for (label, shortcut, handler) in actions { add(label, shortcut, .button, handler) }
+        if let dismiss { add("Dismiss", dismiss.shortcut, .dismiss, dismiss.handler) }
+        toast = Toast(message: message, actions: toastActions, tone: tone)
     }
 
     func performToastAction(_ id: UUID) {
@@ -357,6 +379,7 @@ final class AppModel {
     /// Vertical tabs only: the sidebar is folded away, leaving the terminal
     /// the full width.
     var sidebarCollapsed: Bool { didSet { defaults.set(sidebarCollapsed, forKey: "sidebarCollapsed") } }
+    var sidebarSide: SidebarSide { didSet { defaults.set(sidebarSide.rawValue, forKey: "sidebarSide") } }
 
     func toggleSidebar() {
         if tabStyle == .vertical { sidebarCollapsed.toggle() } else { tabStyle = .vertical }
@@ -380,6 +403,20 @@ final class AppModel {
             tabStyle = .vertical
             sidebarCollapsed = false
         }
+    }
+    /// Zen Mode: the tab bar (or sidebar) stays out of sight until the
+    /// pointer reaches the window's top (or leading) edge.
+    var zenMode: Bool {
+        didSet {
+            defaults.set(zenMode, forKey: "zenMode")
+            zenChromeHovered = false
+        }
+    }
+    /// Zen Mode only: the pointer is over the revealed tab bar or sidebar.
+    var zenChromeHovered = false
+    /// Zen Mode keeps the chrome away unless it's hovered or in use.
+    var zenChromeHidden: Bool {
+        zenMode && !zenChromeHovered && !showSessionMenu && overview == .none
     }
     /// The sidebar lists only tabs running agents or reporting status, each
     /// with what it's doing and since when.
@@ -420,8 +457,8 @@ final class AppModel {
     // MARK: Theme state
 
     var appearanceMode: AppearanceMode { didSet { defaults.set(appearanceMode.rawValue, forKey: "appearance"); applyTheme() } }
-    private var lightThemeName: String { didSet { defaults.set(lightThemeName, forKey: "lightTheme") } }
-    private var darkThemeName: String { didSet { defaults.set(darkThemeName, forKey: "darkTheme") } }
+    private(set) var lightThemeName: String { didSet { defaults.set(lightThemeName, forKey: "lightTheme") } }
+    private(set) var darkThemeName: String { didSet { defaults.set(darkThemeName, forKey: "darkTheme") } }
     private(set) var customThemes: [Theme] = []
     private var systemIsDark: Bool
     /// Set while hovering a theme in the palette; reverted on dismiss.
@@ -484,7 +521,9 @@ final class AppModel {
         self.systemIsDark = systemIsDark
         tabStyle = TabStyle(rawValue: d.string(forKey: "tabStyle") ?? "") ?? .horizontal
         sidebarCollapsed = d.bool(forKey: "sidebarCollapsed")
+        sidebarSide = SidebarSide(rawValue: d.string(forKey: "sidebarSide") ?? "") ?? .left
         activityMode = d.bool(forKey: "activityMode")
+        zenMode = d.bool(forKey: "zenMode")
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
@@ -1585,8 +1624,13 @@ final class AppModel {
 
     /// `~/.config/den/config.toml`, read on launch and when Den comes back
     /// to the front; a broken file keeps the previous config.
-    @ObservationIgnored private(set) var config = UserConfig()
+    private(set) var config = UserConfig()
     @ObservationIgnored private var configStamp: Date?
+    /// Settings' shortcut recorder is listening; Den's own key handling
+    /// (leader, menus) stands aside meanwhile.
+    @ObservationIgnored var isRecordingShortcut = false
+    /// Opens the Settings window; set by the app delegate.
+    @ObservationIgnored var showSettings: (() -> Void)?
     /// Called after a new config loads, so the menu picks up its shortcuts.
     @ObservationIgnored var configDidChange: (() -> Void)?
 
@@ -1608,6 +1652,29 @@ final class AppModel {
         case .failure(let error):
             report("Den's config at \(url.path) has an error, so the previous settings stay in use: \(error.message) Fix it and run Reload Config.")
         }
+    }
+
+    /// Writes one setting to config.toml (creating it from the template
+    /// first) and applies it at once. `nil` removes the key, restoring the
+    /// default. Comments and other keys in the file stay as written.
+    func setConfig(_ key: String, _ value: TOMLValue?, table: String? = nil) {
+        let url = UserConfig.url
+        do {
+            let existing = FileManager.default.fileExists(atPath: url.path)
+                ? try String(contentsOf: url, encoding: .utf8)
+                : UserConfig.template
+            let edited = ConfigEdit.setting(key, to: value, inTable: table, of: existing)
+            // Check before writing: a setting must never leave the file broken.
+            if case .failure(let error) = UserConfig.parse(edited) {
+                return report("Den didn't save \(table.map { "[\($0)] " } ?? "")\(key) because the result wouldn't load: \(error.message) \(url.path) is unchanged.")
+            }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try edited.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            return report("Could not save \(key) to \(url.path): \(error.localizedDescription). The setting is unchanged; check the folder's permissions.")
+        }
+        configStamp = nil
+        reloadConfig()
     }
 
     /// Terminal font keys from the config win over the persisted palette
@@ -1633,6 +1700,8 @@ final class AppModel {
     /// when it used the key. The leader pressed twice goes through to the
     /// program.
     func handleKey(keyCode: UInt16, unmodified: String?, flags: NSEvent.ModifierFlags) -> Bool {
+        // Settings is recording a shortcut: every key goes to the recorder.
+        if isRecordingShortcut { return false }
         // A button toast's shortcuts (shown in its buttons) fire first, so
         // the update's Relaunch/Dismiss keys work even while typing.
         if let toast, !toast.actions.isEmpty {
@@ -1856,12 +1925,21 @@ final class AppModel {
         }
     }
 
-    var themesForCurrentAppearance: [Theme] {
-        let builtIn = effectiveAppearance == .dark ? ThemeCatalog.dark : ThemeCatalog.light
+    var themesForCurrentAppearance: [Theme] { themes(for: effectiveAppearance) }
+
+    func themes(for appearance: Appearance) -> [Theme] {
+        let builtIn = appearance == .dark ? ThemeCatalog.dark : ThemeCatalog.light
         // A hand-written theme with a built-in's name replaces it.
         let shadowed = Set(customThemes.map(\.name))
         return builtIn.filter { !shadowed.contains($0.name) }
-            + customThemes.filter { $0.appearance == effectiveAppearance }
+            + customThemes.filter { $0.appearance == appearance }
+    }
+
+    /// Makes `theme` the one used in its appearance, without switching
+    /// appearance (Settings lists light and dark themes side by side).
+    func useTheme(_ theme: Theme) {
+        if theme.appearance == .dark { darkThemeName = theme.name } else { lightThemeName = theme.name }
+        applyTheme()
     }
 
     /// Files in `~/.config/den/themes/` that failed to parse, for the

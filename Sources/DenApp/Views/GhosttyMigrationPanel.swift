@@ -129,7 +129,7 @@ struct GhosttyMigrationPanel: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                PanelButton(title: "Open Config", shortcut: "⌘,", prominent: false, theme: theme, action: openConfig)
+                PanelButton(title: "Open Config", shortcut: "⌥⌘,", prominent: false, theme: theme, action: openConfig)
                 PanelButton(title: "Done", shortcut: "↩", prominent: true, theme: theme, action: done)
             }
         }

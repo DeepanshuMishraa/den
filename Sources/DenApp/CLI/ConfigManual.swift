@@ -218,7 +218,9 @@ enum ConfigManual {
             density             string   \(Density.allCases.map(\.rawValue).joined(separator: " | "))
             tabStyle            string   horizontal | vertical
             sidebarCollapsed    bool     vertical tabs folded away
+            sidebarSide         string   left | right, where vertical tabs sit
             activityMode        bool     sidebar lists only tabs with agents/status
+            zenMode             bool     tab bar/sidebar hidden until hovered at the edge
             showPaneHeaders     bool     default true
             acc                 bool     automatic contrast correction, default true
 

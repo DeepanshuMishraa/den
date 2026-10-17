@@ -41,6 +41,7 @@ struct RootView: View {
         .preferredColorScheme(theme.isDark ? .dark : .light)
         .animation(.den, value: model.overview)
         .animation(.den, value: model.tabStyle)
+        .animation(.den, value: model.zenMode)
         .animation(.den, value: model.density)
         .animation(.easeInOut(duration: 0.25), value: model.effectiveInterfaceStyle)
         .animation(.easeOut(duration: 0.18), value: model.toast)
@@ -56,29 +57,38 @@ struct RootView: View {
         let surfaces = model.surfaces
         let pad = model.density.outerPadding
         Group {
-            if model.tabStyle == .vertical {
+            if model.zenMode {
+                content
+                    .padding(pad)
+                    .overlay(alignment: zenAlignment) { ZenChrome() }
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            } else if model.tabStyle == .vertical {
                 let collapsed = model.sidebarCollapsed
+                let side = model.sidebarSide
+                // On the right, the panes keep a bar on top for the traffic
+                // lights and dragging the window.
+                let topBar = collapsed || side == .right
+                let sidebar = Sidebar().transition(.move(edge: side.edge).combined(with: .opacity))
                 HStack(spacing: 0) {
-                    if !collapsed {
-                        Sidebar()
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                    }
+                    if !collapsed, side == .left { sidebar }
                     VStack(spacing: 0) {
-                        if collapsed {
-                            CollapsedSidebarBar()
+                        if topBar {
+                            CollapsedSidebarBar(showsToggle: collapsed)
                                 .transition(.opacity)
                         }
                         content
-                            .padding(.top, collapsed ? 0 : pad)
+                            .padding(.top, topBar ? 0 : pad)
                             .padding(.bottom, pad)
-                            .padding(.leading, collapsed ? pad : 0)
-                            .padding(.trailing, pad)
-                            .overlay(alignment: .leading) {
+                            .padding(.leading, collapsed || side == .right ? pad : 0)
+                            .padding(.trailing, collapsed || side == .left ? pad : 0)
+                            .overlay(alignment: side == .left ? .leading : .trailing) {
                                 // Compact density: a hairline instead of a gap.
                                 if model.density == .compact, !collapsed { surfaces.hairline.frame(width: 1) }
                             }
                     }
+                    if !collapsed, side == .right { sidebar }
                 }
+                .animation(.den, value: side)
                 .animation(.den, value: collapsed)
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else {
@@ -95,6 +105,12 @@ struct RootView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
         }
+    }
+
+    /// The edge Zen Mode's chrome slides in from.
+    private var zenAlignment: Alignment {
+        guard model.tabStyle == .vertical else { return .top }
+        return model.sidebarSide == .left ? .leading : .trailing
     }
 
     // MARK: Content
@@ -191,7 +207,7 @@ struct RootView: View {
 
         if model.showSessionMenu {
             SessionMenu()
-                .padding(.leading, model.tabStyle == .vertical ? 14 : TitleBar.leadingInset + 2)
+                .padding(.leading, model.tabStyle == .vertical && model.sidebarSide == .left ? 14 : TitleBar.leadingInset + 2)
                 .padding(.top, TitleBar.height - 2)
                 .transition(.asymmetric(insertion: .scale(scale: 0.96, anchor: .topLeading).combined(with: .opacity), removal: .opacity))
         }
@@ -279,6 +295,49 @@ struct RootView: View {
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
+}
+
+/// Zen Mode's tab bar or sidebar. Hidden, it's a thin strip along the top
+/// (or leading) edge; touching that slides the chrome in over the panes, so
+/// the terminals keep their size, and leaving it slides it away again.
+private struct ZenChrome: View {
+    @Environment(AppModel.self) private var model
+    /// How far from the edge the pointer has to come to bring it back.
+    private static let edge: CGFloat = 6
+
+    var body: some View {
+        let vertical = model.tabStyle == .vertical
+        let edge: Edge = vertical ? model.sidebarSide.edge : .top
+        ZStack(alignment: vertical ? (edge == .leading ? .leading : .trailing) : .top) {
+            if model.zenChromeHidden {
+                Color.clear
+                    .frame(width: vertical ? Self.edge : nil, height: vertical ? nil : Self.edge)
+                    .frame(maxWidth: vertical ? nil : .infinity, maxHeight: vertical ? .infinity : nil)
+                    .contentShape(Rectangle())
+            } else {
+                Group {
+                    if vertical { Sidebar().frame(maxHeight: .infinity) } else { TitleBar() }
+                }
+                .background(background(vertical: vertical))
+                .transition(.move(edge: edge).combined(with: .opacity))
+            }
+        }
+        .onHover { hovering in withAnimation(.den) { model.zenChromeHovered = hovering } }
+    }
+
+    private func background(vertical: Bool) -> some View {
+        let theme = model.theme
+        // Opaque: it floats over the panes rather than the window backdrop.
+        return LinearGradient(colors: [theme.windowTop, theme.windowBottom], startPoint: .top, endPoint: .bottom)
+            .overlay(alignment: vertical ? (model.sidebarSide == .left ? .trailing : .leading) : .bottom) {
+                theme.separator.frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
+            }
+            .shadow(color: .black.opacity(0.18), radius: 12)
+    }
+}
+
+extension SidebarSide {
+    var edge: Edge { self == .left ? .leading : .trailing }
 }
 
 private extension ToastPosition {

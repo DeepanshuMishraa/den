@@ -6,6 +6,7 @@ import SwiftUI
 /// `[[keys.bind]]` action.
 enum DenCommand: String, CaseIterable {
     case commandPalette = "command_palette"
+    case openSettings = "open_settings"
     case openConfig = "open_config"
     case reloadConfig = "reload_config"
     case checkForUpdates = "check_for_updates"
@@ -31,6 +32,7 @@ enum DenCommand: String, CaseIterable {
     case showSidebar = "show_sidebar"
     case hideSidebar = "hide_sidebar"
     case toggleActivityMode = "toggle_activity_mode"
+    case toggleZenMode = "toggle_zen_mode"
     case togglePaneHeaders = "toggle_pane_headers"
     case toggleContrastCorrection = "toggle_contrast_correction"
     case peek
@@ -82,6 +84,7 @@ enum DenCommand: String, CaseIterable {
     var title: String {
         switch self {
         case .commandPalette: "Command Palette…"
+        case .openSettings: "Settings…"
         case .openConfig: "Open Config File…"
         case .reloadConfig: "Reload Config"
         case .checkForUpdates: "Check for Updates…"
@@ -106,6 +109,7 @@ enum DenCommand: String, CaseIterable {
         case .showSidebar: "Show Sidebar"
         case .hideSidebar: "Hide Sidebar"
         case .toggleActivityMode: "Toggle Activity Mode"
+        case .toggleZenMode: "Toggle Zen Mode"
         case .togglePaneHeaders: "Toggle Pane Headers"
         case .toggleContrastCorrection: "Toggle Automatic Contrast Correction"
         case .peek: "Peek at Tabs"
@@ -152,7 +156,8 @@ enum DenCommand: String, CaseIterable {
     var defaultShortcut: String? {
         switch self {
         case .commandPalette: "cmd+shift+p"
-        case .openConfig: "cmd+,"
+        case .openSettings: "cmd+,"
+        case .openConfig: "opt+cmd+,"
         case .reloadConfig: "cmd+shift+,"
         case .hide: "cmd+h"
         case .quit: "cmd+q"
@@ -171,6 +176,7 @@ enum DenCommand: String, CaseIterable {
         case .toggleVerticalTabs: "ctrl+cmd+s"
         case .toggleSidebar: "opt+cmd+s"
         case .toggleActivityMode: "cmd+shift+a"
+        case .toggleZenMode: "ctrl+cmd+z"
         case .peek: "ctrl+cmd+down"
         case .leavePeek: "ctrl+cmd+up"
         case .showAllSessions: "ctrl+cmd+e"
@@ -228,6 +234,7 @@ enum DenCommand: String, CaseIterable {
         let animated: (() -> Void) -> Void = { body in withAnimation(.den) { body() } }
         switch self {
         case .commandPalette: model.palette = .root
+        case .openSettings: model.showSettings?()
         case .openConfig: model.openConfigFile()
         case .reloadConfig: model.reloadConfig(force: true)
         case .checkForUpdates: model.checkForUpdates()
@@ -252,6 +259,7 @@ enum DenCommand: String, CaseIterable {
         case .showSidebar: animated { model.showSidebar() }
         case .hideSidebar: animated { model.hideSidebar() }
         case .toggleActivityMode: animated { model.toggleActivityMode() }
+        case .toggleZenMode: animated { model.zenMode.toggle() }
         case .togglePaneHeaders: animated { model.showPaneHeaders.toggle() }
         case .toggleContrastCorrection: model.contrastCorrection.toggle()
         case .peek: animated { model.stepOverview(1) }

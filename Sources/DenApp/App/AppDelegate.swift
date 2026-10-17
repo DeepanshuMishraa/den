@@ -16,6 +16,7 @@ final class MenuAction: NSObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: AppModel?
     private var windowController: DenWindowController?
+    private var settingsController: SettingsWindowController?
     private var actions: [MenuAction] = []
     private var appearanceObservation: NSKeyValueObservation?
     private var leaderMonitor: Any?
@@ -42,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await start() }
         }
         NSApp.mainMenu = buildMenu(model)
+        model.showSettings = { [weak self, weak model] in
+            guard let self, let model else { return }
+            let controller = settingsController ?? SettingsWindowController(model: model)
+            settingsController = controller
+            controller.show()
+        }
         model.configDidChange = { [weak self, weak model] in
             guard let self, let model else { return }
             NSApp.mainMenu = buildMenu(model)
@@ -89,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSLog("Den keytest \(chars) handled=\(handled) fontSize=\(model.fontSize)")
                 }
             case "palette": model.palette = .root
+            case "settings": model.showSettings?()
             case "themes": model.palette = .theme
             case "sessions": model.showSessionMenu = true
             case "split": model.split(.horizontal)
@@ -179,13 +187,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(menu("Den", [
             NSMenuItem(title: "About Den", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""),
             .separator(),
-        ] + items([.commandPalette, .openConfig, .reloadConfig, .checkForUpdates, nil, .hide, .quit])))
+        ] + items([.openSettings, .commandPalette, .openConfig, .reloadConfig, .checkForUpdates, nil, .hide, .quit])))
 
         main.addItem(menu("File", items([.newTab, .newSession, .goToDirectory, .insertPath, nil, .closePane, .closeTab])))
         main.addItem(menu("Edit", items([.copy, .paste, .selectAll])))
         main.addItem(menu("View", items([
             .changeTheme, .changeFont, .fontBigger, .fontSmaller, .fontReset, nil,
-            .toggleVerticalTabs, .toggleSidebar, .toggleActivityMode, .togglePaneHeaders, .toggleContrastCorrection, nil,
+            .toggleVerticalTabs, .toggleSidebar, .toggleActivityMode, .toggleZenMode, .togglePaneHeaders, .toggleContrastCorrection, nil,
             .peek, .leavePeek, .showAllSessions, nil, .toggleFullScreen,
         ])))
         main.addItem(menu("Pane", items([

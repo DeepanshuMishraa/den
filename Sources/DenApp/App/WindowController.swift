@@ -207,6 +207,7 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
         }
         positionTrafficLights()
         followTheme()
+        followZenMode()
     }
 
     @available(*, unavailable)
@@ -241,6 +242,23 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
                 self?.followTheme()
                 self?.refreshChrome()
             }
+        }
+    }
+
+    /// Zen Mode fades the traffic lights out with the tab bar or sidebar
+    /// they sit on, and back in when it's revealed.
+    private func followZenMode() {
+        withObservationTracking {
+            let hidden = model.zenChromeHidden
+            let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                for type in buttons {
+                    window?.standardWindowButton(type)?.animator().alphaValue = hidden ? 0 : 1
+                }
+            }
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.followZenMode() }
         }
     }
 
