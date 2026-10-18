@@ -2,8 +2,9 @@ import DenProtocol
 import SwiftUI
 
 /// Inserts a path to anything, anywhere, at the cursor of whatever runs in
-/// the pane: a shell, an editor, an agent. The field starts at the pane's
-/// folder for ordinary path navigation; typing narrows it, and fsearch
+/// the pane: a shell, an editor, an agent. The field starts where the picker
+/// last closed (else the pane's folder) for ordinary path navigation; Tab
+/// steps into the selected folder, typing narrows it, and fsearch
 /// finds matches below the folder (or across the disk, for a bare word).
 /// The selected path previews at the cursor in ghost text.
 struct PathPickerOverlay: View {
@@ -54,6 +55,9 @@ struct PathPickerOverlay: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
         .onAppear(perform: enter)
+        .onDisappear {
+            if let dir = PathQuery.parse(text, home: homeOrRoot).directory { model.rememberPathPickerFolder(dir, on: host) }
+        }
         .task(id: text) { await refresh() }
         .onKeyPress(.escape) { model.pathPicker = nil; return .handled }
         .onKeyPress(.downArrow) { move(request.row > request.rows / 2 ? -1 : 1); return .handled }
@@ -158,7 +162,7 @@ struct PathPickerOverlay: View {
     private func enter() {
         let metrics = FontMetrics(family: model.fontFamily, pointSize: model.fontSize, scale: 2)
         cell = CGSize(width: metrics.cellWidth / 2, height: metrics.cellHeight / 2)
-        let start = request.cwd ?? home ?? "/"
+        let start = model.pathPickerFolder(on: host) ?? request.cwd ?? home ?? "/"
         text = (home.map { PathQuery.abbreviate(start, home: $0) } ?? start) + (start == "/" ? "" : "/")
         KeyboardFocus.takeFromTerminal { focused = true }
     }

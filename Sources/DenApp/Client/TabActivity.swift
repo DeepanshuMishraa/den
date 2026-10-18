@@ -3,8 +3,7 @@ import Foundation
 
 /// A tab's line in Activity Mode: what its program is up to and since when.
 /// Only tabs running something worth watching (a program reporting OSC
-/// 7501, or a coding agent, whose status dend infers) have one; plain
-/// shells and editors don't.
+/// 7501, or a coding agent) have one; plain shells and editors don't.
 struct TabActivity: Equatable {
     enum State: Equatable {
         case blocked(BlockedKind?)
@@ -36,8 +35,7 @@ struct TabActivity: Equatable {
         self.init(state: state, detail: record.msg, since: since)
     }
 
-    /// An agent dend hasn't reported on yet (an older dend, or the first
-    /// second after launch).
+    /// An agent that doesn't report OSC 7501 (or hasn't yet).
     static func unreported(lastOutput: Date?, now: Date) -> TabActivity {
         TabActivity(state: .idle, since: lastOutput ?? now)
     }

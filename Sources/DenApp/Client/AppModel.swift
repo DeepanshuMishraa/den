@@ -118,6 +118,9 @@ final class AppModel {
     }
     /// Paths inserted with the picker, newest first.
     private(set) var recentPaths: [String]
+    /// The folder the picker was in when it last closed, per host; it opens
+    /// there again. This Mac's survives relaunch.
+    @ObservationIgnored private var pathPickerFolders: [HostID: String] = [:]
 
     /// Bumped when an overlay closes; the focused terminal takes keyboard
     /// focus back so typing goes to the shell again.
@@ -525,6 +528,7 @@ final class AppModel {
         activityMode = d.bool(forKey: "activityMode")
         zenMode = d.bool(forKey: "zenMode")
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
+        if let folder = d.string(forKey: "pathPickerFolder") { pathPickerFolders[.local] = folder }
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
         fontLigatures = d.bool(forKey: "fontLigatures")
@@ -1613,7 +1617,21 @@ final class AppModel {
             recentPaths = Array(([path] + recentPaths.filter { $0 != path }).prefix(20))
             defaults.set(recentPaths, forKey: "recentPaths")
         }
+        rememberPathPickerFolder((path as NSString).deletingLastPathComponent, on: host)
         pathPicker = nil
+    }
+
+    /// Where the picker opens on `host`: the folder it last closed in, if
+    /// that still exists (a remote one can't be checked from here).
+    func pathPickerFolder(on host: HostID) -> String? {
+        guard let folder = pathPickerFolders[host] else { return nil }
+        var isDir: ObjCBool = false
+        return host != .local || (FileManager.default.fileExists(atPath: folder, isDirectory: &isDir) && isDir.boolValue) ? folder : nil
+    }
+
+    func rememberPathPickerFolder(_ folder: String, on host: HostID) {
+        pathPickerFolders[host] = folder
+        if host == .local { defaults.set(folder, forKey: "pathPickerFolder") }
     }
 
     func dismissError() { lastError = nil }
@@ -2079,8 +2097,7 @@ final class AppModel {
     }
 
     /// The tab's line in Activity Mode, or nil for tabs it leaves out. The
-    /// most urgent reported status wins (dend infers one for agents that
-    /// don't report their own).
+    /// most urgent OSC 7501 status wins; an agent that reports none is idle.
     func activity(of tab: TabLayout, now: Date) -> TabActivity? {
         let panes = tab.root.panes
         let reported = panes.compactMap { pane in

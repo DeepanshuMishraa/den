@@ -35,15 +35,6 @@ final class Pane {
     /// Process group that sent the latest working/blocked report; when it is
     /// gone, those records end.
     var statusOwner: pid_t?
-    /// Status dend infers for an agent that doesn't report its own; nil
-    /// when no agent runs or the agent speaks OSC 7501 itself.
-    var agentInference: AgentStatusInference?
-    /// The running program sent OSC 7501 itself, so nothing is inferred.
-    var reportsOwnStatus = false
-    /// Output arrived since the last inference tick, not counting echo of
-    /// the user's typing.
-    var agentOutput = false
-    var lastInput = Date.distantPast
     let ptyWriter: FDWriter
     var reader: PaneReader?
     var exitSource: DispatchSourceProtocol?
