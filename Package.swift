@@ -10,6 +10,9 @@ let termyEngine = Target.systemLibrary(name: "CTermyEngine", path: "Frameworks/l
 let termyEngine = Target.binaryTarget(name: "CTermyEngine", path: "Frameworks/TermyEngine.xcframework")
 #endif
 
+// Absolute: the linker doesn't run from the package root.
+let dendInfoPlist = String(#filePath.dropLast("Package.swift".count)) + "Sources/dend/Info.plist"
+
 let package = Package(
     name: "Den",
     platforms: [.macOS(.v15)],
@@ -31,7 +34,18 @@ let package = Package(
         ),
         .target(name: "DenProtocol"),
         .target(name: "DenServer", dependencies: ["DenVT", "DenProtocol", "CDenPTY"]),
-        .executableTarget(name: "dend", dependencies: ["DenServer", "DenProtocol", "CDenPTY"]),
+        // dend runs as its own launchd job, so macOS asks it (not Den.app)
+        // for Desktop/Documents/Downloads access. Without an embedded
+        // Info.plist carrying usage strings it can't prompt and is denied.
+        .executableTarget(
+            name: "dend",
+            dependencies: ["DenServer", "DenProtocol", "CDenPTY"],
+            exclude: ["Info.plist"],
+            linkerSettings: [.unsafeFlags(
+                ["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", dendInfoPlist],
+                .when(platforms: [.macOS])
+            )]
+        ),
         .executableTarget(
             name: "DenApp",
             dependencies: ["DenVT", "DenProtocol", "Sparkle"],

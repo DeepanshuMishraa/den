@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>den.dipxsy.app.dend</string>
+  <key>CFBundleName</key><string>Den</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Den's shells need this to work with files on your Desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Den's shells need this to work with files in your Documents folder.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Den's shells need this to work with files in your Downloads folder.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>Den's shells need this to work with files on removable drives.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>Den's shells need this to work with files on network drives.</string>
+</dict>
+</plist>
