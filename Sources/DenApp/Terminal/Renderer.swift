@@ -278,9 +278,15 @@ struct FrameBuilder {
         let cursorColor = colors.cursor ?? theme.cursor
         let radius = Float(metrics.scale) * 3
 
+        // Selection and find-bar matches: runs of one fill along a row.
+        // Every match tints with the accent; the current one is solid.
+        let matchFill = theme.background.mixed(with: theme.accentRGB, theme.isDark ? 0.42 : 0.32)
+        let currentFill = theme.accentRGB
+        let onCurrent = currentFill.luminance > 0.45 ? RGB(0, 0, 0) : RGB(255, 255, 255)
         var selectionRow = -1
         var selectionStart = 0
         var selectionEnd = 0
+        var selectionFill = theme.selection
         // Local so the cell closure below doesn't overlap `self.selections`.
         var selectionRects: [RectInstance] = []
         // Locals too, for the same reason: the run being collected, and the
@@ -297,19 +303,29 @@ struct FrameBuilder {
             let x = origin.x + Float(selectionStart) * cw
             let y = origin.y + Float(selectionRow) * ch
             rects.append(RectInstance(rect: SIMD4(x, y, Float(selectionEnd - selectionStart + 1) * cw, ch),
-                                      color: theme.selection.simd(), params: SIMD4(radius, 0, 0, 0)))
+                                      color: selectionFill.simd(), params: SIMD4(radius, 0, 0, 0)))
             selectionRow = -1
         }
 
         state.forEachCell { cell in
-            if cell.selected {
-                if selectionRow == cell.row, cell.col == selectionEnd + 1 {
+            let fill: RGB? = if cell.selected {
+                theme.selection
+            } else {
+                switch cell.found {
+                case .current: currentFill
+                case .match: matchFill
+                case .none: nil
+                }
+            }
+            if let fill {
+                if selectionRow == cell.row, cell.col == selectionEnd + 1, fill == selectionFill {
                     selectionEnd = cell.col + (cell.width == .wide ? 1 : 0)
                 } else {
                     flushSelection(&selectionRects)
                     selectionRow = cell.row
                     selectionStart = cell.col
                     selectionEnd = cell.col + (cell.width == .wide ? 1 : 0)
+                    selectionFill = fill
                 }
             }
             if cell.width == .spacerTail || cell.width == .spacerHead { return }
@@ -330,13 +346,14 @@ struct FrameBuilder {
             let isCursorCell = cursor.map { $0.shape == .block && cursorFocused && cursorOpacity > 0.5 && $0.x == cell.col && $0.y == cell.row } ?? false
             if isCursorCell { fg = defaultBg }
             if cell.selected, !isCursorCell, let selected = theme.selectionForeground { fg = selected }
+            if !cell.selected, cell.found == .current, !isCursorCell { fg = onCurrent }
 
             if let bg {
                 backgrounds.append(RectInstance(rect: SIMD4(x, y, cw * span, ch), color: bg.simd()))
             }
             guard !cell.codepoints.isEmpty, !cell.style.invisible else { return }
             if contrastCorrection, !isCursorCell {
-                fg = pipelines.corrected(fg, on: cell.selected ? theme.selection : (bg ?? defaultBg), themeForeground: theme.foreground)
+                fg = pipelines.corrected(fg, on: fill ?? bg ?? defaultBg, themeForeground: theme.foreground)
             }
             let alpha: Float = cell.style.faint ? 0.6 : 1
 

@@ -116,6 +116,12 @@ final class AppModel {
         let col: Int, row: Int
         let rows: Int
     }
+    /// The find bar (⌘F), searching the panes of one tab.
+    var find: TabFind? {
+        didSet { if oldValue != nil, find == nil { terminalFocusRequest &+= 1 } }
+    }
+    /// Bumped to move the keyboard into the open find bar's field.
+    var findFocusRequest = 0
     /// Paths inserted with the picker, newest first.
     private(set) var recentPaths: [String]
     /// The folder the picker was in when it last closed, per host; it opens

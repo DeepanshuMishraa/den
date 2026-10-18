@@ -133,6 +133,16 @@ struct RootView: View {
                 placeholder
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if model.find != nil {
+                // Under the top-right pane's header, clear of its buttons.
+                FindBar()
+                    .padding(.top, model.showPaneHeaders ? 40 : 10)
+                    .padding(.trailing, 14)
+                    .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
+            }
+        }
+        .animation(.denFast, value: model.find == nil)
         .animation(.denFast, value: model.activeTab)
         .animation(.den, value: model.zoomedPane)
         .animation(.den, value: model.activeLayout?.root)

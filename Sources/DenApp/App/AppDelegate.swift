@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ] + items([.openSettings, .commandPalette, .openConfig, .reloadConfig, .checkForUpdates, nil, .hide, .quit])))
 
         main.addItem(menu("File", items([.newTab, .newSession, .goToDirectory, .insertPath, nil, .closePane, .closeTab])))
-        main.addItem(menu("Edit", items([.copy, .paste, .selectAll])))
+        main.addItem(menu("Edit", items([.copy, .paste, .selectAll, nil, .find, .findNext, .findPrevious, nil, .findTab, .findSession])))
         main.addItem(menu("View", items([
             .changeTheme, .changeFont, .fontBigger, .fontSmaller, .fontReset, nil,
             .toggleVerticalTabs, .toggleSidebar, .toggleActivityMode, .toggleZenMode, .togglePaneHeaders, .toggleContrastCorrection, nil,

@@ -75,6 +75,8 @@ public final class VTTerminal {
     let frame = FrameCache()
     /// Highlighted text, in rows that stay put while output scrolls.
     var selection: TextSelection?
+    /// Find-bar matches to draw; the app sets and clears them.
+    public var searchHighlights: SearchHighlights?
 
     /// Scrollback kept per terminal: rows, with a byte budget as a backstop
     /// for very wide panes. libtermy evicts about 4x slower when the byte

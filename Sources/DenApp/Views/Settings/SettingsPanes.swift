@@ -580,7 +580,7 @@ struct ShortcutSettings: View {
         let listed: [(String, [DenCommand])] = [
             ("Den", [.openSettings, .commandPalette, .openConfig, .reloadConfig, .checkForUpdates, .hide, .quit]),
             ("File", [.newTab, .newSession, .goToDirectory, .insertPath, .closePane, .closeTab]),
-            ("Edit", [.copy, .paste, .selectAll]),
+            ("Edit", [.copy, .paste, .selectAll, .find, .findNext, .findPrevious, .findTab, .findSession]),
             ("View", [.changeTheme, .changeFont, .fontBigger, .fontSmaller, .fontReset, .toggleVerticalTabs, .toggleSidebar,
                       .showSidebar, .hideSidebar, .toggleActivityMode, .toggleZenMode, .togglePaneHeaders, .toggleContrastCorrection,
                       .peek, .leavePeek, .showAllSessions, .toggleFullScreen]),

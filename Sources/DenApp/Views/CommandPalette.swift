@@ -5,14 +5,14 @@ import UniformTypeIdentifiers
 
 /// Which list the palette shows. Submenus appear as a chip in the field.
 enum PaletteRoute: Equatable {
-    case root, theme, interfaceStyle, font, shell, cursorBlink, changeSession, renameSession, renameTab, goToDirectory, addHost, deleteTheme
+    case root, theme, interfaceStyle, font, shell, cursorBlink, changeSession, findTab, renameSession, renameTab, goToDirectory, addHost, deleteTheme
     /// Not a list: shows the Ghostty migration's progress.
     case migrateGhostty
     case renameHost(RemoteHost.ID)
 
     var chip: String? {
         switch self {
-        case .root, .migrateGhostty: nil
+        case .root, .migrateGhostty, .findTab: nil
         case .theme: "Theme"
         case .font: "Font"
         case .shell: "Shell"
@@ -35,7 +35,8 @@ enum PaletteRoute: Equatable {
         case .shell: "Select Shell…"
         case .cursorBlink: "Filter blink settings…"
         case .interfaceStyle: "Select Interface Style…"
-        case .changeSession: "Filter sessions…"
+        case .changeSession: "Search sessions…"
+        case .findTab: "Search tabs…"
         case .renameSession: "Session name"
         case .renameTab: "Tab title"
         case .renameHost: "Host name"
@@ -58,6 +59,11 @@ struct PaletteItem: Identifiable {
     var sectionIcon: String?
     var icon: String?
     let title: String
+    /// A second line under the title, e.g. where a tab lives.
+    var subtitle: String?
+    var subtitleIcon: String?
+    /// A tab's program icons, drawn in place of `icon`.
+    var deck: [ProgramKind]?
     var detail: String?
     var shortcut: String?
     var checked = false
@@ -147,6 +153,7 @@ struct CommandPalette: View {
                     .onChange(of: selection) { proxy.scrollTo(selection) }
                 }
             }
+            if route == .findTab || route == .changeSession { footer(theme) }
         }
         .padding(6)
         .frame(width: 440)
@@ -234,17 +241,29 @@ struct CommandPalette: View {
         let theme = model.theme
         let fg = highlighted ? theme.onAccent : theme.chromeText
         let dim = highlighted ? theme.onAccent.opacity(0.75) : theme.tertiaryText
-        let hits = route == .root || route == .theme || route == .font || route == .shell || route == .interfaceStyle || route == .changeSession ? (Fuzzy.match(query, in: item.title) ?? []) : []
-        return HStack(spacing: 8) {
-            if let icon = item.icon {
+        let hits = route == .root || route == .theme || route == .font || route == .shell || route == .interfaceStyle || route == .changeSession || route == .findTab ? (Fuzzy.match(query, in: item.title) ?? []) : []
+        return HStack(spacing: item.subtitle == nil ? 8 : 10) {
+            if let deck = item.deck {
+                DeckIcon(deck: deck, height: 18)
+                    .frame(width: 22)
+            } else if let icon = item.icon {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(.system(size: item.subtitle == nil ? 12 : 13.5))
                     .foregroundStyle(icon == "folder.fill" && !highlighted ? Color(.sRGB, red: 0.33, green: 0.62, blue: 0.96) : fg)
-                    .frame(width: 16)
+                    .frame(width: item.subtitle == nil ? 16 : 22)
             }
-            Fuzzy.highlighted(item.title, hits: hits, base: fg, accent: highlighted ? fg : theme.accent)
-                .uiFont(size: 13.5)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Fuzzy.highlighted(item.title, hits: hits, base: fg, accent: highlighted ? fg : theme.accent)
+                    .uiFont(size: 13.5, weight: item.subtitle == nil ? .regular : .medium)
+                    .lineLimit(1)
+                if let subtitle = item.subtitle {
+                    HStack(spacing: 4) {
+                        if let icon = item.subtitleIcon { Image(systemName: icon).font(.system(size: 10)) }
+                        Text(subtitle).uiFont(size: 11.5).lineLimit(1).truncationMode(.middle)
+                    }
+                    .foregroundStyle(highlighted ? theme.onAccent.opacity(0.8) : theme.secondaryText)
+                }
+            }
             Spacer(minLength: 10)
             if let detail = item.detail {
                 Text(detail).uiFont(size: 12.5).foregroundStyle(dim).lineLimit(1).truncationMode(.head)
@@ -264,8 +283,8 @@ struct CommandPalette: View {
             }
         }
         .padding(.horizontal, 9)
-        .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(highlighted ? theme.accent : .clear))
+        .frame(height: item.subtitle == nil ? 30 : 44)
+        .background(RoundedRectangle(cornerRadius: item.subtitle == nil ? 7 : 9, style: .continuous).fill(highlighted ? theme.accent : .clear))
     }
 
     // MARK: Behavior
@@ -338,10 +357,11 @@ struct CommandPalette: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         switch route {
         case .migrateGhostty: return []
-        case .root, .theme, .interfaceStyle, .font, .shell, .cursorBlink, .changeSession, .deleteTheme:
+        case .root, .theme, .interfaceStyle, .font, .shell, .cursorBlink, .changeSession, .findTab, .deleteTheme:
             let all = items(for: route)
             guard !q.isEmpty else { return all }
-            return Fuzzy.filter(all, query: q, key: \.title)
+            // Tabs also match by the session and host they're in.
+            return Fuzzy.filter(all, query: q) { [$0.title, $0.subtitle].compactMap { $0 }.joined(separator: " ") }
         case .renameSession:
             guard !q.isEmpty, let id = model.currentSession else { return [] }
             return [PaletteItem(id: "rename", title: "Rename session to “\(q)”", shortcut: "↩", action: .run { model.renameSession(id, to: q) })]
@@ -441,8 +461,23 @@ struct CommandPalette: View {
             }
         case .changeSession:
             return model.orderedSessions.enumerated().map { i, s in
-                PaletteItem(id: "session-\(s.id)", title: s.name, shortcut: model.config.shortcutLabel(.goToSession, number: i + 1), checked: s.id == model.currentSession,
-                            action: .run { model.switchSession(s.id) })
+                let tabs = model.tabs(in: s.id)
+                let host = model.sessionHosts[s.id] ?? .local
+                return PaletteItem(id: "session-\(s.id)", title: s.name,
+                                   subtitle: "\(model.hostLabel(host)) · \(tabs.count) \(tabs.count == 1 ? "tab" : "tabs")",
+                                   subtitleIcon: Self.hostIcon(host), deck: tabs.first.map(model.deck),
+                                   shortcut: model.config.shortcutLabel(.goToSession, number: i + 1), checked: s.id == model.currentSession,
+                                   action: .run { model.switchSession(s.id) })
+            }
+        case .findTab:
+            return model.orderedSessions.flatMap { s in
+                let host = model.sessionHosts[s.id] ?? .local
+                return model.tabs(in: s.id).map { tab in
+                    PaletteItem(id: "tab-\(tab.id)", title: model.tabTitle(tab),
+                                subtitle: "\(model.hostLabel(host)) › \(s.name)", subtitleIcon: Self.hostIcon(host),
+                                deck: model.deck(for: tab), checked: s.id == model.currentSession && tab.id == model.activeTab,
+                                action: .run { withAnimation(.denFast) { model.selectTab(tab.id) } })
+                }
             }
         case .deleteTheme:
             // Dual-variant files appear once: both variants share one file.
@@ -470,6 +505,9 @@ struct CommandPalette: View {
             PaletteItem(id: "rename-session", title: "Rename Session", detail: session, submenu: true, action: .push(.renameSession)),
             PaletteItem(id: "rename-tab", title: "Rename Tab", detail: tabTitle, submenu: true, action: .push(.renameTab)),
             PaletteItem(id: "add-host", icon: "network", title: "Add Remote Host…", submenu: true, action: .push(.addHost)),
+            PaletteItem(id: "find-tab", icon: "rectangle.stack", title: "Find Tab…", shortcut: key(.findTab), submenu: true, action: .push(.findTab)),
+            PaletteItem(id: "find", icon: "magnifyingglass", title: "Find in Tab…", shortcut: key(.find),
+                        action: .run { DispatchQueue.main.async { model.openFind() } }),
             PaletteItem(id: "new-session", title: "New Session", shortcut: key(.newSession), action: .run { model.createSession(name: "") }),
             PaletteItem(id: "new-tab", title: "New Tab", shortcut: key(.newTab), action: .run { model.newTab() }),
             PaletteItem(id: "insert-path", icon: "text.insert", title: "Insert Path…", shortcut: key(.insertPath),
@@ -626,6 +664,25 @@ struct CommandPalette: View {
         }
         let shown = Set(items.map(\.id))
         return items + deeper.filter { !shown.contains($0.id) }
+    }
+
+    private static func hostIcon(_ host: HostID) -> String {
+        host == .local ? "laptopcomputer" : "server.rack"
+    }
+
+    /// The keys a picker answers to, under its list.
+    private func footer(_ theme: Theme) -> some View {
+        HStack(spacing: 6) {
+            Spacer()
+            Text("Close").uiFont(size: 11.5).foregroundStyle(theme.tertiaryText)
+            Keycap(label: "esc", theme: theme).foregroundStyle(theme.secondaryText)
+            Text(route == .findTab ? "Go to Tab" : "Switch").uiFont(size: 11.5).foregroundStyle(theme.secondaryText).padding(.leading, 8)
+            Keycap(label: "↩", theme: theme).foregroundStyle(theme.secondaryText)
+        }
+        .padding(.horizontal, 9)
+        .padding(.top, 7)
+        .padding(.bottom, 2)
+        .overlay(alignment: .top) { theme.separator.frame(height: 0.5).padding(.horizontal, -6) }
     }
 
     private func importTheme() {

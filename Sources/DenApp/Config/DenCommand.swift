@@ -21,6 +21,11 @@ enum DenCommand: String, CaseIterable {
 
     case copy, paste
     case selectAll = "select_all"
+    case find
+    case findNext = "find_next"
+    case findPrevious = "find_previous"
+    case findTab = "find_tab"
+    case findSession = "find_session"
 
     case changeTheme = "change_theme"
     case changeFont = "change_font"
@@ -99,6 +104,11 @@ enum DenCommand: String, CaseIterable {
         case .copy: "Copy"
         case .paste: "Paste"
         case .selectAll: "Select All"
+        case .find: "Find…"
+        case .findNext: "Find Next"
+        case .findPrevious: "Find Previous"
+        case .findTab: "Find Tab…"
+        case .findSession: "Find Session…"
         case .changeTheme: "Change Theme…"
         case .changeFont: "Change Font…"
         case .fontBigger: "Bigger"
@@ -170,6 +180,12 @@ enum DenCommand: String, CaseIterable {
         case .copy: "cmd+c"
         case .paste: "cmd+v"
         case .selectAll: "cmd+a"
+        case .find: "cmd+f"
+        case .findNext: "cmd+g"
+        // ⌘⇧G is Go to Directory; ⇧Return in the bar steps back.
+        case .findPrevious: nil
+        case .findTab: "cmd+t"
+        case .findSession: "cmd+p"
         case .fontBigger: "cmd+="
         case .fontSmaller: "cmd+-"
         case .fontReset: "cmd+0"
@@ -249,6 +265,11 @@ enum DenCommand: String, CaseIterable {
         case .copy: NSApp.sendAction(#selector(TerminalView.copy(_:)), to: nil, from: nil)
         case .paste: NSApp.sendAction(#selector(TerminalView.paste(_:)), to: nil, from: nil)
         case .selectAll: NSApp.sendAction(#selector(NSResponder.selectAll(_:)), to: nil, from: nil)
+        case .find: model.openFind()
+        case .findNext: model.find == nil ? model.openFind() : model.stepFind(-1)
+        case .findPrevious: model.find == nil ? model.openFind() : model.stepFind(1)
+        case .findTab: model.palette = .findTab
+        case .findSession: model.palette = .changeSession
         case .changeTheme: model.palette = .theme
         case .changeFont: model.palette = .font
         case .fontBigger: model.adjustFontSize(1)

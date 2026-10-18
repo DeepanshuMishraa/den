@@ -31,6 +31,10 @@ public struct CellView {
     public var foreground: RGB?
     public var background: RGB?
     public var selected: Bool
+    public var found: Found
+
+    /// Whether a find-bar match covers the cell.
+    public enum Found: Sendable { case none, match, current }
 }
 
 public enum CursorShape: Sendable {
@@ -145,6 +149,8 @@ public final class VTRenderState {
     private var terminal: VTTerminal?
     /// The selection in viewport rows, for this frame.
     private var selected: (start: (row: Int, col: Int), end: (row: Int, col: Int))?
+    /// Find-bar matches on each viewport row, as column ranges.
+    private var foundRanges: [Int: [(columns: ClosedRange<Int>, current: Bool)]] = [:]
     private var scratch = [UInt32](repeating: 0, count: 32)
 
     public init() throws(VTError) {}
@@ -160,6 +166,20 @@ public final class VTRenderState {
             guard end >= 0, start < rows else { return nil }
             return (start < 0 ? (0, 0) : (Int(start), selection.start.col),
                     end >= rows ? (Int(rows - 1), Int.max) : (Int(end), selection.end.col))
+        }
+        foundRanges.removeAll(keepingCapacity: true)
+        if let highlights = terminal.searchHighlights {
+            let firstRow = Int64(terminal.state.scrolled_into_history) - Int64(terminal.frame.displayOffset)
+            let rows = Int64(terminal.frame.rows)
+            for (i, match) in highlights.matches.enumerated() where match.end.row >= firstRow && match.start.row < firstRow + rows {
+                // A match across a soft wrap covers the end of one row and
+                // the start of the next.
+                for row in max(match.start.row, firstRow) ... min(match.end.row, firstRow + rows - 1) {
+                    let first = row == match.start.row ? match.start.col : 0
+                    let last = row == match.end.row ? match.end.col : Int.max
+                    foundRanges[Int(row - firstRow), default: []].append((first ... last, i == highlights.current))
+                }
+            }
         }
     }
 
@@ -202,7 +222,8 @@ public final class VTRenderState {
                     let index = row * frame.cols + col
                     let cell = cells[index]
                     let selected = isSelected(row: row, col: col)
-                    if cell.flags & blank != 0, !selected { continue }
+                    let found = foundState(row: row, col: col)
+                    if cell.flags & blank != 0, !selected, found == .none { continue }
                     let width: CellWidth = switch Int32(cell.width) {
                     case TERMY_ENGINE_CELL_WIDE: .wide
                     case TERMY_ENGINE_CELL_SPACER_TAIL: .spacerTail
@@ -242,12 +263,22 @@ public final class VTRenderState {
                             codepoints: UnsafeBufferPointer(start: buf.baseAddress, count: count),
                             width: width, style: style,
                             foreground: resolve(cell.foreground), background: resolve(cell.background),
-                            selected: selected
+                            selected: selected, found: found
                         ))
                     }
                 }
             }
         }
+    }
+
+    private func foundState(row: Int, col: Int) -> CellView.Found {
+        guard let ranges = foundRanges[row] else { return .none }
+        var result = CellView.Found.none
+        for range in ranges where range.columns.contains(col) {
+            if range.current { return .current }
+            result = .match
+        }
+        return result
     }
 
     private func isSelected(row: Int, col: Int) -> Bool {
