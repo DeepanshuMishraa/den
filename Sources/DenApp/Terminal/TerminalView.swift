@@ -271,7 +271,7 @@ final class TerminalView: MTKView {
             }
         }
 
-        let clear = frame.clear.map { $0.simd() } ?? .zero
+        let clear = frame.clear ?? .zero
         pass.colorAttachments[0].clearColor = MTLClearColor(red: Double(clear.x), green: Double(clear.y), blue: Double(clear.z), alpha: Double(clear.w))
         pass.colorAttachments[0].loadAction = .clear
         guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }

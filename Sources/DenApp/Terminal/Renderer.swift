@@ -196,9 +196,10 @@ struct FrameBuilder {
     var selections: [RectInstance] = []
     var decorations: [RectInstance] = []
     var glyphs: [GlyphInstance] = []
-    /// Nil when the terminal uses the theme background: the view stays
+    /// Premultiplied fill for the whole view, padding included. Nil when the
+    /// app draws on the card (or its canvas folds into it): the view stays
     /// transparent so the card's gradient shows through.
-    var clear: RGB?
+    var clear: SIMD4<Float>?
 
     init(metrics: FontMetrics, atlas: GlyphAtlas, pipelines: RenderPipelines, origin: SIMD2<Float>, theme: Theme,
          cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool, cursorOpacity: Float = 1) {
@@ -272,7 +273,10 @@ struct FrameBuilder {
     mutating func build(_ state: VTRenderState) {
         let colors = state.colors
         let defaultBg = colors.background
-        clear = defaultBg == theme.background ? nil : defaultBg
+        // Cell fills wait until the whole grid is seen: whether the app has
+        // a canvas to fold decides how each one draws.
+        var cellBackgrounds: [(SIMD4<Float>, RGB)] = []
+        var coverage: [RGB: Int] = [:]
         let cw = Float(metrics.cellWidth), ch = Float(metrics.cellHeight)
         let cursor = showCursor ? state.cursor : nil
         let cursorColor = colors.cursor ?? theme.cursor
@@ -349,7 +353,8 @@ struct FrameBuilder {
             if !cell.selected, cell.found == .current, !isCursorCell { fg = onCurrent }
 
             if let bg {
-                backgrounds.append(RectInstance(rect: SIMD4(x, y, cw * span, ch), color: bg.simd()))
+                cellBackgrounds.append((SIMD4(x, y, cw * span, ch), bg))
+                coverage[bg, default: 0] += Int(span)
             }
             guard !cell.codepoints.isEmpty, !cell.style.invisible else { return }
             if contrastCorrection, !isCursorCell {
@@ -400,6 +405,19 @@ struct FrameBuilder {
         flushRun()
         flushSelection(&selectionRects)
         selections = selectionRects
+
+        let (cols, rows) = state.size
+        let fold = BackgroundFold(theme: theme.background, defaultBackground: defaultBg, coverage: coverage, cellCount: cols * rows)
+        clear = fold.clear
+        var layers: [RGB: SIMD4<Float>?] = [:]
+        for (rect, color) in cellBackgrounds {
+            let layer = layers[color] ?? {
+                let l = fold.layer(color)
+                layers[color] = l
+                return l
+            }()
+            if let layer { backgrounds.append(RectInstance(rect: rect, color: layer)) }
+        }
 
         if let cursor {
             let x = origin.x + Float(cursor.x) * cw
