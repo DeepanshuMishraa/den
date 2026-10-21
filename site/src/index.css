@@ -63,6 +63,7 @@ h1 strong { font-weight: 600; color: var(--blue); }
 }
 .button:hover { color: var(--on-blue); background: var(--blue); }
 .button:active { transform: scale(0.97); }
+.demo { display: block; width: 100%; height: auto; margin-top: 40px; border-radius: 10px; border: 1px solid var(--line); }
 
 /* Sections */
 section { padding-top: 104px; }

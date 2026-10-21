@@ -41,6 +41,19 @@ export default function App() {
             apple silicon · macOS 15+ · <a href={links.repo}>source</a>
           </span>
         </div>
+        <video
+          className="demo reveal"
+          ref={reveal}
+          src="/hero.mp4"
+          width={1580}
+          height={1080}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          aria-label="Den demo"
+        />
       </div>
 
       <section className="reveal" ref={reveal} id="how" aria-labelledby="how-h">
