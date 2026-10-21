@@ -36,6 +36,7 @@ struct RootView: View {
         }
         .coordinateSpace(.named(Self.space))
         .environment(\.uiFontFamily, model.uiFontFamily)
+        .overlayPreferenceValue(TabCardKey.self) { TabCardLayer(requests: $0) }
         .overlayPreferenceValue(TooltipKey.self) { TooltipLayer(requests: $0, theme: theme) }
         .ignoresSafeArea()
         .preferredColorScheme(theme.isDark ? .dark : .light)
@@ -45,6 +46,7 @@ struct RootView: View {
         .animation(.den, value: model.density)
         .animation(.easeInOut(duration: 0.25), value: model.effectiveInterfaceStyle)
         .animation(.easeOut(duration: 0.18), value: model.toast)
+        .animation(.denFast, value: model.showActivityMenu)
         .animation(.easeOut(duration: 0.12), value: model.leaderPending)
         .animation(.easeOut(duration: 0.18), value: model.loginRequest)
         .animation(.easeOut(duration: 0.18), value: model.whatsNew)
@@ -204,12 +206,13 @@ struct RootView: View {
 
     @ViewBuilder
     private var overlays: some View {
-        let dismissible = model.showSessionMenu || model.palette != nil
+        let dismissible = model.showSessionMenu || model.showActivityMenu || model.palette != nil
         if dismissible {
             // Clicking anywhere outside a menu closes it.
             Color.black.opacity(0.001)
                 .onTapGesture {
                     model.showSessionMenu = false
+                    model.showActivityMenu = false
                     model.previewTheme = nil
                     model.palette = nil
                 }
@@ -220,6 +223,14 @@ struct RootView: View {
                 .padding(.leading, model.tabStyle == .vertical && model.sidebarSide == .left ? 14 : TitleBar.leadingInset + 2)
                 .padding(.top, TitleBar.height - 2)
                 .transition(.asymmetric(insertion: .scale(scale: 0.96, anchor: .topLeading).combined(with: .opacity), removal: .opacity))
+        }
+
+        if model.showActivityMenu, model.tabStyle == .horizontal {
+            ActivityMenu()
+                .padding(.trailing, TitleBar.activityMenuTrailing)
+                .padding(.top, TitleBar.height - 2)
+                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                .transition(.asymmetric(insertion: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity), removal: .opacity))
         }
 
         if model.palette != nil {

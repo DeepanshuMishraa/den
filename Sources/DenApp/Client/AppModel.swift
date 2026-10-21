@@ -97,6 +97,8 @@ final class AppModel {
     var showSessionMenu = false {
         didSet { if oldValue, !showSessionMenu { terminalFocusRequest &+= 1 } }
     }
+    /// Horizontal tabs: the eye button's dropdown of tabs reporting activity.
+    var showActivityMenu = false
     var palette: PaletteRoute? {
         didSet {
             if oldValue != nil, palette == nil {
@@ -425,7 +427,7 @@ final class AppModel {
     var zenChromeHovered = false
     /// Zen Mode keeps the chrome away unless it's hovered or in use.
     var zenChromeHidden: Bool {
-        zenMode && !zenChromeHovered && !showSessionMenu && overview == .none
+        zenMode && !zenChromeHovered && !showSessionMenu && !showActivityMenu && overview == .none
     }
     /// The sidebar lists only tabs running agents or reporting status, each
     /// with what it's doing and since when.
@@ -2104,8 +2106,10 @@ final class AppModel {
 
     /// The tab's line in Activity Mode, or nil for tabs it leaves out. The
     /// most urgent OSC 7501 status wins; an agent that reports none is idle.
+    /// Panes back at a shell prompt drop out: their program has exited, and
+    /// the done/error it left behind is the tab badge's to show.
     func activity(of tab: TabLayout, now: Date) -> TabActivity? {
-        let panes = tab.root.panes
+        let panes = tab.root.panes.filter { program(for: $0).glyph != .prompt }
         let reported = panes.compactMap { pane in
             StatusRecords(programStatus[pane] ?? []).headline.map { (record: $0, pane: pane) }
         }
@@ -2117,12 +2121,29 @@ final class AppModel {
         return TabActivity.unreported(lastOutput: agents.compactMap { lastOutput[$0] }.max(), now: now)
     }
 
+    /// One pane's share of the above, for the tab hover card.
+    func activity(of pane: PaneID, now: Date) -> TabActivity? {
+        guard program(for: pane).glyph != .prompt else { return nil }
+        if let record = StatusRecords(programStatus[pane] ?? []).headline {
+            return TabActivity(record: record, since: statusSince[pane] ?? now)
+        }
+        guard program(for: pane).isAgent else { return nil }
+        return TabActivity.unreported(lastOutput: lastOutput[pane], now: now)
+    }
+
     /// Something outside the tab on screen finished or is waiting on the
     /// user: the Activity Mode button wears a dot.
     var anyTabWantsAttention: Bool {
         layouts.values.contains { layout in
             layout.tabs.contains { $0.id != activeTab && status(of: $0)?.wantsAttention == true }
         }
+    }
+
+    /// Some tab has an agent open or a program reporting status: the
+    /// Activity Mode button wears a dot for as long as it lasts.
+    var anyTabHasActivity: Bool {
+        let now = Date()
+        return layouts.values.contains { layout in layout.tabs.contains { activity(of: $0, now: now) != nil } }
     }
 
     /// A tab in this session (other than the one on screen) finished or is

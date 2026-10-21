@@ -52,7 +52,7 @@ struct TabActivity: Equatable {
     }
 }
 
-private extension TabActivity.State {
+extension TabActivity.State {
     var label: String {
         switch self {
         case .blocked(.permission): "Needs permission"

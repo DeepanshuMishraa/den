@@ -279,7 +279,13 @@ enum DenCommand: String, CaseIterable {
         case .toggleSidebar: animated { model.toggleSidebar() }
         case .showSidebar: animated { model.showSidebar() }
         case .hideSidebar: animated { model.hideSidebar() }
-        case .toggleActivityMode: animated { model.toggleActivityMode() }
+        case .toggleActivityMode:
+            // Horizontal tabs show activity in the eye button's dropdown.
+            if model.tabStyle == .horizontal {
+                withAnimation(.denFast) { model.showActivityMenu.toggle() }
+            } else {
+                animated { model.toggleActivityMode() }
+            }
         case .toggleZenMode: animated { model.zenMode.toggle() }
         case .togglePaneHeaders: animated { model.showPaneHeaders.toggle() }
         case .toggleContrastCorrection: model.contrastCorrection.toggle()

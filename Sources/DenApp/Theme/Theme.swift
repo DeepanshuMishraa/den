@@ -83,6 +83,9 @@ struct Theme: Identifiable, Equatable, Sendable {
     var activeTab: Color { isDark ? Color.white.opacity(0.10) : Color.white.opacity(0.92) }
     var activeTabBorder: Color { isDark ? Color.white.opacity(0.09) : Color.black.opacity(0.06) }
     var hover: Color { isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.045) }
+    /// The capsule the horizontal tabs sit in.
+    var tabTrack: Color { isDark ? Color.white.opacity(0.045) : Color.black.opacity(0.035) }
+    var tabTrackBorder: Color { isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.05) }
     var separator: Color { isDark ? Color.white.opacity(0.13) : Color.black.opacity(0.12) }
     var accent: Color { accentRGB.color }
     /// Text drawn on top of `accent`.

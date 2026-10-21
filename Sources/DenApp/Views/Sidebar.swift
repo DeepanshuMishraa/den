@@ -133,17 +133,25 @@ private struct ActivityList: View {
     }
 }
 
-/// Shows or leaves Activity Mode. On, it sits in a filled circle like a
-/// pressed toggle; off, it wears a dot when a tab off screen has something
-/// for you.
-private struct ActivityModeToggle: View {
+/// Shows or leaves Activity Mode; with horizontal tabs, opens the activity
+/// dropdown instead. On, it sits in a filled circle like a pressed toggle;
+/// off, it wears a dot while any agent is open or a tab off screen has
+/// something for you.
+struct ActivityModeToggle: View {
     @Environment(AppModel.self) private var model
     @State private var hovering = false
 
     var body: some View {
         let theme = model.theme
-        let on = model.activityMode
-        Button { withAnimation(.den) { model.toggleActivityMode() } } label: {
+        let dropdown = model.tabStyle == .horizontal
+        let on = dropdown ? model.showActivityMenu : model.activityMode
+        Button {
+            if dropdown {
+                withAnimation(.denFast) { model.showActivityMenu.toggle() }
+            } else {
+                withAnimation(.den) { model.toggleActivityMode() }
+            }
+        } label: {
             Image(systemName: "eye")
                 .font(.system(size: 14, weight: on ? .semibold : .medium))
                 .foregroundStyle(on ? theme.chromeText : theme.secondaryText)
@@ -155,7 +163,7 @@ private struct ActivityModeToggle: View {
         .buttonStyle(.hitArea)
         .onHover { hovering = $0 }
         .overlay(alignment: .topTrailing) {
-            if !on, model.anyTabWantsAttention {
+            if !on, model.anyTabWantsAttention || model.anyTabHasActivity {
                 Circle()
                     .fill(Color(.sRGB, red: 0.25, green: 0.55, blue: 1, opacity: 1))
                     .frame(width: 6, height: 6)
@@ -163,7 +171,48 @@ private struct ActivityModeToggle: View {
                     .transition(.scale.combined(with: .opacity))
             }
         }
-        .denTooltip(on ? "Leave Activity Mode" : "Activity Mode", command: .toggleActivityMode)
+        .denTooltip(dropdown ? "Activity" : (on ? "Leave Activity Mode" : "Activity Mode"), command: .toggleActivityMode)
+    }
+}
+
+/// Horizontal tabs' Activity Mode: a dropdown under the eye button listing
+/// tabs running agents or reporting status, grouped by session.
+struct ActivityMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let theme = model.theme
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let now = context.date
+            let groups = model.orderedSessions.compactMap { session -> (SessionSummary, [(TabLayout, TabActivity)])? in
+                let rows = model.tabs(in: session.id).compactMap { tab in model.activity(of: tab, now: now).map { (tab, $0) } }
+                return rows.isEmpty ? nil : (session, rows)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if groups.isEmpty {
+                    Text("No processes are reporting activity")
+                        .uiFont(size: 13)
+                        .foregroundStyle(theme.tertiaryText)
+                        .frame(maxWidth: .infinity, minHeight: 96)
+                }
+                ForEach(groups, id: \.0.id) { session, rows in
+                    Text(session.name)
+                        .uiFont(size: 12, weight: .medium)
+                        .foregroundStyle(theme.tertiaryText)
+                        .lineLimit(1)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                    ForEach(rows, id: \.0.id) { tab, activity in
+                        ActivityRow(tab: tab, activity: activity, now: now,
+                                    selected: session.id == model.currentSession && tab.id == model.activeTab,
+                                    style: .menu)
+                    }
+                }
+            }
+            .frame(width: 300, alignment: .leading)
+        }
+        .padding(6)
+        .background(MenuSurface(theme: theme))
     }
 }
 
@@ -230,6 +279,7 @@ struct SidebarRow: View {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
         )
         .contentShape(Rectangle())
+        .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading)
         .onHover { hovering = $0 }
         .onTapGesture { withAnimation(.denFast) { model.selectTab(tab.id) } }
     }
@@ -238,52 +288,75 @@ struct SidebarRow: View {
 /// A tab in Activity Mode, like Rex's: title over what it's doing; on the
 /// right, dots while it works or a pill when it needs you, and its age.
 struct ActivityRow: View {
+    /// The sidebar marks the tab on screen; the dropdown highlights the
+    /// hovered row in the accent, like a menu.
+    enum Style { case sidebar, menu }
+
     let tab: TabLayout
     let activity: TabActivity
     let now: Date
     let selected: Bool
+    var style = Style.sidebar
     @Environment(AppModel.self) private var model
     @State private var hovering = false
 
     var body: some View {
         let theme = model.theme
+        let lit = style == .menu && hovering
+        let dim = lit ? theme.onAccent.opacity(0.75) : theme.tertiaryText
         HStack(spacing: 9) {
-            DeckIcon(deck: model.deck(for: tab), height: 14, badge: !selected && (model.hasActivity(tab) || model.status(of: tab)?.wantsAttention == true), fan: .up)
+            DeckIcon(deck: model.deck(for: tab), height: style == .menu ? 17 : 14,
+                     badge: !selected && (model.hasActivity(tab) || model.status(of: tab)?.wantsAttention == true), fan: .up)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(model.tabTitle(tab))
                         .uiFont(size: 13)
-                        .foregroundStyle(selected ? theme.chromeText : theme.chromeText.opacity(0.88))
+                        .foregroundStyle(lit ? theme.onAccent : (selected ? theme.chromeText : theme.chromeText.opacity(0.88)))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     trailingMark(theme)
+                        .foregroundStyle(lit ? AnyShapeStyle(theme.onAccent) : AnyShapeStyle(.primary))
                 }
                 HStack(spacing: 6) {
                     Text(activity.detail)
                         .uiFont(size: 11.5)
-                        .foregroundStyle(theme.tertiaryText)
+                        .foregroundStyle(dim)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(TabActivity.age(since: activity.since, now: now))
                         .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(theme.tertiaryText)
+                        .foregroundStyle(dim)
                 }
             }
         }
         .padding(.leading, 9)
         .padding(.trailing, 10)
-        .frame(height: 40)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
-        )
+        .frame(height: style == .menu ? 46 : 40)
+        .background(background(theme))
         .contentShape(Rectangle())
+        .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading, enabled: style == .sidebar)
         .onHover { hovering = $0 }
-        .onTapGesture { withAnimation(.denFast) { model.selectTab(tab.id) } }
+        .onTapGesture {
+            withAnimation(.denFast) {
+                model.selectTab(tab.id)
+                if style == .menu { model.showActivityMenu = false }
+            }
+        }
         .contextMenu { Button("Close Tab") { model.closeTab(tab.id) } }
+    }
+
+    @ViewBuilder private func background(_ theme: Theme) -> some View {
+        let shape = RoundedRectangle(cornerRadius: style == .menu ? 8 : 12, style: .continuous)
+        switch style {
+        case .sidebar:
+            shape
+                .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
+                .overlay(shape.strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
+        case .menu:
+            shape.fill(hovering ? theme.accent : .clear)
+        }
     }
 
     @ViewBuilder private func trailingMark(_ theme: Theme) -> some View {
@@ -321,6 +394,7 @@ struct StatusPill: View {
 struct SidebarTitle: View {
     let title: String
     let theme: Theme
+    var weight = Font.Weight.regular
 
     var body: some View {
         Group {
@@ -332,7 +406,7 @@ struct SidebarTitle: View {
                 Text(title).foregroundStyle(theme.chromeText)
             }
         }
-        .uiFont(size: 13)
+        .uiFont(size: 13, weight: weight)
         .lineLimit(1)
         .truncationMode(.tail)
     }

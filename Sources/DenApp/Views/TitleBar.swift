@@ -11,6 +11,10 @@ struct TitleBar: View {
     static let peekHeight: CGFloat = 104
     /// Room for the traffic lights.
     static let leadingInset: CGFloat = 76
+    /// From the window's right edge to the activity dropdown's: past the
+    /// ⌘ and + buttons (26 each, 2 apart) and the bar's 8 of padding, so
+    /// it hangs under the eye button.
+    static let activityMenuTrailing: CGFloat = 8 + 26 + 2 + 26 + 2
 
     var body: some View {
         let peek = min(model.overviewLevel, 1)
@@ -23,6 +27,7 @@ struct TitleBar: View {
             TabStrip()
             Spacer(minLength: 0)
             HStack(spacing: 2) {
+                ActivityModeToggle()
                 IconButton(symbol: "command", size: 13) { model.palette = .root }
                     .denTooltip("Command Palette", command: .commandPalette)
                 IconButton(symbol: "plus", size: 14) { model.newTab() }
@@ -165,6 +170,7 @@ struct TabStrip: View {
                         selection: selection,
                         showDivider: showDivider(after: index, tabs: tabs)
                     )
+                    .tabCard(tab, edge: .bottom, enabled: dragging == nil && model.overview == .none)
                     .onHover { inside in
                         if inside { hovered = tab.id } else if hovered == tab.id { hovered = nil }
                     }
@@ -200,6 +206,15 @@ struct TabStrip: View {
             .animation(.den, value: model.overview)
         }
         .frame(maxWidth: CGFloat(max(model.tabs.count, 1)) * Self.maxTabWidth)
+        // The track the tabs sit in; the peek drawer grows out of it.
+        .background(alignment: .top) {
+            let theme = model.theme
+            let radius = 18 - 6 * min(model.overviewLevel, 1)
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(theme.tabTrack)
+                .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(theme.tabTrackBorder, lineWidth: 0.5))
+                .padding(.vertical, 2)
+        }
     }
 
     private func showDivider(after index: Int, tabs: [TabLayout]) -> Bool {
@@ -224,8 +239,7 @@ struct TabItem: View {
         // 0 → 1 as the peek drawer opens; follows the fingers mid-swipe.
         let peek = min(model.overviewLevel, 1)
         let radius = 15 - 5 * peek
-        // Unfocused tabs only: the one on screen speaks for itself.
-        let status = active ? nil : model.status(of: tab)
+        let status = model.status(of: tab)
         let compact = width < TabStrip.compactTabWidth
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -233,13 +247,16 @@ struct TabItem: View {
                     .overlay(alignment: .bottomTrailing) {
                         if compact, let status { StatusGlyph(indicator: status.indicator, size: 9).offset(x: 4, y: 4) }
                     }
-                if !compact {
+                if !compact, active {
                     // The tab you're on shows its whole title, flowing, rather than "…".
-                    MarqueeText(text: model.tabTitle(tab), flowing: active && peek == 0)
-                        .uiFont(size: 13, weight: active ? .medium : .regular)
-                        .foregroundStyle(active ? theme.chromeText : theme.secondaryText)
+                    MarqueeText(text: model.tabTitle(tab), flowing: peek == 0)
+                        .uiFont(size: 13, weight: .medium)
+                        .foregroundStyle(theme.chromeText)
+                } else if !compact {
+                    SidebarTitle(title: model.tabTitle(tab), theme: theme)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if !compact, hovered || (active && peek == 0) {
+                if !compact, hovered {
                     Button { model.closeTab(tab.id) } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 9.5, weight: .semibold))
@@ -295,7 +312,6 @@ struct TabItem: View {
         .padding(.top, 5)
         .contentShape(Rectangle())
         .onTapGesture { model.selectTab(tab.id) }
-        .denTooltip([model.tabTitle(tab), status?.message].compactMap { $0 }.joined(separator: " — "), command: .goToTab, number: index + 1)
         .animation(.denFast, value: status)
     }
 }
