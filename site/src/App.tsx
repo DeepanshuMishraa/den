@@ -1,4 +1,4 @@
-import { AppleLogo } from './brand'
+import { DownloadButton } from './DownloadButton'
 import { CopyCommand } from './CopyCommand'
 import { commands, features, links, shortcuts, steps } from './content'
 import { Glyph } from './Glyphs'
@@ -33,10 +33,7 @@ export default function App() {
         </p>
         <Timeline />
         <div className="actions reveal" ref={reveal}>
-          <a className="button" href={links.download}>
-            <AppleLogo />
-            download for mac
-          </a>
+          <DownloadButton />
           <span>
             apple silicon · macOS 15+ · <a href={links.repo}>source</a>
           </span>
