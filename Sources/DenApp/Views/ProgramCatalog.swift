@@ -123,7 +123,7 @@ extension ProgramKind {
         add(["opencode"], "opencode", "OpenCode", 0x2B2B2B, 0x0A0A0A, .brand(asset: "opencode", template: true))
         add(["aider"], "aider", "Aider", 0x22C55E, 0x15803D, .monogram("ai"))
         add(["amp"], "amp", "Amp", 0xF6553F, 0xC2301F, .symbol("bolt.fill"))
-        add(["cursor-agent", "cursor"], "cursor", "Cursor", 0x2E2E2E, 0x0B0B0B, .brand(asset: "cursor", template: true))
+        add(["cursor-agent", "cursor", "agent"], "cursor", "Cursor", 0x2E2E2E, 0x0B0B0B, .brand(asset: "cursor", template: true))
         add(["copilot", "github-copilot-cli"], "copilot", "Copilot", 0x3B3F46, 0x16181C, .brand(asset: "copilot", template: true))
         add(["goose"], "goose", "Goose", 0x1F1F1F, 0x000000, .monogram("g"))
         add(["crush"], "crush", "Crush", 0xFF6AC1, 0xB43A8C, .symbol("heart.fill"))
@@ -197,7 +197,8 @@ extension ProgramKind {
         add(["podman"], "podman", "Podman", 0xA54BC0, 0x6B2385, .symbol("shippingbox.fill"))
         add(["kubectl", "k9s", "helm", "kubectx", "kubens", "minikube", "kind"], "kubernetes", "Kubernetes", 0x4F86EC, 0x2350B8, .symbol("steeringwheel"))
         add(["terraform", "tofu", "terragrunt"], "terraform", "Terraform", 0x8F5CDB, 0x5C2DAA, .symbol("square.stack.3d.up.fill"))
-        add(["aws", "gcloud", "az", "flyctl", "fly", "vercel", "wrangler", "railway"], "cloud", "Cloud", 0x60A5FA, 0x2563EB, .symbol("cloud.fill"))
+        add(["aws", "gcloud", "az", "flyctl", "fly", "wrangler", "railway"], "cloud", "Cloud", 0x60A5FA, 0x2563EB, .symbol("cloud.fill"))
+        add(["vercel"], "vercel", "Vercel", 0x2B2B2B, 0x0A0A0A, .brand(asset: "vercel", template: true))
 
         // Remote and multiplexers.
         add(["ssh", "mosh", "mosh-client", "et", "autossh", "sshpass"], "ssh", "SSH", 0x475569, 0x1E293B, .symbol("globe"))
