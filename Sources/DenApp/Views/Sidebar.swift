@@ -24,36 +24,33 @@ struct Sidebar: View {
             .background(TitleBarBackground())
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 9) {
-                        Image(systemName: "laptopcomputer").font(.system(size: 13.5))
-                        Text("This Mac").uiFont(size: 13.5, weight: .semibold)
-                    }
-                    .foregroundStyle(theme.chromeText)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 6)
-                    .padding(.bottom, 4)
-
-                    // Like Rex, the list blurs across when the mode flips.
-                    Group {
-                        if model.activityMode {
-                            ActivityList()
-                                .transition(.blurReplace)
-                        } else {
-                            VStack(alignment: .leading, spacing: 2) {
-                                ForEach(model.orderedSessions, id: \.id) { session in
-                                    SessionHeader(session: session)
-                                    ForEach(model.tabs(in: session.id), id: \.id) { tab in
-                                        SidebarRow(tab: tab, selected: session.id == model.currentSession && tab.id == model.activeTab)
+                // Like Rex, the list blurs across when the mode flips.
+                Group {
+                    if model.activityMode {
+                        ActivityList()
+                            .transition(.blurReplace)
+                    } else {
+                        // Each machine, then its sessions and their tabs.
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach([HostID.local] + model.remoteHosts.map { .remote($0.id) }, id: \.self) { host in
+                                SidebarHostHeader(host: host)
+                                if !model.isCollapsed(host) {
+                                    ForEach(model.sessions(on: host), id: \.id) { session in
+                                        SessionHeader(session: session)
+                                        ForEach(model.tabs(in: session.id), id: \.id) { tab in
+                                            SidebarRow(tab: tab, selected: session.id == model.currentSession && tab.id == model.activeTab)
+                                        }
                                     }
                                 }
                             }
-                            .transition(.blurReplace)
                         }
+                        .transition(.blurReplace)
                     }
                 }
                 .padding(.horizontal, 8)
+                .padding(.top, 4)
                 .animation(.den, value: model.orderedSessions.map(\.id))
+                .animation(.den, value: model.collapsedHosts)
                 .animation(.den, value: model.activityMode)
             }
             .scrollIndicators(.never)
@@ -71,6 +68,100 @@ struct Sidebar: View {
             .frame(height: 36)
         }
         .frame(width: Self.width)
+    }
+}
+
+/// A machine over its sessions: This Mac or a remote host with its state.
+/// Tap to fold it away (remembered across launches); a host that isn't
+/// connected offers to try again, or to log in.
+private struct SidebarHostHeader: View {
+    let host: HostID
+    @Environment(AppModel.self) private var model
+    @State private var hovering = false
+
+    var body: some View {
+        let theme = model.theme
+        let collapsed = model.isCollapsed(host)
+        HStack(spacing: 9) {
+            icon(theme)
+                .font(.system(size: 13.5))
+                .frame(width: 16)
+            Text(model.hostLabel(host))
+                .uiFont(size: 13.5, weight: .semibold)
+                .foregroundStyle(theme.chromeText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if case .remote(let id) = host, let state = model.remoteStates[id], !state.isConnected {
+                if hovering, let action = recovery(id, state) {
+                    IconButton(symbol: action.symbol, size: 11) { action.run() }
+                        .denTooltip(action.label)
+                } else {
+                    Text(HostStatus.short(state))
+                        .uiFont(size: 11)
+                        .foregroundStyle(theme.tertiaryText)
+                        .lineLimit(1)
+                }
+            }
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(theme.tertiaryText)
+                .rotationEffect(.degrees(collapsed ? -90 : 0))
+                .opacity(hovering || collapsed ? 1 : 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .padding(.top, host == .local ? 0 : 8)
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.den) { model.toggleCollapsed(host) } }
+        .onHover { hovering = $0 }
+        .help(helpText)
+        .contextMenu {
+            if case .remote(let id) = host {
+                if model.remoteStates[id]?.isConnected == true {
+                    Button("New Session Here") { model.createSession(name: "", on: host) }
+                    Button("Disconnect") { model.disconnectHost(id) }
+                } else {
+                    Button("Try Again") { model.connectRemote(id, reveal: true) }
+                }
+                Button("Rename Host…") { model.palette = .renameHost(id) }
+                Button("Remove Host", role: .destructive) { model.removeRemoteHost(id) }
+            } else {
+                Button("New Session") { model.createSession(name: "", on: .local) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func icon(_ theme: Theme) -> some View {
+        switch host {
+        case .local:
+            Image(systemName: "laptopcomputer").foregroundStyle(theme.chromeText)
+        case .remote(let id):
+            switch model.remoteStates[id] {
+            case .connected?:
+                Image(systemName: "server.rack").foregroundStyle(theme.chromeText)
+            case .connecting?, .downloading?, .uploading?:
+                ProgressView().controlSize(.mini)
+            case .failed?, .reconnecting?, .needsLogin?, .needsRestart?:
+                Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+            case .disconnected?, nil:
+                Image(systemName: "server.rack").foregroundStyle(theme.tertiaryText)
+            }
+        }
+    }
+
+    private func recovery(_ id: RemoteHost.ID, _ state: RemoteState) -> (symbol: String, label: String, run: () -> Void)? {
+        switch state {
+        case .needsLogin: ("key", "Log In…", { model.requestLogin(id) })
+        case .failed, .reconnecting, .disconnected, .needsRestart: ("arrow.clockwise", "Try Again", { model.connectRemote(id, reveal: true) })
+        case .connecting, .downloading, .uploading, .connected: nil
+        }
+    }
+
+    private var helpText: String {
+        guard case .remote(let id) = host, let state = model.remoteStates[id] else { return "" }
+        return HostStatus.detail(state)
     }
 }
 
@@ -279,9 +370,11 @@ struct SidebarRow: View {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
         )
         .contentShape(Rectangle())
+        // Before tabCard: its tap (which hides the card) sits on this view,
+        // and a tap attached outside it would never fire.
+        .onTapGesture { withAnimation(.denFast) { model.selectTab(tab.id) } }
         .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading)
         .onHover { hovering = $0 }
-        .onTapGesture { withAnimation(.denFast) { model.selectTab(tab.id) } }
     }
 }
 
@@ -336,14 +429,14 @@ struct ActivityRow: View {
         .frame(height: style == .menu ? 46 : 40)
         .background(background(theme))
         .contentShape(Rectangle())
-        .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading, enabled: style == .sidebar)
-        .onHover { hovering = $0 }
         .onTapGesture {
             withAnimation(.denFast) {
                 model.selectTab(tab.id)
                 if style == .menu { model.showActivityMenu = false }
             }
         }
+        .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading, enabled: style == .sidebar)
+        .onHover { hovering = $0 }
         .contextMenu { Button("Close Tab") { model.closeTab(tab.id) } }
     }
 

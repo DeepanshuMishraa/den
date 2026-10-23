@@ -73,6 +73,8 @@ enum DenCommand: String, CaseIterable {
     case previousSession = "previous_session"
     case nextSession = "next_session"
     case closeSession = "close_session"
+    case nextHost = "next_host"
+    case previousHost = "previous_host"
 
     case nextTab = "next_tab"
     case previousTab = "previous_tab"
@@ -152,6 +154,8 @@ enum DenCommand: String, CaseIterable {
         case .previousSession: "Previous Session"
         case .nextSession: "Next Session"
         case .closeSession: "Close Session"
+        case .nextHost: "Next Machine"
+        case .previousHost: "Previous Machine"
         case .nextTab: "Show Next Tab"
         case .previousTab: "Show Previous Tab"
         case .moveTabLeft: "Move Tab Left"
@@ -221,6 +225,8 @@ enum DenCommand: String, CaseIterable {
         case .goToSession: "leader+digit"
         case .previousSession: "opt+cmd+["
         case .nextSession: "opt+cmd+]"
+        case .nextHost: "leader+]"
+        case .previousHost: "leader+["
         case .nextTab: "cmd+shift+]"
         case .previousTab: "cmd+shift+["
         case .moveTabLeft: "opt+cmd+shift+["
@@ -238,9 +244,7 @@ enum DenCommand: String, CaseIterable {
         switch self {
         case .goToTab:
             if number >= 1, number <= model.tabs.count { model.selectTab(at: number - 1) }
-        case .goToSession:
-            let sessions = model.orderedSessions
-            if sessions.indices.contains(number - 1) { model.switchSession(sessions[number - 1].id) }
+        case .goToSession: model.goToSession(number)
         default: perform(model)
         }
     }
@@ -320,6 +324,8 @@ enum DenCommand: String, CaseIterable {
         case .previousSession: model.cycleSession(-1)
         case .nextSession: model.cycleSession(1)
         case .closeSession: model.currentSession.map(model.killSession)
+        case .nextHost: model.cycleHost(1)
+        case .previousHost: model.cycleHost(-1)
         case .nextTab: model.cycleTab(1)
         case .previousTab: model.cycleTab(-1)
         case .moveTabLeft: model.moveActiveTab(-1)

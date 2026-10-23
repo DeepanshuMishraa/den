@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])))
         main.addItem(menu("Session", items([
             .changeSession, .renameSession, .renameTab, .tidyTabTitle, nil, .previousSession, .nextSession, nil,
-            .goToSession, nil,
+            .goToSession, nil, .previousHost, .nextHost, nil,
             .addRemoteHost, .closeSession,
         ])))
         let windowMenu = menu("Window", items([

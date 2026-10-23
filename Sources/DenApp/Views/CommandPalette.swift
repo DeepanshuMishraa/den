@@ -460,13 +460,16 @@ struct CommandPalette: View {
                             checked: path == current, action: .run { model.setDefaultShell(path) })
             }
         case .changeSession:
-            return model.orderedSessions.enumerated().map { i, s in
+            // Numbers count the machine on screen, like go_to_session.
+            let here = model.sessions(on: model.currentHost).map(\.id)
+            return model.orderedSessions.map { s in
                 let tabs = model.tabs(in: s.id)
                 let host = model.sessionHosts[s.id] ?? .local
+                let number = here.firstIndex(of: s.id).map { $0 + 1 }
                 return PaletteItem(id: "session-\(s.id)", title: s.name,
                                    subtitle: "\(model.hostLabel(host)) · \(tabs.count) \(tabs.count == 1 ? "tab" : "tabs")",
                                    subtitleIcon: Self.hostIcon(host), deck: tabs.first.map(model.deck),
-                                   shortcut: model.config.shortcutLabel(.goToSession, number: i + 1), checked: s.id == model.currentSession,
+                                   shortcut: number.flatMap { model.config.shortcutLabel(.goToSession, number: $0) }, checked: s.id == model.currentSession,
                                    action: .run { model.switchSession(s.id) })
             }
         case .findTab:

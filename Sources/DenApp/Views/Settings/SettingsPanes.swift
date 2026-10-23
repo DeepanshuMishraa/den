@@ -587,7 +587,7 @@ struct ShortcutSettings: View {
             ("Panes", [.splitRight, .splitDown, .zoomPane, .nextPane, .previousPane, .focusPaneLeft, .focusPaneDown, .focusPaneUp,
                        .focusPaneRight, .resizePaneLeft, .resizePaneDown, .resizePaneUp, .resizePaneRight, .movePaneLeft,
                        .movePaneRight, .movePaneUp, .movePaneDown]),
-            ("Sessions", [.changeSession, .goToSession, .renameSession, .previousSession, .nextSession, .closeSession, .addRemoteHost]),
+            ("Sessions", [.changeSession, .goToSession, .renameSession, .previousSession, .nextSession, .closeSession, .previousHost, .nextHost, .addRemoteHost]),
             ("Tabs", [.renameTab, .tidyTabTitle, .nextTab, .previousTab, .moveTabLeft, .moveTabRight, .goToTab, .lastTab]),
             ("Window", [.minimize]),
         ]

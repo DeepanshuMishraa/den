@@ -28,8 +28,14 @@ struct SessionMenu: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         let all = model.orderedSessions
         let numbered = Array(all.enumerated())
+        // go_to_session counts the machine on screen only, so only its
+        // sessions show a number.
+        let here = model.sessions(on: model.currentHost).map(\.id)
         func sessionRows(_ list: [(offset: Int, element: SessionSummary)]) -> [Row] {
-            list.map { Row.session($0.element, shortcut: $0.offset < 9 ? $0.offset + 1 : nil) }
+            list.map { item in
+                let n = here.firstIndex(of: item.element.id)
+                return Row.session(item.element, shortcut: n.flatMap { $0 < 9 ? $0 + 1 : nil })
+            }
         }
         var rows: [Row]
         if q.isEmpty {
@@ -114,9 +120,10 @@ struct SessionMenu: View {
         .onKeyPress(.upArrow) { selection = selectable(max(selection - 1, 0), step: -1, in: rows); return .handled }
         .onKeyPress(.escape) { model.showSessionMenu = false; return .handled }
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
+            let here = model.sessions(on: model.currentHost)
             guard press.modifiers.contains(.command), let n = Int(press.characters), n >= 1,
-                  model.orderedSessions.indices.contains(n - 1) else { return .ignored }
-            model.switchSession(model.orderedSessions[n - 1].id)
+                  here.indices.contains(n - 1) else { return .ignored }
+            model.switchSession(here[n - 1].id)
             model.showSessionMenu = false
             return .handled
         }

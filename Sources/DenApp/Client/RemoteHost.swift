@@ -4,6 +4,14 @@ import Foundation
 enum HostID: Hashable, Sendable {
     case local
     case remote(RemoteHost.ID)
+
+    /// Stable across launches, for remembering per-machine UI state.
+    var storageKey: String {
+        switch self {
+        case .local: "local"
+        case .remote(let id): id.uuidString
+        }
+    }
 }
 
 /// A saved SSH destination running dend. Holds no secrets: passwords live in

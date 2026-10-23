@@ -216,6 +216,8 @@ import DenVT
         #expect(config.afterLeader(keyCode: 0x0F, unmodified: "r", flags: .shift) == .command(.renameSession))
         #expect(config.afterLeader(keyCode: 0x14, unmodified: "3", flags: []) == .command(.goToSession))
         #expect(config.afterLeader(keyCode: 0x07, unmodified: "x", flags: []) == .command(.addRemoteHost))
+        #expect(config.afterLeader(keyCode: 0x1E, unmodified: "]", flags: []) == .command(.nextHost))
+        #expect(config.afterLeader(keyCode: 0x21, unmodified: "[", flags: []) == .command(.previousHost))
         #expect(config.afterLeader(keyCode: 0x05, unmodified: "g", flags: []) == nil)
         #expect(config.keycaps(.newTab) == [["⌥", "Space"], ["N"]])
         #expect(config.keycaps(.goToTab, number: 12) == [["⌘", "1", "2"]])

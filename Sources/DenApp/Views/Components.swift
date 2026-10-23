@@ -231,12 +231,22 @@ struct ToastView: View {
             : Color(red: 0.03, green: 0.48, blue: 0.24)
     }
 
+    private var orange: Color {
+        theme.isDark ? Color(red: 1, green: 0.7, blue: 0.3) : Color(red: 0.72, green: 0.4, blue: 0)
+    }
+
+    private var red: Color {
+        theme.isDark ? Color(red: 1, green: 0.45, blue: 0.45) : Color(red: 0.78, green: 0.13, blue: 0.13)
+    }
+
     /// The toast's color: green for confirmations, the theme's accent for
-    /// notices.
+    /// notices, orange for warnings, red for failures.
     private var tint: Color {
         switch toast.tone {
         case .success: green
         case .notice: theme.accent
+        case .warning: orange
+        case .danger: red
         }
     }
 
@@ -247,11 +257,23 @@ struct ToastView: View {
         ToastLayout(spacing: 5, maxWidth: 636) {
             HStack(spacing: 10) {
                 badge.padding(.leading, 2)
-                TickerText(text: toast.message, font: font.weight(.semibold), color: toast.actions.isEmpty ? theme.chromeText : tint)
-                    // Beside buttons the message gets a short window and
-                    // ticks through it, keeping the pill compact.
-                    .frame(maxWidth: toast.actions.isEmpty ? nil : 240, alignment: .leading)
-                    .layoutPriority(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    TickerText(text: toast.message, font: font.weight(.semibold), color: titleColor)
+                    if let detail = toast.detail {
+                        Text(detail)
+                            .font(font.weight(.regular))
+                            .foregroundStyle(theme.secondaryText)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .help(detail)
+                    }
+                }
+                // Beside buttons the message gets a short window and ticks
+                // through it, keeping the pill compact; a detail line
+                // needs room to say why.
+                .frame(maxWidth: toast.actions.isEmpty ? nil : (toast.detail == nil ? 240 : 380), alignment: .leading)
+                .layoutPriority(1)
                 if !toast.actions.isEmpty {
                     HStack(spacing: 8) {
                         ForEach(Array(buttons.enumerated()), id: \.element.id) { index, action in
@@ -290,9 +312,23 @@ struct ToastView: View {
         .background(toastGlass)
     }
 
+    /// Warnings and failures always read in their color; other toasts only
+    /// beside buttons.
+    private var titleColor: Color {
+        switch toast.tone {
+        case .warning, .danger: tint
+        case .success, .notice: toast.actions.isEmpty ? theme.chromeText : tint
+        }
+    }
+
     @ViewBuilder
     private var badge: some View {
         switch toast.tone {
+        case .warning, .danger:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 20, height: 20)
         case .success:
             ZStack {
                 Circle().fill(green)

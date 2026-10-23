@@ -140,13 +140,21 @@ enum ConfigManual {
                               end, page_up, page_down, f1 ... f12
                               digit (also 1..9): any number key; only for
                               go_to_tab and go_to_session, the number picks
-                              the target
+                              the target (sessions count per machine)
                 "cmd++" binds plus. Case doesn't matter.
 
             \(CLIOutput.bold("Leader"))
                 "leader+n" means: press the leader, let go, then n. The leader is
                 opt+space unless [keys] leader says otherwise. Pressing the
                 leader twice sends it to the program.
+
+            \(CLIOutput.bold("Machines"))
+                Session commands stay on the machine on screen (This Mac or a
+                remote host): go_to_session's number counts that machine's
+                sessions only, and next_session/previous_session cycle through
+                them. next_host/previous_host (leader+] and leader+[) move to
+                the next machine with sessions, back to the one last shown
+                there. The session menu (change_session) lists every machine.
 
             \(CLIOutput.bold("Commands and their defaults"))
             \(commandTable)

@@ -155,10 +155,16 @@ final class AppModel {
         enum Tone: Equatable {
             case success
             case notice(symbol: String)
+            /// Orange: something needs a look but nothing is broken.
+            case warning
+            /// Red: something failed.
+            case danger
         }
 
         let id = UUID()
         var message: String
+        /// A second, dimmer line under the message: the reason, for failures.
+        var detail: String?
         /// Download/install fraction 0…1, if one is in flight.
         var progress: Double?
         /// Buttons the toast offers; empty for plain confirmations.
@@ -174,14 +180,14 @@ final class AppModel {
     /// Handlers for the current toast's buttons, by action id.
     @ObservationIgnored private var toastHandlers: [UUID: () -> Void] = [:]
 
-    func showToast(_ message: String) {
+    func showToast(_ message: String, tone: Toast.Tone = .success) {
         // A transient note must not bury an action prompt (notably the
         // update's Restart button, which Sparkle is waiting on): show it
         // briefly, then put the prompt back.
         if let current = toast, !current.actions.isEmpty {
             let restore = current
             let restoreHandlers = toastHandlers
-            let next = Toast(message: message)
+            let next = Toast(message: message, tone: tone)
             toastHandlers = [:]
             toast = next
             Task { [weak self] in
@@ -193,7 +199,7 @@ final class AppModel {
             return
         }
         toastHandlers = [:]
-        let next = Toast(message: message)
+        let next = Toast(message: message, tone: tone)
         toast = next
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1600))
@@ -224,7 +230,7 @@ final class AppModel {
     /// may name a `cmd+shift+u`-style shortcut: it is shown in the button
     /// (as "⇧⌘U") and fires the button from `handleKey`.
     /// `dismiss` adds a round ✕ after the buttons, running its handler too.
-    func showActionToast(_ message: String, tone: Toast.Tone = .success,
+    func showActionToast(_ message: String, tone: Toast.Tone = .success, detail: String? = nil,
                          actions: [(label: String, shortcut: String?, handler: () -> Void)],
                          dismiss: (shortcut: String?, handler: () -> Void)? = nil) {
         toastHandlers = [:]
@@ -242,7 +248,7 @@ final class AppModel {
         }
         for (label, shortcut, handler) in actions { add(label, shortcut, .button, handler) }
         if let dismiss { add("Dismiss", dismiss.shortcut, .dismiss, dismiss.handler) }
-        toast = Toast(message: message, actions: toastActions, tone: tone)
+        toast = Toast(message: message, detail: detail, actions: toastActions, tone: tone)
     }
 
     func performToastAction(_ id: UUID) {
@@ -391,6 +397,14 @@ final class AppModel {
     /// the full width.
     var sidebarCollapsed: Bool { didSet { defaults.set(sidebarCollapsed, forKey: "sidebarCollapsed") } }
     var sidebarSide: SidebarSide { didSet { defaults.set(sidebarSide.rawValue, forKey: "sidebarSide") } }
+    /// Machines folded away in the sidebar, by `HostID.storageKey`.
+    private(set) var collapsedHosts: Set<String> { didSet { defaults.set(collapsedHosts.sorted(), forKey: "collapsedHosts") } }
+
+    func isCollapsed(_ host: HostID) -> Bool { collapsedHosts.contains(host.storageKey) }
+
+    func toggleCollapsed(_ host: HostID) {
+        if collapsedHosts.remove(host.storageKey) == nil { collapsedHosts.insert(host.storageKey) }
+    }
 
     func toggleSidebar() {
         if tabStyle == .vertical { sidebarCollapsed.toggle() } else { tabStyle = .vertical }
@@ -533,6 +547,7 @@ final class AppModel {
         tabStyle = TabStyle(rawValue: d.string(forKey: "tabStyle") ?? "") ?? .horizontal
         sidebarCollapsed = d.bool(forKey: "sidebarCollapsed")
         sidebarSide = SidebarSide(rawValue: d.string(forKey: "sidebarSide") ?? "") ?? .left
+        collapsedHosts = Set(d.stringArray(forKey: "collapsedHosts") ?? [])
         activityMode = d.bool(forKey: "activityMode")
         zenMode = d.bool(forKey: "zenMode")
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
@@ -821,7 +836,8 @@ final class AppModel {
             case .remote(let id):
                 remoteStates[id] = .connected(hostName: name)
                 retryDelays[id] = nil
-                endSetupProgress(id, "Connected to \(remoteHost(id)?.label ?? name)")
+                announcedFailures.remove(id)
+                endHostToast(id, "Connected to \(remoteHost(id)?.label ?? name)")
                 if version >= 5 {
                     Task { [weak self] in
                         if let (home, _) = await self?.listDirectory("~", on: host) { self?.hostHomes[host] = home }
@@ -1011,7 +1027,7 @@ final class AppModel {
     }
 
     func sessions(on host: HostID) -> [SessionSummary] {
-        orderedSessions.filter { sessionHosts[$0.id] == host }
+        orderedSessions.filter { (sessionHosts[$0.id] ?? .local) == host }
     }
 
     /// Adds a host from what was typed (`user@host:port`) and connects;
@@ -1047,6 +1063,7 @@ final class AppModel {
     func removeRemoteHost(_ id: RemoteHost.ID) {
         guard let host = remoteHost(id) else { return }
         disconnectRemote(id)
+        endHostToast(id)
         remoteHosts.removeAll { $0.id == id }
         RemoteHostStore.save(remoteHosts)
         SSHPasswords.delete(for: host.account)
@@ -1066,7 +1083,11 @@ final class AppModel {
     /// `reveal` brings the host's session on screen once it's up.
     func connectRemote(_ id: RemoteHost.ID, reveal: Bool) {
         guard let host = remoteHost(id) else { return }
-        if reveal { revealOnConnect.insert(id) }
+        if reveal {
+            revealOnConnect.insert(id)
+            // Asked for again: a new failure gets its own toast.
+            announcedFailures.remove(id)
+        }
         // An explicit connect re-arms launch auto-connect and retries; a
         // disconnect clears it (see disconnectHost), so it sticks.
         if let i = remoteHosts.firstIndex(where: { $0.id == id }), !remoteHosts[i].autoConnect {
@@ -1093,6 +1114,7 @@ final class AppModel {
     func disconnectHost(_ id: RemoteHost.ID) {
         revealOnConnect.remove(id)
         disconnectRemote(id)
+        endHostToast(id)
         retryDelays[id] = nil
         // Persisted: a disconnected host stays disconnected across restarts
         // until explicitly connected again.
@@ -1116,15 +1138,17 @@ final class AppModel {
     /// Hosts whose dend boot persistence was ensured this launch (fresh
     /// install or persistCommand), so it isn't re-run on every reconnect.
     @ObservationIgnored private var persistenceEnsured: Set<RemoteHost.ID> = []
-    /// The progress toast each host's dend setup is showing.
-    @ObservationIgnored private var setupToasts: [RemoteHost.ID: UUID] = [:]
+    /// The toast each host has up: its dend setup's progress, or a failure.
+    @ObservationIgnored private var hostToasts: [RemoteHost.ID: UUID] = [:]
+    /// Hosts whose current failure streak was already toasted.
+    @ObservationIgnored private var announcedFailures: Set<RemoteHost.ID> = []
 
     /// Ends the connection and invalidates attempts and retries in flight.
     private func disconnectRemote(_ id: RemoteHost.ID) {
         attempts[id, default: 0] += 1
         setups.removeValue(forKey: id)?.cancel()
         channels.removeValue(forKey: id)?.terminate()
-        endSetupProgress(id)
+        endHostToast(id, keepFailure: true)
         if connections[.remote(id)] != nil { connectionClosed(.remote(id), "disconnected") }
     }
 
@@ -1199,7 +1223,9 @@ final class AppModel {
         }
 
         remoteStates[id] = .connecting(step: "Attaching to \(host.address)…")
-        if setupToasts[id] != nil { showSetupProgress(id, "Starting dend on \(host.label)…", 1) }
+        if let toastID = hostToasts[id], toast?.id == toastID, toast?.progress != nil {
+            showSetupProgress(id, "Starting dend on \(host.label)…", 1)
+        }
         switch ssh.openChannel(RemoteSetup.streamCommand) {
         case .failure(let failure):
             setupFailed(host, failure)
@@ -1212,24 +1238,41 @@ final class AppModel {
         }
     }
 
-    /// Mirrors a host's dend download and install into a progress toast,
-    /// for hosts you're waiting on (not background reconnects).
+    /// Mirrors a host's dend download and install into a progress toast.
     private func showSetupProgress(_ id: RemoteHost.ID, _ message: String, _ fraction: Double) {
-        guard revealOnConnect.contains(id) else { return }
         showUpdateProgress(message, progress: fraction)
-        if let toast { setupToasts[id] = toast.id }
+        if let toast, toast.progress != nil { hostToasts[id] = toast.id }
     }
 
-    /// Takes down a host's setup toast, if it's still the one on screen,
-    /// showing `message` in its place.
-    private func endSetupProgress(_ id: RemoteHost.ID, _ message: String? = nil) {
-        guard let toastID = setupToasts.removeValue(forKey: id), toast?.id == toastID else { return }
-        if let message { showToast(message) } else { dismissToast() }
+    /// Takes down a host's toast, if it's still the one on screen, showing
+    /// `message` in its place. `keepFailure` leaves a failure toast up, so
+    /// it isn't swept away by the retry that follows it.
+    private func endHostToast(_ id: RemoteHost.ID, _ message: String? = nil, keepFailure: Bool = false) {
+        guard let toastID = hostToasts[id], let current = toast, current.id == toastID else {
+            hostToasts[id] = nil
+            return
+        }
+        if keepFailure, current.progress == nil { return }
+        hostToasts[id] = nil
+        // Dismissed first: showToast would put an action toast back after it.
+        dismissToast()
+        if let message { showToast(message) }
+    }
+
+    /// "Couldn't connect" with the reason and Try Again, once per failure
+    /// streak; retries in the background don't bring it back.
+    private func showHostFailure(_ host: RemoteHost, _ reason: String) {
+        guard !announcedFailures.contains(host.id) else { return }
+        announcedFailures.insert(host.id)
+        showActionToast("Couldn't connect to \(host.label)", tone: .danger, detail: reason,
+                        actions: [(label: "Try Again", shortcut: nil, handler: { [weak self] in self?.connectRemote(host.id, reveal: true) })],
+                        dismiss: (shortcut: nil, handler: {}))
+        if let toast { hostToasts[host.id] = toast.id }
     }
 
     private func setupFailed(_ host: RemoteHost, _ failure: SSH.Failure) {
         let id = host.id
-        endSetupProgress(id)
+        endHostToast(id)
         switch failure {
         case .authentication:
             remoteStates[id] = .needsLogin
@@ -1243,18 +1286,22 @@ final class AppModel {
             )
         case .unreachable(let detail):
             // Hosts that are down or asleep get retried until they're up.
-            scheduleRetry(id, reason: detail.isEmpty ? "\(host.address) isn't answering." : detail)
+            let reason = detail.isEmpty ? "\(host.address) isn't answering." : detail
+            // Said out loud only when you asked for this host; launch
+            // auto-connects show it in the sidebar instead.
+            if revealOnConnect.contains(id) { showHostFailure(host, "Can't reach \(host.address). \(reason) Den keeps retrying.") }
+            scheduleRetry(id, reason: reason)
         case .hostKeyChanged, .remote, .launch:
             revealOnConnect.remove(id)
             remoteStates[id] = .failed(failure.description)
-            lastError = "\(host.label): \(failure.description)"
+            showHostFailure(host, failure.description)
         }
     }
 
     private func remoteClosed(_ id: RemoteHost.ID, attempt: Int, reason: String, channel: SSH.Channel) {
         guard attempts[id] == attempt else { return }
         channels[id] = nil
-        endSetupProgress(id)
+        endHostToast(id, keepFailure: true)
         connectionClosed(.remote(id), reason)
         let said = channel.lastError
         scheduleRetry(id, reason: said.isEmpty ? "The connection closed. Sessions keep running on the host." : said)
@@ -1365,6 +1412,9 @@ final class AppModel {
 
     var orderedSessions: [SessionSummary] { sessions.filter { layouts[$0.id] != nil } }
 
+    /// The session last shown on each machine, where `cycleHost` returns to.
+    @ObservationIgnored private var lastSessions: [HostID: SessionID] = [:]
+
     func switchSession(_ id: SessionID) {
         guard layouts[id] != nil || pendingSession == id else { return }
         awaitingRemembered = nil
@@ -1374,15 +1424,39 @@ final class AppModel {
     /// Shows a session without giving up on reopening the remembered one.
     private func show(_ id: SessionID) {
         currentSession = id
+        lastSessions[sessionHosts[id] ?? .local] = id
         zoomedPane = nil
         Self.writeRememberedSession(id)
         clearActivity()
     }
 
+    /// Next/previous session on the machine on screen; other machines'
+    /// sessions are a `cycleHost` away.
     func cycleSession(_ delta: Int) {
-        let list = orderedSessions
+        let list = sessions(on: currentHost)
         guard let i = list.firstIndex(where: { $0.id == currentSession }), !list.isEmpty else { return }
         switchSession(list[(i + delta + list.count) % list.count].id)
+    }
+
+    /// go_to_session: the `number`th session (1-based) on the machine on screen.
+    func goToSession(_ number: Int) {
+        let list = sessions(on: currentHost)
+        if list.indices.contains(number - 1) { switchSession(list[number - 1].id) }
+    }
+
+    /// Machines with sessions to show, This Mac first, then saved hosts in order.
+    var hostsWithSessions: [HostID] {
+        ([HostID.local] + remoteHosts.map { .remote($0.id) }).filter { !sessions(on: $0).isEmpty }
+    }
+
+    /// Moves to the next/previous machine, back to the session last shown there.
+    func cycleHost(_ delta: Int) {
+        let hosts = hostsWithSessions
+        guard hosts.count > 1, let i = hosts.firstIndex(of: currentHost) else { return }
+        let target = hosts[(i + delta + hosts.count) % hosts.count]
+        let list = sessions(on: target)
+        let last = lastSessions[target].flatMap { id in list.first { $0.id == id } }
+        if let session = last ?? list.first { switchSession(session.id) }
     }
 
     /// A new session on `host`, by default the host of the session on screen.
