@@ -101,11 +101,43 @@ jobs:
       # Same as a local release build: the TermyEngine xcframework, then
       # Den.app. Version is stamped into the Info.plist before signing, so
       # the signature stays valid.
+      # A stable (self-signed) identity keeps dend's macOS privacy grants
+      # (Full Disk Access, Downloads…) across updates; an ad-hoc signature
+      # changes every build, so macOS silently drops them. Without the
+      # secret (pull requests from forks) the build stays ad-hoc.
+      - name: Import signing certificate
+        id: signing
+        env:
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+          SIGNING_IDENTITY: ${{ vars.SIGNING_IDENTITY }}
+        run: |
+          if [[ -z "$SIGNING_CERT_P12" ]]; then
+            echo "No SIGNING_CERT_P12 secret; signing ad-hoc." >&2
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$SIGNING_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$SIGNING_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "identity=${SIGNING_IDENTITY:-Den Signing}" >> "$GITHUB_OUTPUT"
+
       - name: Build Den.app
         env:
           DEN_VERSION: ${{ steps.version.outputs.version }}
           DEN_SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
-        run: scripts/bundle.sh release
+          DEN_SIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          scripts/bundle.sh release
+          # Fails the build if dend didn't get the identity.
+          codesign -dvv dist/Den.app/Contents/MacOS/dend 2>&1 | grep -E 'Authority|Signature'
 
       # The app is ad-hoc signed, not notarized. Gatekeeper treats it as
       # unsigned on other Macs (right-click > Open on first launch).
