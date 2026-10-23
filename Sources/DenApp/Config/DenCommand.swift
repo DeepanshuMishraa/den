@@ -112,7 +112,7 @@ enum DenCommand: String, CaseIterable {
         case .findTab: "Find Tab…"
         case .findSession: "Find Session…"
         case .changeTheme: "Change Theme…"
-        case .changeFont: "Change Font…"
+        case .changeFont: "Change Terminal Font…"
         case .fontBigger: "Bigger"
         case .fontSmaller: "Smaller"
         case .fontReset: "Actual Size"
@@ -275,7 +275,7 @@ enum DenCommand: String, CaseIterable {
         case .findTab: model.palette = .findTab
         case .findSession: model.palette = .changeSession
         case .changeTheme: model.palette = .theme
-        case .changeFont: model.palette = .font
+        case .changeFont: model.palette = .terminalFont
         case .fontBigger: model.adjustFontSize(1)
         case .fontSmaller: model.adjustFontSize(-1)
         case .fontReset: model.resetFontSize()

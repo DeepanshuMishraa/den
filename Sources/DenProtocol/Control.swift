@@ -49,6 +49,11 @@ public enum ControlRequest: Codable, Equatable, Sendable {
     case capture(pane: PaneID, format: CaptureFormat)
     /// From now on this connection receives `controlEvent` frames.
     case watchEvents
+    /// dend's own macOS privacy access, which every shell it runs inherits.
+    case permissions
+    /// Asks macOS to list dend under Screen & System Audio Recording
+    /// (showing its prompt the first time); replies with `permissions`.
+    case requestScreenRecording
 }
 
 public enum ControlReply: Codable, Equatable, Sendable {
@@ -56,7 +61,28 @@ public enum ControlReply: Codable, Equatable, Sendable {
     case state(DenState)
     case launched(session: SessionID, tab: TabID, pane: PaneID)
     case text(String)
+    case permissions(HostPermissions)
     case failed(String)
+}
+
+/// The macOS privacy grants dend holds. Shells and agents inherit them,
+/// since dend, not the Den app, is the process macOS holds responsible.
+public struct HostPermissions: Codable, Equatable, Sendable {
+    public enum Access: String, Codable, Sendable {
+        case granted, missing
+        /// Not a macOS host.
+        case notApplicable
+    }
+
+    /// Reading protected folders: Downloads, Desktop, Documents, Mail,
+    /// other apps' containers.
+    public let fullDiskAccess: Access
+    public let screenRecording: Access
+
+    public init(fullDiskAccess: Access, screenRecording: Access) {
+        self.fullDiskAccess = fullDiskAccess
+        self.screenRecording = screenRecording
+    }
 }
 
 // MARK: - State

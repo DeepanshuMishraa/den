@@ -476,6 +476,12 @@ final class AppModel {
     var uiFontFamily: String { config.uiFont ?? fontFamily }
     var uiFontSize: CGFloat { config.uiFontSize.map { CGFloat($0) } ?? fontSize }
 
+    /// Applies at once and saves `terminal_font`, so a config reload keeps it.
+    func setTerminalFont(_ family: String) {
+        fontFamily = family
+        setConfig("terminal_font", .string(family))
+    }
+
     func adjustFontSize(_ delta: CGFloat) { fontSize = min(max(fontSize + delta, 8), 32) }
     func resetFontSize() { fontSize = FontMetrics.defaultSize }
 
@@ -505,6 +511,10 @@ final class AppModel {
     @ObservationIgnored private var revealOnConnect: Set<RemoteHost.ID> = []
     @ObservationIgnored private var listings: [UInt32: (host: HostID, reply: CheckedContinuation<(String, [DirectoryEntry])?, Never>)] = [:]
     @ObservationIgnored private var nextListing: UInt32 = 1
+    @ObservationIgnored private var controls: [UInt32: (host: HostID, reply: CheckedContinuation<ControlReply?, Never>)] = [:]
+    @ObservationIgnored private var nextControl: UInt32 = 1
+    /// What this Mac's dend may access; nil until asked, or when it can't say.
+    private(set) var permissions: HostPermissions?
     @ObservationIgnored private var sentSizes: [PaneID: GridSize] = [:]
     @ObservationIgnored private var lastSeen: [PaneID: Date] = [:]
     /// Unobserved on purpose: it changes on every write. Activity Mode reads
@@ -625,6 +635,27 @@ final class AppModel {
         terminalFocusRequest &+= 1
     }
 
+    // MARK: Permissions
+
+    /// The Grant Permissions panel is up.
+    var showPermissions = false
+    private static let permissionsOfferedKey = "permissionsOffered"
+
+    /// Once per install: without Full Disk Access, shells hit "Operation not
+    /// permitted" in ~/Downloads and the like, so offer it up front.
+    private func offerPermissionsIfMissing() async {
+        await refreshPermissions()
+        guard permissions?.fullDiskAccess == .missing, !defaults.bool(forKey: Self.permissionsOfferedKey) else { return }
+        defaults.set(true, forKey: Self.permissionsOfferedKey)
+        showPermissions = true
+    }
+
+    func dismissPermissions() {
+        guard showPermissions else { return }
+        showPermissions = false
+        terminalFocusRequest &+= 1
+    }
+
     // MARK: Connection
 
     @ObservationIgnored private var startedRemotes = false
@@ -701,6 +732,10 @@ final class AppModel {
         for (pane, h) in paneHosts where h == host { dropPane(pane) }
         for (id, waiting) in listings where waiting.host == host {
             listings.removeValue(forKey: id)
+            waiting.reply.resume(returning: nil)
+        }
+        for (id, waiting) in controls where waiting.host == host {
+            controls.removeValue(forKey: id)
             waiting.reply.resume(returning: nil)
         }
     }
@@ -833,6 +868,7 @@ final class AppModel {
             switch host {
             case .local:
                 connectionState = .connected(host: name)
+                Task { [weak self] in await self?.offerPermissionsIfMissing() }
             case .remote(let id):
                 remoteStates[id] = .connected(hostName: name)
                 retryDelays[id] = nil
@@ -927,8 +963,12 @@ final class AppModel {
                 pickSession(excluding: id)
             }
 
-        case .controlReply, .controlEvent:
-            // Only the den CLI asks for these.
+        case .controlReply(let request, let json):
+            let reply = try? ControlCoding.decode(ControlReply.self, from: json).get()
+            controls.removeValue(forKey: request)?.reply.resume(returning: reply)
+
+        case .controlEvent:
+            // Only the den CLI watches events.
             break
 
         case .error(let message):
@@ -1388,6 +1428,30 @@ final class AppModel {
             listings[request] = (host, continuation)
             conn.send(.listDirectory(request: request, path: path))
         }
+    }
+
+    /// A control-channel request to `host`'s dend; nil when it's not
+    /// connected, too old (protocol 6) or its reply can't be read.
+    func control(_ request: ControlRequest, on host: HostID) async -> ControlReply? {
+        guard (protocols[host] ?? 0) >= 6, let conn = connections[host] else { return nil }
+        let id = nextControl
+        nextControl &+= 1
+        return await withCheckedContinuation { continuation in
+            controls[id] = (host, continuation)
+            conn.send(.control(request: id, ControlCoding.encode(request)))
+        }
+    }
+
+    /// Re-reads this Mac's dend grants. A dend from before the request
+    /// answers `failed`, which leaves them unknown.
+    func refreshPermissions() async {
+        guard case .permissions(let granted)? = await control(.permissions, on: .local) else { return permissions = nil }
+        permissions = granted
+    }
+
+    func requestScreenRecording() async {
+        if case .permissions(let granted)? = await control(.requestScreenRecording, on: .local) { permissions = granted }
+        PrivacySettings.open(.screenRecording)
     }
 
     /// Why the session on screen has nothing to show, when its host is

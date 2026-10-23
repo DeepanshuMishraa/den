@@ -118,6 +118,13 @@ import DenVT
         guard case .failure = UserConfig.parse("toast_position = true") else { Issue.record("parsed"); return }
     }
 
+    @Test func paneBorderIsOffUnlessSet() throws {
+        #expect(try UserConfig.parse("").get().paneBorder == false)
+        #expect(try UserConfig.parse("pane_border = true").get().paneBorder == true)
+        guard case .failure(let e) = UserConfig.parse("pane_border = \"yes\"") else { Issue.record("parsed"); return }
+        #expect(e.message.contains("true or false"))
+    }
+
     /// The Ghostty bindings that pass ⌘A etc. to Neovim as alt+key.
     @Test func textKeybindSendsEscapedBytes() throws {
         let config = try UserConfig.parse("""

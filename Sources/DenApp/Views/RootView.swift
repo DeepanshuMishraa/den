@@ -50,6 +50,7 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.12), value: model.leaderPending)
         .animation(.easeOut(duration: 0.18), value: model.loginRequest)
         .animation(.easeOut(duration: 0.18), value: model.whatsNew)
+        .animation(.easeOut(duration: 0.18), value: model.showPermissions)
         .animation(.easeInOut(duration: 0.25), value: theme)
     }
 
@@ -257,6 +258,16 @@ struct RootView: View {
                 .onTapGesture { model.dismissWhatsNew() }
                 .transition(.opacity)
             WhatsNewPanel(whatsNew: whatsNew)
+                .padding(.top, TitleBar.height + 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
+        }
+
+        if model.showPermissions {
+            Color.black.opacity(0.18)
+                .onTapGesture { model.dismissPermissions() }
+                .transition(.opacity)
+            PermissionsPanel()
                 .padding(.top, TitleBar.height + 40)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))

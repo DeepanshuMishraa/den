@@ -64,4 +64,12 @@ import DenProtocol
         #expect(message.contains("already exists"))
         guard case .failed? = try c.control(.capture(pane: PaneID(), format: .text)) else { Issue.record("unknown pane accepted"); return }
     }
+
+    /// The app asks dend, not itself: shells inherit dend's privacy grants.
+    @Test func permissionsAreReportedForDendItself() async throws {
+        let c = try await connect()
+        guard case .permissions(let reported)? = try c.control(.permissions) else { Issue.record("no permissions reply"); return }
+        // The server runs in this process, so a direct probe must agree.
+        #expect(reported == HostPermissions.probe())
+    }
 }

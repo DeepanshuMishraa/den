@@ -31,7 +31,7 @@ struct Sidebar: View {
                             .transition(.blurReplace)
                     } else {
                         // Each machine, then its sessions and their tabs.
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
                             ForEach([HostID.local] + model.remoteHosts.map { .remote($0.id) }, id: \.self) { host in
                                 SidebarHostHeader(host: host)
                                 if !model.isCollapsed(host) {
@@ -48,7 +48,7 @@ struct Sidebar: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.top, 4)
+                .padding(.top, 6)
                 .animation(.den, value: model.orderedSessions.map(\.id))
                 .animation(.den, value: model.collapsedHosts)
                 .animation(.den, value: model.activityMode)
@@ -110,8 +110,8 @@ private struct SidebarHostHeader: View {
                 .opacity(hovering || collapsed ? 1 : 0)
         }
         .padding(.horizontal, 10)
-        .frame(height: 30)
-        .padding(.top, host == .local ? 0 : 8)
+        .frame(height: 32)
+        .padding(.top, host == .local ? 0 : 16)
         .contentShape(Rectangle())
         .onTapGesture { withAnimation(.den) { model.toggleCollapsed(host) } }
         .onHover { hovering = $0 }
@@ -182,7 +182,7 @@ private struct SessionHeader: View {
             .padding(.horizontal, 10)
             // Equal room above and below: the name sits midway between the
             // previous session's last tab and its own first one.
-            .padding(.vertical, 7)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { model.switchSession(session.id) }
@@ -197,7 +197,7 @@ private struct ActivityList: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             // TimelineView centers loose content; keep rows in a leading stack.
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
             let now = context.date
             let agents = model.orderedSessions.compactMap { session -> (SessionSummary, [(TabLayout, TabActivity)])? in
                 let rows = model.tabs(in: session.id).compactMap { tab in model.activity(of: tab, now: now).map { (tab, $0) } }
@@ -362,12 +362,12 @@ struct SidebarRow: View {
                 StatusGlyph(indicator: status.indicator)
             }
         }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
         )
         .contentShape(Rectangle())
         // Before tabCard: its tap (which hides the card) sits on this view,
@@ -426,7 +426,7 @@ struct ActivityRow: View {
         }
         .padding(.leading, 9)
         .padding(.trailing, 10)
-        .frame(height: style == .menu ? 46 : 40)
+        .frame(height: 46)
         .background(background(theme))
         .contentShape(Rectangle())
         .onTapGesture {

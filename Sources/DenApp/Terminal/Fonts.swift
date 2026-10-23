@@ -45,17 +45,6 @@ enum FontRegistry {
             .filter { font(named: $0, size: 12) != nil }
     }
 
-    /// Monospaced families installed on this Mac, for the font picker.
-    static func monospacedFamilies() -> [String] {
-        let fm = NSFontManager.shared
-        let families = fm.availableFontFamilies.filter { family in
-            guard let members = fm.availableMembers(ofFontFamily: family), let first = members.first,
-                  let name = first.first as? String, let font = NSFont(name: name, size: 13) else { return false }
-            return font.isFixedPitch || family.localizedCaseInsensitiveContains("mono")
-        }
-        return families.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-    }
-
     /// The primary font with the Nerd Font cascade attached, so Core Text
     /// picks icons from a Nerd Font before falling back to system fonts.
     static func font(family: String, size: CGFloat) -> CTFont {
@@ -68,5 +57,56 @@ enum FontRegistry {
         guard !cascade.isEmpty else { return base }
         let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontCascadeListAttribute: cascade] as CFDictionary)
         return CTFontCreateCopyWithAttributes(base, size, nil, descriptor)
+    }
+}
+
+/// Every font family installed on this Mac (plus the bundled one), split
+/// into monospaced and proportional, for the font pickers. Scanning takes a
+/// moment with hundreds of families, so it runs once, off the main thread.
+struct FontCatalog: Sendable {
+    let monospaced: [String]
+    let proportional: [String]
+
+    /// Both lists, alphabetically.
+    var all: [String] { (monospaced + proportional).sorted(by: Self.order) }
+
+    @MainActor private static var cached: FontCatalog?
+    @MainActor private static var scanning: Task<FontCatalog, Never>?
+
+    /// The scanned catalog, if it's ready.
+    @MainActor static var current: FontCatalog? { cached }
+
+    /// Scans on first call; later calls get the same result.
+    @MainActor static func load() async -> FontCatalog {
+        if let cached { return cached }
+        let task = scanning ?? Task.detached(priority: .userInitiated) { scan() }
+        scanning = task
+        let catalog = await task.value
+        cached = catalog
+        return catalog
+    }
+
+    private static func order(_ a: String, _ b: String) -> Bool {
+        a.localizedStandardCompare(b) == .orderedAscending
+    }
+
+    /// Core Text is thread-safe and, unlike NSFontManager, lists fonts
+    /// registered for this process only, like the bundled one.
+    private nonisolated static func scan() -> FontCatalog {
+        let names = (CTFontManagerCopyAvailableFontFamilyNames() as? [String]) ?? []
+        var monospaced: [String] = []
+        var proportional: [String] = []
+        // Names starting with "." are system UI fonts apps can't pick.
+        for family in Set(names) where !family.hasPrefix(".") {
+            let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: family] as CFDictionary)
+            let traits = CTFontGetSymbolicTraits(CTFontCreateWithFontDescriptor(descriptor, 13, nil))
+            if traits.contains(.traitMonoSpace) || family.localizedCaseInsensitiveContains("mono") {
+                monospaced.append(family)
+            } else {
+                proportional.append(family)
+            }
+        }
+        if !monospaced.contains(FontRegistry.bundledFamily) { monospaced.append(FontRegistry.bundledFamily) }
+        return FontCatalog(monospaced: monospaced.sorted(by: order), proportional: proportional.sorted(by: order))
     }
 }

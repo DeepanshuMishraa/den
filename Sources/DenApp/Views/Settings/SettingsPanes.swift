@@ -61,15 +61,23 @@ struct AppearanceSettings: View {
                 SettingsToggle(title: "Show pane headers", isOn: Binding(
                     get: { model.showPaneHeaders },
                     set: { value in withAnimation(.den) { model.showPaneHeaders = value } }))
+                SettingsToggle(title: "Focus border", detail: "Ring the focused pane in the theme's accent color.", inConfigFile: true,
+                               isOn: Binding(get: { model.config.paneBorder },
+                                             set: { model.setConfig("pane_border", .bool($0)) }))
             }
 
-            SettingsSection("Interface Text", footer: "Toasts, menus and pickers. Without a font of its own, Den's interface uses the terminal font.") {
-                SettingsRow(title: "Font", inConfigFile: true) {
-                    FontMenu(selection: model.config.uiFont, placeholder: "Same as Terminal") { family in
+            SettingsSection("Fonts", footer: "The interface font covers the sidebar, tabs, toasts, menus and pickers. Without one of its own, it uses the terminal font.") {
+                SettingsRow(title: "Terminal font", inConfigFile: true) {
+                    FontMenu(selection: model.fontFamily, placeholder: nil, kind: .terminal) { family in
+                        if let family { model.setTerminalFont(family) }
+                    }
+                }
+                SettingsRow(title: "Interface font", inConfigFile: true) {
+                    FontMenu(selection: model.config.uiFont, placeholder: "Same as Terminal", kind: .interface) { family in
                         model.setConfig("ui_font", family.map(TOMLValue.string))
                     }
                 }
-                SettingsRow(title: "Size", inConfigFile: true) {
+                SettingsRow(title: "Interface size", inConfigFile: true) {
                     SizeStepper(value: model.config.uiFontSize.map { Int($0) }, fallback: Int(model.fontSize)) { size in
                         model.setConfig("ui_font_size", size.map { .integer($0) })
                     }
@@ -373,9 +381,8 @@ struct TerminalSettings: View {
                 TerminalPreview(theme: theme, family: model.fontFamily, size: model.fontSize, ligatures: model.fontLigatures)
                     .padding(12)
                 SettingsRow(title: "Font", inConfigFile: true) {
-                    FontMenu(selection: model.config.terminalFont ?? model.fontFamily, placeholder: nil) { family in
-                        if let family { model.fontFamily = family }
-                        model.setConfig("terminal_font", family.map(TOMLValue.string))
+                    FontMenu(selection: model.fontFamily, placeholder: nil, kind: .terminal) { family in
+                        if let family { model.setTerminalFont(family) }
                     }
                 }
                 SettingsRow(title: "Size", inConfigFile: true) {
@@ -507,39 +514,152 @@ private struct CursorPreview: View {
     }
 }
 
-/// Picks a monospaced family; `nil` means the default (no key in the file).
+/// Picks any installed family from a searchable popover; `nil` means the
+/// default (no key in the file). The list is lazy, so hundreds of fonts
+/// scroll without building a row for each.
 struct FontMenu: View {
+    /// Terminals list monospaced families first; the interface takes any.
+    enum Kind { case terminal, interface }
+
     let selection: String?
     /// Title for the default choice, or nil when there's no default to offer.
     let placeholder: String?
+    let kind: Kind
     let onChange: (String?) -> Void
-    @State private var families: [String] = []
+    @Environment(\.settingsTheme) private var theme
+    @State private var open = false
+    @State private var hovering = false
 
     var body: some View {
-        Menu {
-            if let placeholder {
-                Button(placeholder) { onChange(nil) }
-                Divider()
+        Button { open.toggle() } label: {
+            HStack(spacing: 6) {
+                Text(selection ?? placeholder ?? "")
+                    .font(.custom(selection ?? FontRegistry.bundledFamily, size: 12.5))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(theme.tertiaryText)
             }
-            ForEach(families, id: \.self) { family in
-                Button {
-                    onChange(family)
-                } label: {
-                    if family == selection { Label(family, systemImage: "checkmark") } else { Text(family) }
+            .padding(.horizontal, 12)
+            .frame(height: 26)
+            .foregroundStyle(theme.chromeText)
+            .background(Capsule().fill(hovering || open ? theme.activeTab : theme.hover))
+            .overlay(Capsule().strokeBorder(theme.menuBorder, lineWidth: 0.5))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.hitArea)
+        .onHover { hovering = $0 }
+        .fixedSize()
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            FontPickerList(selection: selection, placeholder: placeholder, kind: kind) { family in
+                open = false
+                onChange(family)
+            }
+            .environment(\.settingsTheme, theme)
+        }
+    }
+}
+
+private struct FontPickerList: View {
+    let selection: String?
+    let placeholder: String?
+    let kind: FontMenu.Kind
+    let onPick: (String?) -> Void
+    @Environment(\.settingsTheme) private var theme
+    @State private var catalog = FontCatalog.current
+    @State private var query = ""
+
+    var body: some View {
+        let sections = sections
+        VStack(spacing: 0) {
+            SettingsSearchField(text: $query, placeholder: "Search fonts")
+                .padding(10)
+                .onSubmit { if let first = sections.first?.families.first { onPick(first) } }
+            theme.separator.frame(height: 0.5)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1, pinnedViews: .sectionHeaders) {
+                    if let placeholder, query.isEmpty {
+                        FontPickerRow(title: placeholder, family: nil, selected: selection == nil) { onPick(nil) }
+                    }
+                    ForEach(sections, id: \.title) { section in
+                        Section {
+                            ForEach(section.families, id: \.self) { family in
+                                FontPickerRow(title: family, family: family, selected: family == selection) { onPick(family) }
+                            }
+                        } header: {
+                            Text(section.title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(theme.tertiaryText)
+                                .padding(.horizontal, 10)
+                                .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+                                .background(.regularMaterial)
+                        }
+                    }
+                    if catalog == nil {
+                        ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 60)
+                    } else if sections.isEmpty {
+                        Text("No fonts match “\(query)”")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(theme.tertiaryText)
+                            .frame(maxWidth: .infinity, minHeight: 60)
+                    }
+                }
+                .padding(6)
+            }
+            .scrollIndicators(.automatic)
+        }
+        .frame(width: 320, height: 400)
+        .task { if catalog == nil { catalog = await FontCatalog.load() } }
+    }
+
+    private var sections: [(title: String, families: [String])] {
+        guard let catalog else { return [] }
+        let groups: [(title: String, families: [String])] = switch kind {
+        case .terminal: [("Monospaced", catalog.monospaced), ("Proportional", catalog.proportional)]
+        case .interface: [("All Fonts", catalog.all)]
+        }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return groups
+            .map { ($0.title, q.isEmpty ? $0.families : $0.families.filter { $0.localizedCaseInsensitiveContains(q) }) }
+            .filter { !$0.families.isEmpty }
+    }
+}
+
+/// A family's name, with a sample set in the family itself; symbol fonts
+/// stay readable since the name uses the system font.
+private struct FontPickerRow: View {
+    let title: String
+    let family: String?
+    let selected: Bool
+    let action: () -> Void
+    @Environment(\.settingsTheme) private var theme
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+                    .opacity(selected ? 1 : 0)
+                    .frame(width: 12)
+                Text(title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(theme.chromeText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                if let family {
+                    Text("Aa")
+                        .font(.custom(family, size: 13))
+                        .foregroundStyle(theme.secondaryText)
                 }
             }
-        } label: {
-            Text(selection ?? placeholder ?? "")
-                .font(.custom(selection ?? FontRegistry.bundledFamily, size: 12.5))
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hovering ? theme.hover : .clear))
+            .contentShape(Rectangle())
         }
-        .menuStyle(.button)
-        .fixedSize()
-        .onAppear {
-            guard families.isEmpty else { return }
-            var list = FontRegistry.monospacedFamilies()
-            if !list.contains(FontRegistry.bundledFamily) { list.insert(FontRegistry.bundledFamily, at: 0) }
-            families = list
-        }
+        .buttonStyle(.hitArea)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1000,5 +1120,49 @@ struct GeneralSettings: View {
     private var shells: [String] {
         let available = model.availableShells
         return available.contains(model.defaultShell) ? available : [model.defaultShell] + available
+    }
+}
+
+// MARK: - Permissions
+
+struct PermissionSettings: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.settingsTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSection("This Mac", footer: footer) {
+                ForEach(DendPermission.allCases) { permission in
+                    SettingsRow(title: permission.title, detail: permission.detail) {
+                        HStack(spacing: 8) {
+                            PermissionStatus(permission: permission, theme: theme)
+                            if permission.access(model) == .granted {
+                                SettingsButton(title: "Open Settings", symbol: "arrow.up.forward") { open(permission) }
+                            }
+                        }
+                    }
+                }
+            }
+            SettingsSection("dend") {
+                SettingsRow(title: "Show dend in Finder", detail: PrivacySettings.dendURL.map { PathQuery.abbreviate($0.path) }) {
+                    SettingsButton(title: "Reveal", symbol: "folder") {
+                        if let dend = PrivacySettings.dendURL { NSWorkspace.shared.activateFileViewerSelecting([dend]) }
+                    }
+                }
+            }
+        }
+        .refreshesPermissions()
+    }
+
+    private var footer: String {
+        let base = "Granted to dend, the process that runs your shells, so every shell and agent inherits them. Turn one off in System Settings to take it back."
+        return model.permissions == nil ? "dend hasn't reported its access yet; it may be from an older Den. " + base : base
+    }
+
+    private func open(_ permission: DendPermission) {
+        switch permission {
+        case .fullDiskAccess: PrivacySettings.open(.fullDiskAccess)
+        case .screenRecording: PrivacySettings.open(.screenRecording)
+        }
     }
 }

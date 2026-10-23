@@ -397,6 +397,13 @@ public actor DenServer {
         case .watchEvents:
             conn.watchingEvents = true
             return .ok
+
+        case .permissions:
+            return .permissions(HostPermissions.probe())
+
+        case .requestScreenRecording:
+            HostPermissions.requestScreenRecording()
+            return .permissions(HostPermissions.probe())
         }
     }
 

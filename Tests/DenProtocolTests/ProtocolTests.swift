@@ -60,6 +60,8 @@ import Testing
             .setLabel(pane: a, label: nil),
             .capture(pane: b, format: .html),
             .watchEvents,
+            .permissions,
+            .requestScreenRecording,
         ]
         for r in requests {
             #expect(try ControlCoding.decode(ControlRequest.self, from: ControlCoding.encode(r)).get() == r)
@@ -74,6 +76,8 @@ import Testing
             SessionState(id: SessionID(), name: "video", tabs: [TabState(id: TabID(), title: nil, layout: tree, panes: [pane])]),
         ], clients: [ClientState(id: 1, name: "den-cli", connectedAt: created, subscribed: false, watchingEvents: true)])
         #expect(try ControlCoding.decode(ControlReply.self, from: ControlCoding.encode(ControlReply.state(state))).get() == .state(state))
+        let permissions = ControlReply.permissions(HostPermissions(fullDiskAccess: .granted, screenRecording: .missing))
+        #expect(try ControlCoding.decode(ControlReply.self, from: ControlCoding.encode(permissions)).get() == permissions)
     }
 
     @Test func exitStateDecodesWaitStatus() {

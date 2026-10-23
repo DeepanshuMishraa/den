@@ -101,6 +101,10 @@ enum ConfigManual {
                              "bottom-left" | "bottom-center" | "bottom-right"
                 Where the toast pill sits. Default: "bottom-center".
 
+            pane_border = true | false
+                Ring the focused pane with a border in the theme's accent
+                color when a tab has more than one pane. Default: false.
+
             terminal_font = "JetBrainsMono Nerd Font"
             terminal_font_size = 13
             ui_font = "SF Mono"

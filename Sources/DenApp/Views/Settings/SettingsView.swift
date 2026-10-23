@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The panes of the Settings window, in sidebar order.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case appearance, themes, terminal, shortcuts, notifications, hosts, general
+    case appearance, themes, terminal, shortcuts, notifications, hosts, permissions, general
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .shortcuts: "Shortcuts"
         case .notifications: "Notifications"
         case .hosts: "Remote Hosts"
+        case .permissions: "Permissions"
         case .general: "General"
         }
     }
@@ -26,6 +27,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .shortcuts: "command"
         case .notifications: "bell.badge.fill"
         case .hosts: "globe"
+        case .permissions: "lock.shield.fill"
         case .general: "gearshape.fill"
         }
     }
@@ -39,6 +41,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .shortcuts: [Color(red: 0.58, green: 0.6, blue: 0.64), Color(red: 0.4, green: 0.42, blue: 0.46)]
         case .notifications: [Color(red: 1, green: 0.42, blue: 0.38), Color(red: 0.92, green: 0.2, blue: 0.24)]
         case .hosts: [Color(red: 0.72, green: 0.42, blue: 1), Color(red: 0.5, green: 0.24, blue: 0.9)]
+        case .permissions: [Color(red: 0.3, green: 0.62, blue: 1), Color(red: 0.12, green: 0.4, blue: 0.9)]
         case .general: [Color(red: 0.6, green: 0.62, blue: 0.66), Color(red: 0.38, green: 0.4, blue: 0.44)]
         }
     }
@@ -47,18 +50,19 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var keywords: [String] {
         switch self {
         case .appearance: ["light", "dark", "system", "style", "glass", "modern", "themed", "blended", "tabs", "vertical",
-                           "horizontal", "sidebar", "zen", "activity", "density", "compact", "pane", "headers", "ui font"]
+                           "horizontal", "sidebar", "zen", "activity", "density", "compact", "pane", "headers", "border", "focus", "font", "ui font", "interface font", "terminal font"]
         case .themes: ["color", "palette", "import", "ghostty", "json"]
         case .terminal: ["font", "size", "ligatures", "smoothing", "contrast", "cursor", "blink", "option", "alt", "keyboard"]
         case .shortcuts: ["keys", "keybind", "leader", "hotkey", "binding"]
         case .notifications: ["toast", "position"]
         case .hosts: ["ssh", "remote", "tailscale", "server", "dend"]
+        case .permissions: ["privacy", "full disk access", "downloads", "operation not permitted", "screen recording", "tcc"]
         case .general: ["update", "shell", "cli", "command line", "agents", "config", "toml"]
         }
     }
 
     /// Sidebar groups, separated by a gap.
-    static let groups: [[SettingsPane]] = [[.appearance, .themes], [.terminal, .shortcuts, .notifications], [.hosts], [.general]]
+    static let groups: [[SettingsPane]] = [[.appearance, .themes], [.terminal, .shortcuts, .notifications], [.hosts, .permissions], [.general]]
 
     func matches(_ query: String) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -174,6 +178,7 @@ struct SettingsView: View {
         case .shortcuts: ShortcutSettings()
         case .notifications: NotificationSettings()
         case .hosts: HostSettings()
+        case .permissions: PermissionSettings()
         case .general: GeneralSettings()
         }
     }

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Which list the palette shows. Submenus appear as a chip in the field.
 enum PaletteRoute: Equatable {
-    case root, theme, interfaceStyle, font, shell, cursorBlink, changeSession, findTab, renameSession, renameTab, goToDirectory, addHost, deleteTheme
+    case root, theme, interfaceStyle, terminalFont, interfaceFont, shell, cursorBlink, changeSession, findTab, renameSession, renameTab, goToDirectory, addHost, deleteTheme
     /// Not a list: shows the Ghostty migration's progress.
     case migrateGhostty
     case renameHost(RemoteHost.ID)
@@ -14,7 +14,8 @@ enum PaletteRoute: Equatable {
         switch self {
         case .root, .migrateGhostty, .findTab: nil
         case .theme: "Theme"
-        case .font: "Font"
+        case .terminalFont: "Terminal Font"
+        case .interfaceFont: "Interface Font"
         case .shell: "Shell"
         case .cursorBlink: "Cursor Blinking"
         case .interfaceStyle: "Interface Style"
@@ -31,7 +32,7 @@ enum PaletteRoute: Equatable {
         switch self {
         case .root: "Search commands…"
         case .theme: "Select Theme…"
-        case .font: "Select Font…"
+        case .terminalFont, .interfaceFont: "Search fonts…"
         case .shell: "Select Shell…"
         case .cursorBlink: "Filter blink settings…"
         case .interfaceStyle: "Select Interface Style…"
@@ -88,6 +89,8 @@ struct CommandPalette: View {
     @State private var remoteListing: (requested: String, path: String, entries: [DirectoryEntry])?
     /// Where the palette was opened; escaping from there closes it.
     @State private var openedAt = PaletteRoute.root
+    /// Installed fonts for the font pickers; scanned once, off the main thread.
+    @State private var fontCatalog = FontCatalog.current
     @FocusState private var focused: Bool
 
     /// The model is the source of truth so the first frame already shows
@@ -132,7 +135,7 @@ struct CommandPalette: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 1) {
+                        PaletteStack(lazy: items.count > Self.lazyThreshold) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                                 VStack(alignment: .leading, spacing: 1) {
                                     if query.trimmingCharacters(in: .whitespaces).isEmpty, let section = item.section, index == 0 || items[index - 1].section != section {
@@ -148,6 +151,8 @@ struct CommandPalette: View {
                         }
                     }
                     .scrollIndicators(.never)
+                    // A lazy stack can't report its full height; a long list fills the cap anyway.
+                    .frame(height: items.count > Self.lazyThreshold ? 440 : nil)
                     .frame(maxHeight: 440)
                     .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: selection) { proxy.scrollTo(selection) }
@@ -160,6 +165,10 @@ struct CommandPalette: View {
         .background(MenuSurface(theme: theme))
         .onAppear(perform: enter)
         .onChange(of: model.palette) { enter() }
+        .task(id: route) {
+            guard route == .terminalFont || route == .interfaceFont, fontCatalog == nil else { return }
+            fontCatalog = await FontCatalog.load()
+        }
         .task(id: route == .goToDirectory ? query : "") {
             guard route == .goToDirectory else { return }
             folderHits = []
@@ -241,7 +250,7 @@ struct CommandPalette: View {
         let theme = model.theme
         let fg = highlighted ? theme.onAccent : theme.chromeText
         let dim = highlighted ? theme.onAccent.opacity(0.75) : theme.tertiaryText
-        let hits = route == .root || route == .theme || route == .font || route == .shell || route == .interfaceStyle || route == .changeSession || route == .findTab ? (Fuzzy.match(query, in: item.title) ?? []) : []
+        let hits = route == .root || route == .theme || route == .terminalFont || route == .interfaceFont || route == .shell || route == .interfaceStyle || route == .changeSession || route == .findTab ? (Fuzzy.match(query, in: item.title) ?? []) : []
         return HStack(spacing: item.subtitle == nil ? 8 : 10) {
             if let deck = item.deck {
                 DeckIcon(deck: deck, height: 18)
@@ -357,7 +366,7 @@ struct CommandPalette: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         switch route {
         case .migrateGhostty: return []
-        case .root, .theme, .interfaceStyle, .font, .shell, .cursorBlink, .changeSession, .findTab, .deleteTheme:
+        case .root, .theme, .interfaceStyle, .terminalFont, .interfaceFont, .shell, .cursorBlink, .changeSession, .findTab, .deleteTheme:
             let all = items(for: route)
             guard !q.isEmpty else { return all }
             // Tabs also match by the session and host they're in.
@@ -408,13 +417,23 @@ struct CommandPalette: View {
                                          detail: error.message, action: .run { model.report(error.description) }))
             }
             return items
-        case .font:
-            var families = FontRegistry.monospacedFamilies()
-            if !families.contains(FontRegistry.bundledFamily) { families.insert(FontRegistry.bundledFamily, at: 0) }
-            return families.map { family in
-                PaletteItem(id: "font-\(family)", title: family,
-                            detail: family == FontRegistry.bundledFamily ? "Built in" : nil,
-                            checked: family == model.fontFamily, action: .run { model.fontFamily = family })
+        case .terminalFont:
+            // Until the scan lands, the current and built-in fonts.
+            let catalog = fontCatalog ?? FontCatalog(monospaced: [FontRegistry.bundledFamily], proportional: [])
+            let groups = [("Monospaced", catalog.monospaced), ("Proportional", catalog.proportional)]
+            return groups.flatMap { section, families in
+                families.map { family in
+                    PaletteItem(id: "font-\(family)", section: section, title: family,
+                                detail: family == FontRegistry.bundledFamily ? "Built in" : nil,
+                                checked: family == model.fontFamily, action: .run { model.setTerminalFont(family) })
+                }
+            }
+        case .interfaceFont:
+            let same = PaletteItem(id: "font-same", title: "Same as Terminal", detail: model.fontFamily, checked: model.config.uiFont == nil,
+                                   action: .run { model.setConfig("ui_font", nil) })
+            return [same] + (fontCatalog?.all ?? []).map { family in
+                PaletteItem(id: "font-\(family)", title: family, checked: family == model.config.uiFont,
+                            action: .run { model.setConfig("ui_font", .string(family)) })
             }
         case .interfaceStyle:
             return InterfaceStyle.allCases.map { style in
@@ -542,7 +561,9 @@ struct CommandPalette: View {
 
         var view: [PaletteItem] = [
             PaletteItem(id: "change-theme", title: "Change Theme", detail: model.selectedThemeName, submenu: true, action: .push(.theme)),
-            PaletteItem(id: "change-font", title: "Change Font", detail: model.fontFamily, submenu: true, action: .push(.font)),
+            PaletteItem(id: "change-font", title: "Change Terminal Font", detail: model.fontFamily, submenu: true, action: .push(.terminalFont)),
+            PaletteItem(id: "change-ui-font", title: "Change Interface Font", detail: model.config.uiFont ?? "Same as Terminal", submenu: true,
+                        action: .push(.interfaceFont)),
             PaletteItem(id: "change-style", title: "Change Interface Style", detail: model.interfaceStyle.title, submenu: true,
                         action: .push(.interfaceStyle)),
             PaletteItem(id: "density-comfortable", title: Density.comfortable.title, checked: model.density == .comfortable,
@@ -574,6 +595,10 @@ struct CommandPalette: View {
                         action: .run { withAnimation(.den) { model.zenMode.toggle() } }),
             PaletteItem(id: "headers", title: model.showPaneHeaders ? "Hide Pane Headers" : "Show Pane Headers",
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
+            PaletteItem(id: "pane-border", title: model.config.paneBorder ? "Hide Focused Pane Border" : "Show Focused Pane Border",
+                        action: .run { model.setConfig("pane_border", .bool(!model.config.paneBorder)) }),
+            PaletteItem(id: "permissions", title: "Grant Permissions…", detail: "Full Disk Access, Screen Recording",
+                        action: .run { withAnimation(.easeOut(duration: 0.18)) { model.showPermissions = true } }),
             PaletteItem(id: "acc", title: "Automatic Contrast Correction", checked: model.contrastCorrection,
                         keepOpen: true, action: .run { model.contrastCorrection.toggle() }),
             PaletteItem(id: "ligatures", title: model.fontLigatures ? "Disable Terminal Font Ligatures" : "Enable Terminal Font Ligatures",
@@ -698,6 +723,22 @@ struct CommandPalette: View {
         if panel.runModal() == .OK, let url = panel.url { model.importTheme(from: url) }
     }
 
+    /// Past this many rows (all fonts, say) the list builds only what's on screen.
+    private static let lazyThreshold = 150
+}
+
+/// The palette's rows: a plain stack for short lists, lazy for long ones.
+private struct PaletteStack<Content: View>: View {
+    let lazy: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if lazy {
+            LazyVStack(alignment: .leading, spacing: 1) { content }
+        } else {
+            VStack(alignment: .leading, spacing: 1) { content }
+        }
+    }
 }
 
 private struct SectionHeader: View {

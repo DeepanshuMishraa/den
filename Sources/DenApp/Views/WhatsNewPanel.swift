@@ -128,7 +128,7 @@ private struct ReleaseLink: View {
 }
 
 /// A quiet capsule, like the toast's buttons.
-private struct PillButton: View {
+struct PillButton: View {
     let title: String
     let theme: Theme
     let action: () -> Void

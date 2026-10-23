@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FontRegistry.registerBundled()
+        // Ready by the time a font picker opens.
+        Task { _ = await FontCatalog.load() }
         // The `den` CLI installs explicitly from the command palette, never
         // on launch. Panes still get the bundle's bin folder on PATH through
         // dend, so `den` works inside Den regardless.

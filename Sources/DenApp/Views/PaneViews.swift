@@ -100,8 +100,18 @@ struct PaneCard: View {
                         LinearGradient(colors: [theme.cardHighlight, theme.cardBorder], startPoint: .top, endPoint: .bottom),
                         lineWidth: 1
                     )
+                if !model.config.paneBorder {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(theme.accent.opacity(focused && multiple ? 0.35 : 0), lineWidth: 1)
+                }
+            }
+            // `pane_border`: the focused pane wears the theme's accent, in
+            // either density; it fades across as focus moves.
+            if model.config.paneBorder {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(theme.accent.opacity(focused && multiple ? 0.35 : 0), lineWidth: 1)
+                    .strokeBorder(theme.accent.opacity(focused && multiple ? 0.9 : 0), lineWidth: 1.5)
+                    .animation(.easeInOut(duration: 0.22), value: focused)
+                    .allowsHitTesting(false)
             }
         }
         .shadow(color: .black.opacity(islands ? (theme.isDark ? 0.28 : 0.07) : 0), radius: 8, y: 3)

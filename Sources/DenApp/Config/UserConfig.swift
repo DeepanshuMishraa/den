@@ -33,6 +33,8 @@ struct UserConfig: Equatable {
     var optionAsAlt: OptionAsAlt = .both
     /// Where the toast pill sits. `toast_position` in config.toml.
     var toastPosition: ToastPosition = .bottomCenter
+    /// Rings the focused pane in the theme's accent. `pane_border`.
+    var paneBorder = false
     /// Terminal typeface and size. When set, they win over Change Font and
     /// ⌘=/⌘- on every config reload.
     var terminalFont: String?
@@ -177,6 +179,11 @@ struct UserConfig: Equatable {
             }
             config.toastPosition = position
         }
+        switch root["pane_border"] {
+        case nil: break
+        case .bool(let on)?: config.paneBorder = on
+        case let other?: return .failure(ConfigError(message: "pane_border is \(describe(other)); use true or false."))
+        }
 
         func checkSize(_ key: String, _ size: Double) -> Result<Double?, ConfigError> {
             guard (8 ... 32).contains(size) else {
@@ -284,6 +291,9 @@ struct UserConfig: Equatable {
         # Where the toast pill sits: "top-left" | "top-center" | "top-right" |
         # "bottom-left" | "bottom-center" | "bottom-right"
         toast_position = "bottom-center"
+
+        # Ring the focused pane with a border in the theme's accent color.
+        pane_border = false
 
         # Fonts, split by surface. When set, these win over Change Font and
         # ⌘=/⌘- on every reload; when commented out, the palette's choices

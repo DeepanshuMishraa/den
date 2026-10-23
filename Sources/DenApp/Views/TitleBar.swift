@@ -80,12 +80,12 @@ struct SessionButton: View {
             withAnimation(.den) { expanded = true }
             model.showSessionMenu.toggle()
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 9) {
                 Image(systemName: "square.stack")
                     .font(.system(size: 13.5, weight: .regular))
                     .foregroundStyle(theme.secondaryText)
                 if showsName {
-                    VStack(alignment: .leading, spacing: -1) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(model.currentSummary?.name ?? "Connecting…")
                             .uiFont(size: 12.5, weight: .semibold)
                             .foregroundStyle(theme.chromeText)
@@ -99,9 +99,10 @@ struct SessionButton: View {
                     .transition(.opacity.combined(with: .offset(x: -6)))
                 }
             }
-            .padding(.horizontal, 7)
-            .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering || model.showSessionMenu ? theme.hover : .clear))
+            .padding(.leading, 9)
+            .padding(.trailing, 11)
+            .frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hovering || model.showSessionMenu ? theme.hover : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.hitArea)
