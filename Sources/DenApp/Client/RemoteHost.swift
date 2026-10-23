@@ -124,6 +124,9 @@ enum RemoteHostStore {
 enum RemoteState: Equatable {
     /// `step` says what's happening ("Installing dend…").
     case connecting(step: String)
+    /// Fetching the host's dend from Den's GitHub release; `total` is 0
+    /// when the size isn't known.
+    case downloading(received: Int, total: Int)
     /// Sending dend to the host; bytes handed to ssh so far.
     case uploading(sent: Int, total: Int, isUpdate: Bool)
     /// Key authentication failed and no saved password worked.

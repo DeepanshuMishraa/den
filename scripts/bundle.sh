@@ -39,7 +39,7 @@ fi
 if compgen -G "$root/dist/linux/dend-linux-*" >/dev/null; then
   cp "$root"/dist/linux/dend-linux-* "$app/Contents/Resources/"
 else
-  echo "warning: no dist/linux/dend-linux-*; Den.app can't set up Linux hosts (run scripts/build-dend-linux.sh)" >&2
+  echo "note: no dist/linux/dend-linux-*; Den.app downloads Linux dend from its GitHub release instead (run scripts/build-dend-linux.sh to bundle it)" >&2
 fi
 # Sparkle (SwiftPM binary target): embed the framework for the updater.
 # symlinks (Versions/Current) must survive the copy, so plain cp -R. The

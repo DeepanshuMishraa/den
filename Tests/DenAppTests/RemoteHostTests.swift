@@ -59,6 +59,29 @@ import Testing
         #expect(RemoteSetup.normalize(arch: "aarch64", os: "Darwin") == "arm64")
     }
 
+    @Test func linuxDendComesFromTheReleaseWhenNotShipped() throws {
+        let app = FileManager.default.temporaryDirectory.appending(path: "den-\(UUID().uuidString)/Den.app")
+        defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: app.appending(path: "Contents/MacOS"), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: app.appending(path: "Contents/MacOS/Den").path, contents: Data(), attributes: [.posixPermissions: 0o755])
+        let info: [String: String] = [
+            "CFBundleExecutable": "Den", "CFBundleIdentifier": "den.test.\(UUID().uuidString)",
+            "CFBundleShortVersionString": "9.9.\(Int.random(in: 1000 ... 99999))",
+            "SUFeedURL": "https://github.com/DeepanshuMishraa/den/releases/latest/download/appcast.xml",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: app.appending(path: "Contents/Info.plist"))
+        let bundle = try #require(Bundle(url: app))
+        let version = try #require(info["CFBundleShortVersionString"])
+        let probe = RemoteSetup.Probe(os: "Linux", arch: "x86_64", installedHash: nil, serviceRegistered: false)
+
+        guard case .success(.release(let url, let cache)) = RemoteSetup.binary(for: probe, bundle: bundle) else {
+            Issue.record("expected a release download")
+            return
+        }
+        #expect(url.absoluteString == "https://github.com/DeepanshuMishraa/den/releases/download/v\(version)/dend-linux-x86_64")
+        #expect(cache.path.hasSuffix("dend/\(version)/dend-linux-x86_64"))
+    }
+
     @Test func remoteCommandsHaveNoNestedSingleQuotes() {
         let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample den@mac"
         for command in [RemoteSetup.probeCommand, RemoteSetup.installCommand, RemoteSetup.persistCommand, RemoteSetup.streamCommand, RemoteSetup.authorizeCommand(publicKey: key)] {

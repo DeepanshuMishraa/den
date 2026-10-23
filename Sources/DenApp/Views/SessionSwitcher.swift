@@ -44,7 +44,7 @@ struct SessionMenu: View {
                 // Reconnecting a host that needs a restart asks again.
                 case .failed, .reconnecting, .disconnected, .needsRestart: rows.append(.reconnect(host.id))
                 case .connected: rows += [.newSessionOn(host.id), .disconnect(host.id)]
-                case .connecting, .uploading, nil: break
+                case .connecting, .downloading, .uploading, nil: break
                 }
             }
         } else {

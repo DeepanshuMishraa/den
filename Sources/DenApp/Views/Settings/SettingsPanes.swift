@@ -930,6 +930,7 @@ private extension RemoteState {
     var summary: String {
         switch self {
         case .connecting(let step): step
+        case .downloading(let received, let total): "Downloading dend… \(total > 0 ? received * 100 / total : 0)%"
         case .uploading(let sent, let total, _): "Sending dend… \(total > 0 ? sent * 100 / total : 0)%"
         case .needsLogin: "Needs login"
         case .connected(let hostName): "Connected to \(hostName)"
@@ -943,7 +944,7 @@ private extension RemoteState {
     var dotColor: Color {
         switch self {
         case .connected: .green
-        case .connecting, .uploading, .reconnecting: .orange
+        case .connecting, .downloading, .uploading, .reconnecting: .orange
         case .needsLogin, .needsRestart, .failed: .red
         case .disconnected: .gray
         }

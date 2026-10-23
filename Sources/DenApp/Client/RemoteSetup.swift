@@ -1,4 +1,5 @@
 import CryptoKit
+import DenProtocol
 import Foundation
 
 /// Getting dend onto a host: find out what it runs, upload the matching
@@ -23,7 +24,8 @@ enum RemoteSetup {
 
     /// Registers dend to start at boot: a systemd user service on Linux, a
     /// LaunchAgent on macOS, plus lingering so logind keeps the user manager
-    /// (and dend) alive after the last SSH login ends. Idempotent,
+    /// (and dend) alive after the last SSH login ends. Lingering comes first
+    /// so the user manager is up for `systemctl --user`. Idempotent,
     /// best-effort and silent: hosts without systemd/launchctl just skip it,
     /// and on-demand start over SSH still covers them.
     ///
@@ -32,7 +34,9 @@ enum RemoteSetup {
     /// (an indented XML declaration would invalidate the plist, and an
     /// indented EOF would not terminate the heredoc).
     private static let registerServiceScript = #"""
+if command -v loginctl >/dev/null 2>&1; then loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true; fi
 if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/den-dend.service" <<EOF
 [Unit]
@@ -49,7 +53,6 @@ EOF
 systemctl --user daemon-reload >/dev/null 2>&1 || true
 systemctl --user enable --now den-dend.service >/dev/null 2>&1 || true
 fi
-if command -v loginctl >/dev/null 2>&1; then loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true; fi
 if [ "$(uname -s)" = "Darwin" ]; then
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$HOME/Library/LaunchAgents/den.dend.plist" <<EOF
@@ -121,11 +124,20 @@ fi
         }
     }
 
-    /// The dend build for a host, shipped next to Den's executable:
-    /// `dend-linux-<arch>` from scripts/build-dend-linux.sh, or Den's own
-    /// dend for a Mac of the same architecture.
-    static func binary(for probe: Probe) -> Result<URL, SSH.Failure> {
-        guard let dir = Bundle.main.executableURL?.deletingLastPathComponent() else {
+    /// Where a host's dend build comes from.
+    enum Source: Equatable {
+        /// Shipped with Den, or downloaded earlier.
+        case file(URL)
+        /// This Den's release asset, downloaded to `cache` before installing.
+        case release(URL, cache: URL)
+    }
+
+    /// The dend build for a host: `dend-linux-<arch>` shipped next to Den's
+    /// executable (scripts/build-dend-linux.sh) or downloaded from this
+    /// version's GitHub release, or Den's own dend for a Mac of the same
+    /// architecture.
+    static func binary(for probe: Probe, bundle: Bundle = .main) -> Result<Source, SSH.Failure> {
+        guard let dir = bundle.executableURL?.deletingLastPathComponent() else {
             return .failure(.launch("Den can't locate its own executable to find dend builds."))
         }
         let fm = FileManager.default
@@ -133,8 +145,16 @@ fi
         case "Linux":
             let name = "dend-linux-\(probe.arch)"
             let candidates = [dir.appending(path: name), dir.deletingLastPathComponent().appending(path: "Resources/\(name)")]
-            if let found = candidates.first(where: { fm.isExecutableFile(atPath: $0.path) }) { return .success(found) }
-            return .failure(.launch("This Den has no dend build for Linux \(probe.arch), so nothing was installed on the host. Build it with scripts/build-dend-linux.sh (or bundle.sh), then connect again."))
+            if let found = candidates.first(where: { fm.isExecutableFile(atPath: $0.path) }) { return .success(.file(found)) }
+            let info = bundle.infoDictionary
+            guard let version = info?["CFBundleShortVersionString"] as? String, version != "0.0.0",
+                  let repository = ReleaseNotes.repository(feed: (info?["SUFeedURL"] as? String).flatMap(URL.init(string:))),
+                  let url = URL(string: "https://github.com/\(repository)/releases/download/v\(version)/\(name)") else {
+                return .failure(.launch("This Den build has no dend for Linux \(probe.arch) and no release to download it from, so nothing was installed on the host. Build it with scripts/build-dend-linux.sh, then connect again."))
+            }
+            let cache = DenPaths.supportDirectory.appending(path: "dend/\(version)/\(name)")
+            if fm.isExecutableFile(atPath: cache.path) { return .success(.file(cache)) }
+            return .success(.release(url, cache: cache))
         case "Darwin":
             #if arch(arm64)
             let local = "arm64"
@@ -145,10 +165,55 @@ fi
             guard probe.arch == local, fm.isExecutableFile(atPath: own.path) else {
                 return .failure(.launch("This Den only carries dend for \(local) Macs; the host is a \(probe.arch) Mac. Nothing was installed."))
             }
-            return .success(own)
+            return .success(.file(own))
         default:
             return .failure(.launch("Den runs dend on Linux and macOS hosts; this one reports \(probe.os) \(probe.arch). Nothing was installed."))
         }
+    }
+
+    /// Downloads a release's dend to `cache`, reporting bytes received and
+    /// the expected total (0 when the server didn't say). Cancelling the
+    /// calling task stops it; nothing is cached unless it completes.
+    static func download(_ url: URL, to cache: URL,
+                         progress: @escaping @Sendable (Int, Int) -> Void) async -> Result<URL, SSH.Failure> {
+        let name = cache.lastPathComponent
+        let bytes: URLSession.AsyncBytes, response: URLResponse
+        do {
+            (bytes, response) = try await URLSession.shared.bytes(from: url)
+        } catch {
+            return .failure(.launch("Den couldn't download \(name) from \(url.absoluteString) (\(error.localizedDescription)). Nothing was installed on the host; check your connection and connect again."))
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            let hint = status == 404 ? "This release doesn't include it; update Den, or build it with scripts/build-dend-linux.sh." : "Try connecting again."
+            return .failure(.launch("GitHub answered \(status) for \(url.absoluteString), so nothing was installed on the host. \(hint)"))
+        }
+        let total = max(Int(response.expectedContentLength), 0)
+        var data = Data()
+        data.reserveCapacity(total)
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count & 0x3FFFF == 0 { progress(data.count, total) }
+            }
+        } catch {
+            return .failure(.launch("Downloading \(name) stopped after \(data.count >> 20) MB (\(error.localizedDescription)). Nothing was installed on the host; connect again to retry."))
+        }
+        guard total == 0 || data.count == total else {
+            return .failure(.launch("Downloading \(name) ended early (\(data.count) of \(total) bytes). Nothing was installed on the host; connect again to retry."))
+        }
+        progress(data.count, total)
+        do {
+            let fm = FileManager.default
+            try fm.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let partial = cache.appendingPathExtension("partial")
+            try data.write(to: partial, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: partial.path)
+            _ = try fm.replaceItemAt(cache, withItemAt: partial)
+        } catch {
+            return .failure(.launch("Den downloaded \(name) but couldn't save it to \(cache.path) (\(error.localizedDescription)). Nothing was installed on the host."))
+        }
+        return .success(cache)
     }
 
     static func sha256(of url: URL) -> String? {

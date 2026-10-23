@@ -821,6 +821,7 @@ final class AppModel {
             case .remote(let id):
                 remoteStates[id] = .connected(hostName: name)
                 retryDelays[id] = nil
+                endSetupProgress(id, "Connected to \(remoteHost(id)?.label ?? name)")
                 if version >= 5 {
                     Task { [weak self] in
                         if let (home, _) = await self?.listDirectory("~", on: host) { self?.hostHomes[host] = home }
@@ -1115,12 +1116,15 @@ final class AppModel {
     /// Hosts whose dend boot persistence was ensured this launch (fresh
     /// install or persistCommand), so it isn't re-run on every reconnect.
     @ObservationIgnored private var persistenceEnsured: Set<RemoteHost.ID> = []
+    /// The progress toast each host's dend setup is showing.
+    @ObservationIgnored private var setupToasts: [RemoteHost.ID: UUID] = [:]
 
     /// Ends the connection and invalidates attempts and retries in flight.
     private func disconnectRemote(_ id: RemoteHost.ID) {
         attempts[id, default: 0] += 1
         setups.removeValue(forKey: id)?.cancel()
         channels.removeValue(forKey: id)?.terminate()
+        endSetupProgress(id)
         if connections[.remote(id)] != nil { connectionClosed(.remote(id), "disconnected") }
     }
 
@@ -1144,18 +1148,38 @@ final class AppModel {
         let binary: URL
         switch RemoteSetup.binary(for: probe) {
         case .failure(let failure): return setupFailed(host, failure)
-        case .success(let url): binary = url
+        case .success(.file(let url)): binary = url
+        case .success(.release(let url, let cache)):
+            let what = "dend for \(probe.os) \(probe.arch)"
+            remoteStates[id] = .downloading(received: 0, total: 0)
+            showSetupProgress(id, "Downloading \(what)…", 0)
+            let downloaded = await RemoteSetup.download(url, to: cache) { [weak self] received, total in
+                Task { @MainActor in
+                    guard let self, self.attempts[id] == attempt else { return }
+                    self.remoteStates[id] = .downloading(received: received, total: total)
+                    let fraction = total > 0 ? Double(received) / Double(total) : nil
+                    self.showSetupProgress(id, "Downloading \(what)… \(fraction.map { "\(Int($0 * 100))%" } ?? "\(received >> 20) MB")", fraction ?? 0)
+                }
+            }
+            guard attempts[id] == attempt else { return }
+            switch downloaded {
+            case .failure(let failure): return setupFailed(host, failure)
+            case .success(let url): binary = url
+            }
         }
         if RemoteSetup.sha256(of: binary) != probe.installedHash {
             guard let data = try? Data(contentsOf: binary) else {
                 return setupFailed(host, .launch("Den could not read its dend build at \(binary.path). Nothing was installed."))
             }
             let total = data.count, isUpdate = probe.installedHash != nil
+            let verb = isUpdate ? "Updating" : "Installing"
             remoteStates[id] = .uploading(sent: 0, total: total, isUpdate: isUpdate)
+            showSetupProgress(id, "\(verb) dend on \(host.label)…", 0)
             let installed = await ssh.run(RemoteSetup.installCommand, input: data, compress: true) { [weak self] sent in
                 Task { @MainActor in
                     guard let self, self.attempts[id] == attempt else { return }
                     self.remoteStates[id] = .uploading(sent: sent, total: total, isUpdate: isUpdate)
+                    self.showSetupProgress(id, "\(verb) dend on \(host.label)… \(sent * 100 / max(total, 1))%", Double(sent) / Double(max(total, 1)))
                 }
             }
             guard attempts[id] == attempt else { return }
@@ -1175,6 +1199,7 @@ final class AppModel {
         }
 
         remoteStates[id] = .connecting(step: "Attaching to \(host.address)…")
+        if setupToasts[id] != nil { showSetupProgress(id, "Starting dend on \(host.label)…", 1) }
         switch ssh.openChannel(RemoteSetup.streamCommand) {
         case .failure(let failure):
             setupFailed(host, failure)
@@ -1187,8 +1212,24 @@ final class AppModel {
         }
     }
 
+    /// Mirrors a host's dend download and install into a progress toast,
+    /// for hosts you're waiting on (not background reconnects).
+    private func showSetupProgress(_ id: RemoteHost.ID, _ message: String, _ fraction: Double) {
+        guard revealOnConnect.contains(id) else { return }
+        showUpdateProgress(message, progress: fraction)
+        if let toast { setupToasts[id] = toast.id }
+    }
+
+    /// Takes down a host's setup toast, if it's still the one on screen,
+    /// showing `message` in its place.
+    private func endSetupProgress(_ id: RemoteHost.ID, _ message: String? = nil) {
+        guard let toastID = setupToasts.removeValue(forKey: id), toast?.id == toastID else { return }
+        if let message { showToast(message) } else { dismissToast() }
+    }
+
     private func setupFailed(_ host: RemoteHost, _ failure: SSH.Failure) {
         let id = host.id
+        endSetupProgress(id)
         switch failure {
         case .authentication:
             remoteStates[id] = .needsLogin
@@ -1213,6 +1254,7 @@ final class AppModel {
     private func remoteClosed(_ id: RemoteHost.ID, attempt: Int, reason: String, channel: SSH.Channel) {
         guard attempts[id] == attempt else { return }
         channels[id] = nil
+        endSetupProgress(id)
         connectionClosed(.remote(id), reason)
         let said = channel.lastError
         scheduleRetry(id, reason: said.isEmpty ? "The connection closed. Sessions keep running on the host." : said)
@@ -1308,7 +1350,7 @@ final class AppModel {
         let name = remoteHost(id)?.address ?? "the host"
         let message = switch remoteStates[id] {
         case .connecting(let step): step
-        case .uploading(let sent, let total, let isUpdate): HostStatus.detail(.uploading(sent: sent, total: total, isUpdate: isUpdate))
+        case .downloading, .uploading: remoteStates[id].map(HostStatus.detail) ?? ""
         case .needsLogin: "\(name) needs you to log in."
         case .reconnecting(let reason, let retryIn): "Lost \(name): \(reason) Retrying in \(retryIn)s; your sessions keep running there."
         case .failed(let reason): reason

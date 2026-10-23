@@ -7,6 +7,7 @@ enum HostStatus {
     static func short(_ state: RemoteState) -> String {
         switch state {
         case .connecting: "Connecting…"
+        case .downloading(let received, let total): "Downloading dend \(percent(received, total))%"
         case .uploading(let sent, let total, let isUpdate): "\(isUpdate ? "Updating" : "Installing") dend \(percent(sent, total))%"
         case .needsLogin: "Needs login"
         case .connected: "Connected"
@@ -21,6 +22,8 @@ enum HostStatus {
     static func detail(_ state: RemoteState) -> String {
         switch state {
         case .connecting(let step): step
+        case .downloading(let received, let total):
+            "Downloading dend for the host: \(received >> 20)\(total > 0 ? " of \(total >> 20)" : "") MB. It's installed there next."
         case .uploading(let sent, let total, let isUpdate):
             "\(isUpdate ? "Updating" : "Installing") dend on the host: \(sent >> 20) of \(total >> 20) MB sent. Slow links take a few minutes."
         case .needsLogin: "Key login was refused. Log in with a user name and password."
@@ -35,7 +38,7 @@ enum HostStatus {
     static func color(_ state: RemoteState?, theme: Theme) -> Color {
         switch state {
         case .connected: .green
-        case .connecting, .uploading, .reconnecting, .needsRestart: .orange
+        case .connecting, .downloading, .uploading, .reconnecting, .needsRestart: .orange
         case .needsLogin, .failed: .red
         case .disconnected, nil: theme.tertiaryText
         }
