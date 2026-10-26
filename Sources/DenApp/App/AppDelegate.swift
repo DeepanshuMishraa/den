@@ -113,7 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("Den goto: active changed=\(before != model.activeTab) isLast=\(model.activeTab == model.tabs.last?.id)")
             case "toast": model.showToast("Copied to clipboard")
             case _ where part.hasPrefix("style:"):
-                if let s = InterfaceStyle(rawValue: String(part.dropFirst(6))) { model.interfaceStyle = s }
+                if let s = InterfaceStyle(stored: String(part.dropFirst(6))) { model.interfaceStyle = s }
+            case _ where part.hasPrefix("tint:"):
+                model.themeTint = String(part.dropFirst(5)) != "off"
             case "compact": model.density = .compact
             case "comfortable": model.density = .comfortable
             case "styles": model.palette = .interfaceStyle

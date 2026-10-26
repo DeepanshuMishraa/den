@@ -3,7 +3,7 @@ import Foundation
 /// Den's built-in themes: popular terminal themes with their published
 /// palettes, copied verbatim. Each entry names its source: the theme's own
 /// Ghostty port where the project ships one, else the copy bundled with
-/// Ghostty (iTerm2-Color-Schemes). Den's own 41 generated themes follow.
+/// Ghostty (iTerm2-Color-Schemes). Rex's own 41 themes follow.
 enum ThemeCatalog {
     static let dark: [Theme] = [
         // catppuccin/ghostty
@@ -115,34 +115,63 @@ enum ThemeCatalog {
         Theme(published: "Cobalt2", background: 0x132738, foreground: 0xFFFFFF, cursor: 0xF0CC09, selection: 0x18354F,
               ansi: [0x000000, 0xFF0000, 0x38DE21, 0xFFE50A, 0x1460D2, 0xFF005D, 0x00BBBB, 0xBBBBBB, 0x555555, 0xF40E17, 0x3BD01D, 0xEDC809, 0x5555FF, 0xFF55FF, 0x6AE3FA, 0xFFFFFF], selectionForeground: 0xB5B5B5),
     ] + [
-        ThemeSpec(name: "Amber Alert", appearance: .dark, background: 0x17120A, foreground: 0xF2C77A, accentHue: 75, hueShift: 8, chroma: 1.1),
-        ThemeSpec(name: "Aurora Overdrive", appearance: .dark, background: 0x101826, foreground: 0xDCE8F2, accentHue: 170, chroma: 1.1),
-        ThemeSpec(name: "Black Coffee", appearance: .dark, background: 0x101010, foreground: 0xE6E6E6, accentHue: 250, chroma: 0.35),
-        ThemeSpec(name: "Blood Moon", appearance: .dark, background: 0x1E1012, foreground: 0xEAD7D2, accentHue: 18, chroma: 1.05),
-        ThemeSpec(name: "Blue Steel", appearance: .dark, background: 0x0F1A33, foreground: 0xD2DCF2, accentHue: 252, chroma: 1.1),
-        ThemeSpec(name: "Bog Witch", appearance: .dark, background: 0x172019, foreground: 0xDAE3D2, accentHue: 132),
-        ThemeSpec(name: "Cool Ranch Dark", appearance: .dark, background: 0x1A1D1F, foreground: 0xD9D6CF, accentHue: 245),
-        ThemeSpec(name: "Curry Night", appearance: .dark, background: 0x1A1610, foreground: 0xF2E4C4, accentHue: 80),
-        ThemeSpec(name: "Deep Sea Rave", appearance: .dark, background: 0x0B1622, foreground: 0xC9D7E3, accentHue: 230, hueShift: -5),
-        ThemeSpec(name: "Desert Heat", appearance: .dark, background: 0x22171A, foreground: 0xF2DDD0, accentHue: 32),
-        ThemeSpec(name: "Espresso Shot", appearance: .dark, background: 0x1F1913, foreground: 0xE8DCCB, accentHue: 55),
-        ThemeSpec(name: "Forest Rave", appearance: .dark, background: 0x16201B, foreground: 0xD0DDD3, accentHue: 150, chroma: 0.8),
-        ThemeSpec(name: "Ghost Pepper", appearance: .dark, background: 0x1F1311, foreground: 0xF1D9CB, accentHue: 38, chroma: 1.15),
-        ThemeSpec(name: "Gin & Tonic", appearance: .dark, background: 0x141C19, foreground: 0xD3DED7, accentHue: 160, chroma: 0.85),
-        ThemeSpec(name: "Grape Escape", appearance: .dark, background: 0x1E1726, foreground: 0xE4D8F0, accentHue: 300),
-        ThemeSpec(name: "Heartbreaker", appearance: .dark, background: 0x1F1418, foreground: 0xF0DCE2, accentHue: 352),
-        ThemeSpec(name: "Hot Coals", appearance: .dark, background: 0x1E1514, foreground: 0xE8D6CF, accentHue: 28),
-        ThemeSpec(name: "Ice Cold", appearance: .dark, background: 0x0E2A33, foreground: 0xD3E4E6, accentHue: 182),
-        ThemeSpec(name: "Mainframe", appearance: .dark, background: 0x0C140C, foreground: 0xB9F2B0, accentHue: 140, chroma: 1.2),
-        ThemeSpec(name: "Night Shift", appearance: .dark, background: 0x111520, foreground: 0xD5D9E6, accentHue: 240, chroma: 0.9),
-        ThemeSpec(name: "Quicksilver Dark", appearance: .dark, background: 0x1B1C1E, foreground: 0xE4E5E7, accentHue: 232, chroma: 0.6),
-        ThemeSpec(name: "Riptide", appearance: .dark, background: 0x121A1F, foreground: 0xD7E1E6, accentHue: 212),
-        ThemeSpec(name: "Slate Assassin", appearance: .dark, background: 0x1C1F21, foreground: 0xD4D2CC, accentHue: 200, chroma: 0.8),
-        ThemeSpec(name: "Smoke Break", appearance: .dark, background: 0x1F1E1D, foreground: 0xE2DCD2, accentHue: 40, chroma: 0.85),
-        ThemeSpec(name: "Synthwave Riot", appearance: .dark, background: 0x120E1F, foreground: 0xF0E6FF, accentHue: 322, chroma: 1.4),
-        ThemeSpec(name: "Toxic Lagoon", appearance: .dark, background: 0x0D2226, foreground: 0xCFE5E5, accentHue: 198),
-        ThemeSpec(name: "Witching Hour", appearance: .dark, background: 0x1C1A2B, foreground: 0xDCD7EE, accentHue: 285),
-    ].map(Theme.generate)
+        // Superlogical Rex's built-in themes, copied verbatim from its
+        // themes.json terminal palettes and UI accents.
+        Theme(published: "Abyssal Trench", background: 0x06101A, foreground: 0xB8CDD9, cursor: 0x4FE3C1, selection: 0x143349,
+              ansi: [0x0E1C29, 0xE26A6A, 0x52C79A, 0xD4B25E, 0x4A90C9, 0x9179C9, 0x3FBDC9, 0x9DB4C2, 0x47606F, 0xF18787, 0x74DCB2, 0xE6CA7F, 0x6DABDD, 0xAB95DC, 0x64D5DF, 0xDCEBF3], selectionForeground: 0xDCEBF3, accent: 0x4FE3C1),
+        Theme(published: "Basalt Shore", background: 0x14181A, foreground: 0xC8D3D3, cursor: 0x7FD8C4, selection: 0x23393C,
+              ansi: [0x1F2527, 0xDD7A72, 0x7CBFA0, 0xD2B071, 0x729FC0, 0xA68FC0, 0x66C2B5, 0xA9B7B7, 0x576466, 0xEA948D, 0x97D5B7, 0xE3C78E, 0x8FB8D4, 0xBCAAD4, 0x86D9CC, 0xE5EDED], selectionForeground: 0xE5EDED, accent: 0x7FD8C4),
+        Theme(published: "Cathode Amber", background: 0x140F08, foreground: 0xF0C88A, cursor: 0xFFB642, selection: 0x4A3212,
+              ansi: [0x241A0E, 0xE8763F, 0xB8A83F, 0xFFB642, 0xC98D4F, 0xCF8A62, 0xD4A852, 0xCFA972, 0x7A6238, 0xF2925F, 0xD0C05E, 0xFFCC70, 0xDCA86E, 0xE2A67F, 0xE7C077, 0xFFE8C2], selectionForeground: 0xFFE8C2, accent: 0xFFB642),
+        Theme(published: "Charcoal Atelier", background: 0x161616, foreground: 0xD6D2CC, cursor: 0xE05D3A, selection: 0x3A3835,
+              ansi: [0x222222, 0xD96A4D, 0x9AAB84, 0xCFAE7A, 0x8AA0B4, 0xB193A8, 0x8FAFA8, 0xB5B1AB, 0x5F5C58, 0xE8886E, 0xB3C39D, 0xE0C493, 0xA4B9CC, 0xC8ADC0, 0xA8C7C0, 0xEFECE7], selectionForeground: 0xEFECE7, accent: 0xE05D3A),
+        Theme(published: "Cinder Peak", background: 0x151011, foreground: 0xDDCCC6, cursor: 0xFF6B4A, selection: 0x45262A,
+              ansi: [0x231A1B, 0xF25C4A, 0x97AD72, 0xF0A04F, 0x9188C4, 0xD47A94, 0x8FB2A8, 0xC0B0AB, 0x6D5A58, 0xFF7F68, 0xB1C58D, 0xFCBA70, 0xABA3D6, 0xE596AC, 0xA9CABF, 0xF2E7E3], selectionForeground: 0xF2E7E3, accent: 0xFF6B4A),
+        Theme(published: "Cobalt Foundry", background: 0x10151C, foreground: 0xC2CEDB, cursor: 0x4FA8FF, selection: 0x1F3A5C,
+              ansi: [0x1A2129, 0xE57373, 0x81B366, 0xD4A95F, 0x4F95E0, 0x9D85CF, 0x56B3C4, 0xA2B0BE, 0x56626F, 0xEF8F8F, 0x9CC983, 0xE5C07E, 0x74AEEC, 0xB5A0E0, 0x78CBDA, 0xE2EAF2], selectionForeground: 0xE2EAF2, accent: 0x4FA8FF),
+        Theme(published: "Ember Hollow", background: 0x171210, foreground: 0xE0CFC4, cursor: 0xF0955C, selection: 0x47302A,
+              ansi: [0x241B17, 0xE06C4F, 0xA3B06A, 0xE8A75A, 0x8E9FB3, 0xC98A8E, 0x8FB0A2, 0xC3B3A8, 0x6B5A50, 0xF08767, 0xBCC985, 0xF5BF77, 0xA8B9CC, 0xDDA4A7, 0xA9C9BA, 0xF3E8E0], selectionForeground: 0xF3E8E0, accent: 0xF0955C),
+        Theme(published: "Heliotrope Haze", background: 0x14101F, foreground: 0xDCD2EE, cursor: 0xFF7EDB, selection: 0x3A2B5C,
+              ansi: [0x211A33, 0xF66E93, 0x72E0AA, 0xFDCA6A, 0x7A9BF5, 0xC980F2, 0x5FD0E5, 0xB6ABD0, 0x6A5F85, 0xFA8CAB, 0x92EDC0, 0xFED98C, 0x97B2F8, 0xDA9FF6, 0x82E0EF, 0xF0EAF9], selectionForeground: 0xF0EAF9, accent: 0xFF7EDB),
+        Theme(published: "Ink Meridian", background: 0x101623, foreground: 0xCCD6EA, cursor: 0x83A8F2, selection: 0x26365A,
+              ansi: [0x1A2233, 0xDE6E7C, 0x7CBF8E, 0xD9B06E, 0x6F96E8, 0xA687E0, 0x67B7CF, 0xAAB8D0, 0x58657F, 0xEC8B97, 0x98D4A7, 0xE9C78C, 0x8DB0F2, 0xBDA3EC, 0x87CEE2, 0xE6ECF7], selectionForeground: 0xE6ECF7, accent: 0x83A8F2),
+        Theme(published: "Juniper Smoke", background: 0x171B18, foreground: 0xCCD5CD, cursor: 0xA9C7AD, selection: 0x303A32,
+              ansi: [0x232823, 0xD59090, 0x99BD9B, 0xD3BB8B, 0x8EA8C0, 0xB39CBB, 0x92BAB2, 0xB4BFB5, 0x5D6A5F, 0xE2A8A8, 0xB1D1B2, 0xE3CEA4, 0xA7BED3, 0xC8B3CF, 0xABD0C8, 0xE8EDE8], selectionForeground: 0xE8EDE8, accent: 0xA9C7AD),
+        Theme(published: "Merino Dark", background: 0x0D1117, foreground: 0xE6EDF3, cursor: 0x2F81F7, selection: 0xE6EDF3,
+              ansi: [0x484F58, 0xFF7B72, 0x3FB950, 0xD29922, 0x58A6FF, 0xBC8CFF, 0x39C5CF, 0xB1BAC4, 0x6E7681, 0xFFA198, 0x56D364, 0xE3B341, 0x79C0FF, 0xD2A8FF, 0x56D4DD, 0xFFFFFF], selectionForeground: 0x0D1117, accent: 0x2F81F7),
+        Theme(published: "Midnight Tundra", background: 0x0E141B, foreground: 0xC9D4DE, cursor: 0x8FB8D8, selection: 0x24384A,
+              ansi: [0x17202A, 0xD9707C, 0x7FB88A, 0xD8B174, 0x6DA3CF, 0xA58CC7, 0x6FB5B8, 0xAEBCCB, 0x4F6272, 0xE88A95, 0x99CFA3, 0xE8C88F, 0x8ABDE4, 0xBDA6DD, 0x8CCED0, 0xE6EEF5], selectionForeground: 0xE6EEF5, accent: 0x8FB8D8),
+        Theme(published: "Misty Forest", background: 0x131A16, foreground: 0xC4D2C5, cursor: 0x9DC2A0, selection: 0x2C3F33,
+              ansi: [0x1C2620, 0xCF7A70, 0x8FBF8F, 0xC9AD72, 0x77A3B5, 0xA793BB, 0x7CB5A3, 0xAEBBAF, 0x55665A, 0xE09489, 0xA9D6A6, 0xDDC48D, 0x93BCCB, 0xBFADD1, 0x97CDBB, 0xE2ECE2], selectionForeground: 0xE2ECE2, accent: 0x9DC2A0),
+        Theme(published: "Moss Cathedral", background: 0x0F1710, foreground: 0xC6D5C2, cursor: 0x8FD48F, selection: 0x27402A,
+              ansi: [0x1A261B, 0xD4756B, 0x74BD74, 0xCDB35E, 0x6D9CBA, 0xA488BD, 0x6BB8A0, 0xAABCA6, 0x52654F, 0xE39187, 0x92D492, 0xE0CA7E, 0x8AB6D1, 0xBBA4D2, 0x89D0B8, 0xE4EEE1], selectionForeground: 0xE4EEE1, accent: 0x8FD48F),
+        Theme(published: "Neon Arcade", background: 0x0D0D15, foreground: 0xD8DCF0, cursor: 0xFF4FD8, selection: 0x2C2C4A,
+              ansi: [0x1A1A28, 0xFF5370, 0x3DDC97, 0xFFD166, 0x4F9CFF, 0xC774FF, 0x2FD6E0, 0xB8BCD8, 0x5C5E78, 0xFF7A92, 0x6CEEB4, 0xFFE08A, 0x7CB6FF, 0xDA9BFF, 0x63E6EE, 0xF0F2FF], selectionForeground: 0xF0F2FF, accent: 0xFF4FD8),
+        Theme(published: "Nocturne Rose", background: 0x191216, foreground: 0xE2CDD6, cursor: 0xF27FA5, selection: 0x442C38,
+              ansi: [0x271C22, 0xEC6D8B, 0x8CBA92, 0xDFAE79, 0x8F95D6, 0xCD85C0, 0x83B7B2, 0xC3AEB8, 0x6E5A63, 0xF68BA4, 0xA7D1AB, 0xEFC694, 0xAAB0E5, 0xDFA2D4, 0x9ECFCA, 0xF5E9EE], selectionForeground: 0xF5E9EE, accent: 0xF27FA5),
+        Theme(published: "Oxblood Library", background: 0x191012, foreground: 0xDFCBC2, cursor: 0xD96459, selection: 0x45272C,
+              ansi: [0x281A1D, 0xCF5A52, 0x94AD72, 0xD8A55C, 0x8F97B8, 0xC07E93, 0x8FB0A0, 0xC0ACA4, 0x705A58, 0xE07A70, 0xADC48C, 0xE8BE7C, 0xA9B1CC, 0xD49AAB, 0xA8C8B8, 0xF1E4DD], selectionForeground: 0xF1E4DD, accent: 0xD96459),
+        Theme(published: "Petrol Lagoon", background: 0x0C1618, foreground: 0xC2D8D8, cursor: 0x35D0C0, selection: 0x17393D,
+              ansi: [0x152325, 0xE0736E, 0x6CC48E, 0xD1B366, 0x5B9FC4, 0x9D8CCC, 0x3FC4B7, 0xA0B8B8, 0x4D6467, 0xEC8F88, 0x8ADAA8, 0xE2C985, 0x7DB8D8, 0xB5A7DD, 0x66D9CD, 0xDFEEEE], selectionForeground: 0xDFEEEE, accent: 0x35D0C0),
+        Theme(published: "Phosphor Archive", background: 0x0A120C, foreground: 0xA8E5A8, cursor: 0x58F158, selection: 0x1E4020,
+              ansi: [0x142314, 0xCF9A5F, 0x4FD24F, 0xA5DC5F, 0x55B884, 0x8FCE74, 0x5FDCB0, 0x8FC48F, 0x3F6B3F, 0xE5B578, 0x74E874, 0xBFEB82, 0x77D1A2, 0xAADE92, 0x82EDC6, 0xD2F5D2], selectionForeground: 0xD2F5D2, accent: 0x58F158),
+        Theme(published: "Polar Aurora", background: 0x0B1016, foreground: 0xCFDAE2, cursor: 0x6EF2B8, selection: 0x1D3547,
+              ansi: [0x151D26, 0xEE7189, 0x55DFA2, 0xE5C568, 0x5FA5E8, 0xA888EF, 0x47D3D6, 0xA9BAC6, 0x526270, 0xF78DA1, 0x79EEB9, 0xF1D787, 0x82BCF2, 0xBFA3F6, 0x6CE5E8, 0xE8F1F7], selectionForeground: 0xE8F1F7, accent: 0x6EF2B8),
+        Theme(published: "Roasted Umber", background: 0x16110D, foreground: 0xD9C8B8, cursor: 0xC98A4B, selection: 0x3E3225,
+              ansi: [0x241C15, 0xCF6F52, 0x96A86A, 0xD3A35F, 0x8C95A8, 0xB58A92, 0x8FAC93, 0xBFAE9D, 0x6D5E50, 0xDF8A6E, 0xAFBF84, 0xE4BB7D, 0xA6AFC0, 0xC9A4AB, 0xA8C3AB, 0xEFE3D5], selectionForeground: 0xEFE3D5, accent: 0xC98A4B),
+        Theme(published: "Saffron Nightfall", background: 0x131320, foreground: 0xD9D4C8, cursor: 0xFFC247, selection: 0x33324E,
+              ansi: [0x1E1E30, 0xE0705F, 0x9CB56B, 0xFFC247, 0x7D8FD0, 0xBB87C0, 0x76B7AD, 0xB7B2A5, 0x625F72, 0xEE8B7A, 0xB6CC87, 0xFFD36E, 0x98A9E0, 0xD0A3D3, 0x93CFC5, 0xF1ECDF], selectionForeground: 0xF1ECDF, accent: 0xFFC247),
+        Theme(published: "Silver Point Dark", background: 0x131313, foreground: 0xB4B4B4, cursor: 0xF4F4F4, selection: 0xB4B4B4,
+              ansi: [0x1A1A1A, 0xB4B4B4, 0x707070, 0xB4B4B4, 0x707070, 0xB4B4B4, 0x707070, 0xB4B4B4, 0x707070, 0xF4F4F4, 0xB4B4B4, 0xF4F4F4, 0xB4B4B4, 0xF4F4F4, 0xB4B4B4, 0xF4F4F4], selectionForeground: 0x1A1A1A, accent: 0x767676),
+        Theme(published: "Sonoran Dusk", background: 0x171412, foreground: 0xDDD0BF, cursor: 0xE8A860, selection: 0x423528,
+              ansi: [0x26201C, 0xD96E56, 0xA0B06A, 0xE0A45C, 0x8598B0, 0xBD8AA2, 0x92B39C, 0xC2B4A3, 0x6E6355, 0xE88A72, 0xB8C786, 0xEFBC7C, 0xA0B2C8, 0xD1A5B8, 0xACCAB4, 0xF2E9DC], selectionForeground: 0xF2E9DC, accent: 0xE8A860),
+        Theme(published: "Static Noir", background: 0x0A0A0A, foreground: 0xEDEDED, cursor: 0xFF3B30, selection: 0x333333,
+              ansi: [0x1A1A1A, 0xFF4D42, 0x9FD08A, 0xE6C15C, 0x7FB2E8, 0xD093D0, 0x74CFD1, 0xC9C9C9, 0x666666, 0xFF6E64, 0xB7E2A3, 0xF2D47C, 0x9DC7F2, 0xE0AEDE, 0x93E1E2, 0xFFFFFF], selectionForeground: 0xFFFFFF, accent: 0xFF3B30),
+        Theme(published: "Velvet Dusk", background: 0x171122, foreground: 0xD6CBE6, cursor: 0xC9A1F0, selection: 0x372A52,
+              ansi: [0x241A35, 0xE07396, 0x83BB8D, 0xDCAE76, 0x7F95DC, 0xB98AE0, 0x7FB8C4, 0xB5AACB, 0x635677, 0xEF92AE, 0x9ED3A7, 0xEDC793, 0x9CAFE9, 0xCFA8F0, 0x9CD0DA, 0xEDE6F7], selectionForeground: 0xEDE6F7, accent: 0xC9A1F0),
+        Theme(published: "Whitby Bay", background: 0x272A38, foreground: 0xF7F7EE, cursor: 0xF7F7EE, selection: 0x434861,
+              ansi: [0x20222E, 0xFF5D57, 0x4DF08A, 0xF5F28A, 0xB696F7, 0xFF7ED1, 0x90ECF6, 0xF2F2EA, 0x66759F, 0xFF7A72, 0x72FA9E, 0xFBFCAE, 0xD0B0FB, 0xFC97D8, 0xAEFBF8, 0xFDFDFA], selectionForeground: 0xFDFDFA, accent: 0xB696F7),
+    ]
 
     static let light: [Theme] = [
         // catppuccin/ghostty
@@ -203,42 +232,55 @@ enum ThemeCatalog {
         Theme(published: "Alabaster", background: 0xF7F7F7, foreground: 0x000000, cursor: 0x007ACC, selection: 0xBFDBFE,
               ansi: [0x000000, 0xAA3731, 0x448C27, 0xCB9000, 0x325CC0, 0x7A3E9D, 0x0083B2, 0xB7B7B7, 0x777777, 0xF05050, 0x60CB00, 0xF2AF50, 0x007ACC, 0xE64CE6, 0x00AACB, 0xF7F7F7], selectionForeground: 0x000000),
     ] + [
-        ThemeSpec(name: "Cool Ranch Light", appearance: .light, background: 0xFBFAF7, foreground: 0x2B2A28, accentHue: 255),
-        ThemeSpec(name: "Grape Soda", appearance: .light, background: 0xF5F1FA, foreground: 0x352C45, accentHue: 292),
-        ThemeSpec(name: "Honey Butter", appearance: .light, background: 0xFBF6EA, foreground: 0x3A3326, accentHue: 62),
-        ThemeSpec(name: "Hot Off the Press", appearance: .light, background: 0xF0EFEB, foreground: 0x2A2A2A, accentHue: 250, chroma: 0.4),
-        ThemeSpec(name: "Matcha Latte", appearance: .light, background: 0xF2F8EC, foreground: 0x2C3A25, accentHue: 132),
-        ThemeSpec(name: "Mint Julep", appearance: .light, background: 0xEFF7F4, foreground: 0x22362F, accentHue: 165),
-        ThemeSpec(name: "Morning Glory", appearance: .light, background: 0xF6F8FB, foreground: 0x283040, accentHue: 246),
-        ThemeSpec(name: "Oat Milk", appearance: .light, background: 0xF7F9FA, foreground: 0x26313A, accentHue: 222),
-        ThemeSpec(name: "Pancake Stack", appearance: .light, background: 0xFBF4E2, foreground: 0x3A3024, accentHue: 25),
-        ThemeSpec(name: "Paper Cut", appearance: .light, background: 0xFAF8F2, foreground: 0x2E2C29, accentHue: 40, chroma: 0.7),
-        ThemeSpec(name: "Peach Fuzz", appearance: .light, background: 0xFDF2EA, foreground: 0x43302A, accentHue: 42),
-        ThemeSpec(name: "Quicksilver Light", appearance: .light, background: 0xF4F4F5, foreground: 0x2A2B2E, accentHue: 232, chroma: 0.6),
-        ThemeSpec(name: "Sriracha Sunrise", appearance: .light, background: 0xFBF0E8, foreground: 0x40291F, accentHue: 32),
-        ThemeSpec(name: "Sunscreen", appearance: .light, background: 0xF4F1EA, foreground: 0x2C3A42, accentHue: 212),
-    ].map(Theme.generate)
+        // Superlogical Rex's built-in themes, copied verbatim from its
+        // themes.json terminal palettes and UI accents.
+        Theme(published: "Alpine Milk", background: 0xFAFAFA, foreground: 0x333940, cursor: 0x4A90D9, selection: 0xD6E6F7,
+              ansi: [0x333940, 0xC94F46, 0x4A9256, 0xB28422, 0x3D7CC9, 0x8A5FB0, 0x2E8FA0, 0xD7DADE, 0x757D86, 0xE0655B, 0x58AB66, 0xC9982E, 0x5292DD, 0xA075C6, 0x3BA6B8, 0xFFFFFF], selectionForeground: 0x333940, accent: 0x3679BD),
+        Theme(published: "Buttercream Diner", background: 0xFBF3DD, foreground: 0x4D3F33, cursor: 0xD1603D, selection: 0xF2DFAE,
+              ansi: [0x4D3F33, 0xC8432F, 0x5C8A3C, 0xAC7C14, 0x3F74A8, 0xA2538C, 0x38857A, 0xECDFC2, 0x8A7A68, 0xE0553F, 0x6FA24A, 0xC79320, 0x5089BF, 0xB968A2, 0x479E91, 0xFFFCF2], selectionForeground: 0x4D3F33, accent: 0xC05432),
+        Theme(published: "Coastal Linen", background: 0xFAF6EE, foreground: 0x3D4652, cursor: 0x2F8FA6, selection: 0xCBE5E8,
+              ansi: [0x3D4652, 0xC25547, 0x57904D, 0xAC8125, 0x3A74AD, 0x91589A, 0x2F8FA6, 0xE3DCCB, 0x7A828C, 0xD96A5A, 0x68A95D, 0xC39631, 0x4C89C4, 0xA86DB1, 0x3BA6BF, 0xFEFCF7], selectionForeground: 0x3D4652, accent: 0x208096),
+        Theme(published: "Glacier Mint", background: 0xF0F9F6, foreground: 0x2F4640, cursor: 0x2AA88A, selection: 0xC6EBDD,
+              ansi: [0x2F4640, 0xC05045, 0x3D9060, 0xA48224, 0x3F7AB8, 0x8858AB, 0x26948E, 0xD2E8E0, 0x6C837C, 0xD76458, 0x4AA971, 0xBB9830, 0x5190CC, 0x9E6EC1, 0x32ADA6, 0xFBFFFD], selectionForeground: 0x2F4640, accent: 0x00856B),
+        Theme(published: "Ivory Gallery", background: 0xFFFFFF, foreground: 0x1F2328, cursor: 0x1A6FD4, selection: 0xB6D5F5,
+              ansi: [0x1F2328, 0xC13A24, 0x2F7D3C, 0x9A6A00, 0x1A6FD4, 0x7D4BB5, 0x1B7C8C, 0xD0D7DE, 0x656D76, 0xDD4A30, 0x3A9449, 0xB37E0A, 0x388AE8, 0x9560CC, 0x2694A6, 0xFFFFFF], selectionForeground: 0x1F2328, accent: 0x1A6FD4),
+        Theme(published: "Lavender Postcard", background: 0xF7F4FB, foreground: 0x40374F, cursor: 0x7A5BBF, selection: 0xE2D6F5,
+              ansi: [0x40374F, 0xC04E56, 0x4A8F56, 0xA67E28, 0x4A6FC0, 0x8557B8, 0x3E8496, 0xDED7EC, 0x7D7590, 0xD86470, 0x58A866, 0xBF9334, 0x5D84D6, 0x9B6ECD, 0x4C9CB0, 0xFEFDFF], selectionForeground: 0x40374F, accent: 0x7A5BBF),
+        Theme(published: "Merino Light", background: 0xFFFFFF, foreground: 0x1F2328, cursor: 0x0969DA, selection: 0x1F2328,
+              ansi: [0x24292F, 0xCF222E, 0x116329, 0x9D5C00, 0x0969DA, 0x8250DF, 0x1B7C83, 0x6E7781, 0x57606A, 0xA40E26, 0x1A7F37, 0xC47A00, 0x218BFF, 0xA475F9, 0x3192AA, 0x8C959F], selectionForeground: 0xFFFFFF, accent: 0x0969DA),
+        Theme(published: "Newsprint Fog", background: 0xF2F2F0, foreground: 0x333331, cursor: 0xB3402E, selection: 0xDDDDD6,
+              ansi: [0x333331, 0xB3402E, 0x5D7F52, 0x987921, 0x4F6D94, 0x85607F, 0x4D7F7C, 0xD5D5D0, 0x78786F, 0xCC4F3B, 0x6F9562, 0xAF8E2C, 0x6182AB, 0x9B7494, 0x5E9692, 0xFDFDFB], selectionForeground: 0x333331, accent: 0xB3402E),
+        Theme(published: "Orchard Breeze", background: 0xF4F9EF, foreground: 0x3A4A35, cursor: 0x5DA24F, selection: 0xD4ECC4,
+              ansi: [0x3A4A35, 0xC65043, 0x4F9440, 0xA8831F, 0x4478B0, 0x90569C, 0x37897A, 0xD9E5CF, 0x75856B, 0xDD6455, 0x5FAE4E, 0xC1992B, 0x558DC6, 0xA76BB3, 0x45A191, 0xFCFEF9], selectionForeground: 0x3A4A35, accent: 0x448437),
+        Theme(published: "Peach Veranda", background: 0xFDF3EC, foreground: 0x4D3A33, cursor: 0xE07A4F, selection: 0xF7D7C2,
+              ansi: [0x4D3A33, 0xC44F36, 0x578C42, 0xAB7C1C, 0x4472AC, 0x9C5589, 0x3A8878, 0xF0DDD0, 0x8A746A, 0xDC6146, 0x67A350, 0xC39228, 0x5687C2, 0xB26A9F, 0x48A08E, 0xFFFAF6], selectionForeground: 0x4D3A33, accent: 0xB95C34),
+        Theme(published: "Porcelain Morning", background: 0xF7F9FA, foreground: 0x2E3A42, cursor: 0x2277CC, selection: 0xCDE3F5,
+              ansi: [0x2E3A42, 0xC74E42, 0x3D8A4E, 0xB07C22, 0x2C6FBE, 0x8455A8, 0x22808A, 0xCFD8DD, 0x6D7D88, 0xE0604F, 0x4AA55F, 0xCF9226, 0x3D85D8, 0x9C6AC2, 0x2D99A5, 0xFFFFFF], selectionForeground: 0x2E3A42, accent: 0x2277CC),
+        Theme(published: "Silver Point Light", background: 0xF4F4F4, foreground: 0x1A1A1A, cursor: 0x1A1A1A, selection: 0x1A1A1A,
+              ansi: [0x1A1A1A, 0x5C5C5C, 0x8E8E8E, 0x5C5C5C, 0x8E8E8E, 0x5C5C5C, 0x8E8E8E, 0x8E8E8E, 0x5C5C5C, 0x1A1A1A, 0x5C5C5C, 0x1A1A1A, 0x5C5C5C, 0x1A1A1A, 0x5C5C5C, 0xF4F4F4], selectionForeground: 0xF4F4F4, accent: 0x767676),
+        Theme(published: "Sunlit Parchment", background: 0xF8F2E3, foreground: 0x4A3F2E, cursor: 0xB5722A, selection: 0xECD9A8,
+              ansi: [0x4A3F2E, 0xB8442F, 0x587F35, 0x9A7410, 0x3A6EA5, 0x96568E, 0x337A70, 0xE2D7BD, 0x85765E, 0xD4553C, 0x6B9642, 0xB58A1A, 0x4A82BD, 0xAD6BA4, 0x429388, 0xFDFAF1], selectionForeground: 0x4A3F2E, accent: 0xA86820),
+        Theme(published: "Terracotta Noon", background: 0xF9EFE6, foreground: 0x4A382C, cursor: 0xC05A35, selection: 0xF0D4B8,
+              ansi: [0x4A382C, 0xBD4A2D, 0x5F8A3A, 0xA97A16, 0x47709F, 0x9D5680, 0x3E8570, 0xEAD9C8, 0x857262, 0xD55C3C, 0x72A248, 0xC18F22, 0x5985B5, 0xB36B95, 0x4D9D86, 0xFEFAF5], selectionForeground: 0x4A382C, accent: 0xBE5834),
+    ]
 
-    static let defaultDark = "Catppuccin Mocha"
-    static let defaultLight = "Catppuccin Latte"
+    static let defaultDark = "Merino Dark"
+    static let defaultLight = "Merino Light"
 
-    /// Former names of Den's generated themes, so a theme picked before the
-    /// rename (stored by name in UserDefaults) still resolves.
+    /// Den's retired generated names, mapped to the Rex themes that replaced
+    /// them, so a theme picked before the switch still resolves.
     static let renamed: [String: String] = [
-        "Abyssal Trench": "Deep Sea Rave", "Basalt Shore": "Slate Assassin", "Cathode Amber": "Amber Alert",
-        "Charcoal Atelier": "Smoke Break", "Cinder Peak": "Hot Coals", "Cobalt Foundry": "Blue Steel",
-        "Ember Hollow": "Ghost Pepper", "Heliotrope Haze": "Grape Escape", "Ink Meridian": "Night Shift",
-        "Juniper Smoke": "Gin & Tonic", "Merino Dark": "Cool Ranch Dark", "Midnight Tundra": "Ice Cold",
-        "Misty Forest": "Forest Rave", "Moss Cathedral": "Bog Witch", "Neon Arcade": "Synthwave Riot",
-        "Nocturne Rose": "Heartbreaker", "Oxblood Library": "Blood Moon", "Petrol Lagoon": "Toxic Lagoon",
-        "Phosphor Archive": "Mainframe", "Polar Aurora": "Aurora Overdrive", "Roasted Umber": "Espresso Shot",
-        "Saffron Nightfall": "Curry Night", "Silver Point Dark": "Quicksilver Dark", "Sonoran Dusk": "Desert Heat",
-        "Static Noir": "Black Coffee", "Velvet Dusk": "Witching Hour", "Whitby Bay": "Riptide",
-        "Merino Light": "Cool Ranch Light", "Alpine Milk": "Oat Milk", "Buttercream Diner": "Pancake Stack",
-        "Coastal Linen": "Sunscreen", "Glacier Mint": "Mint Julep", "Ivory Gallery": "Paper Cut",
-        "Lavender Postcard": "Grape Soda", "Newsprint Fog": "Hot Off the Press", "Orchard Breeze": "Matcha Latte",
-        "Peach Veranda": "Peach Fuzz", "Porcelain Morning": "Morning Glory", "Silver Point Light": "Quicksilver Light",
-        "Sunlit Parchment": "Honey Butter", "Terracotta Noon": "Sriracha Sunrise",
+        "Amber Alert": "Cathode Amber", "Aurora Overdrive": "Polar Aurora", "Black Coffee": "Static Noir", "Blood Moon": "Oxblood Library",
+        "Blue Steel": "Cobalt Foundry", "Bog Witch": "Moss Cathedral", "Cool Ranch Dark": "Merino Dark", "Cool Ranch Light": "Merino Light",
+        "Curry Night": "Saffron Nightfall", "Deep Sea Rave": "Abyssal Trench", "Desert Heat": "Sonoran Dusk", "Espresso Shot": "Roasted Umber",
+        "Forest Rave": "Misty Forest", "Ghost Pepper": "Ember Hollow", "Gin & Tonic": "Juniper Smoke", "Grape Escape": "Heliotrope Haze",
+        "Grape Soda": "Lavender Postcard", "Heartbreaker": "Nocturne Rose", "Honey Butter": "Sunlit Parchment", "Hot Coals": "Cinder Peak",
+        "Hot Off the Press": "Newsprint Fog", "Ice Cold": "Midnight Tundra", "Mainframe": "Phosphor Archive", "Matcha Latte": "Orchard Breeze",
+        "Mint Julep": "Glacier Mint", "Morning Glory": "Porcelain Morning", "Night Shift": "Ink Meridian", "Oat Milk": "Alpine Milk",
+        "Pancake Stack": "Buttercream Diner", "Paper Cut": "Ivory Gallery", "Peach Fuzz": "Peach Veranda", "Quicksilver Dark": "Silver Point Dark",
+        "Quicksilver Light": "Silver Point Light", "Riptide": "Whitby Bay", "Slate Assassin": "Basalt Shore", "Smoke Break": "Charcoal Atelier",
+        "Sriracha Sunrise": "Terracotta Noon", "Sunscreen": "Coastal Linen", "Synthwave Riot": "Neon Arcade", "Toxic Lagoon": "Petrol Lagoon",
+        "Witching Hour": "Velvet Dusk",
     ]
 
     static func named(_ name: String) -> Theme? {

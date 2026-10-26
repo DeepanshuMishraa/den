@@ -12,7 +12,7 @@ struct AppearanceSettings: View {
         @Bindable var model = model
         let theme = model.theme
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSection("Appearance", footer: "Modern draws the window in Liquid Glass tinted with your theme; Blended frosts the desktop behind it; Themed is fully opaque.") {
+            SettingsSection("Appearance", footer: "Preview Glass or Classic materials with the current theme tint, then select a surface style.") {
                 // Side by side when there's room, stacked when not.
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 0) {
@@ -28,6 +28,10 @@ struct AppearanceSettings: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                SettingsToggle(title: "Theme tint", detail: "Apply the selected theme's colors to interface surfaces.", isOn: Binding(
+                    get: { model.themeTint },
+                    set: { value in withAnimation(.easeInOut(duration: 0.25)) { model.themeTint = value } }))
             }
 
             SettingsSection("Tabs") {
@@ -109,7 +113,7 @@ struct AppearanceSettings: View {
                 ForEach(InterfaceStyle.allCases, id: \.self) { style in
                     SettingsTile(title: style.title, selected: model.interfaceStyle == style,
                                  action: { withAnimation(.easeInOut(duration: 0.25)) { model.interfaceStyle = style } }) {
-                        StylePreview(style: style, theme: model.theme)
+                        StylePreview(style: style, theme: model.theme, themeTint: model.themeTint)
                     }
                 }
             }
@@ -155,6 +159,9 @@ private extension AppearanceMode {
 private struct MiniWindow: View {
     let theme: Theme
     var chromeOpacity: Double = 1
+    /// nil uses the theme's terminal background; pass a neutral for the
+    /// untinted surface previews.
+    var paneFill: Color? = nil
 
     var body: some View {
         VStack(spacing: 2.5) {
@@ -165,7 +172,8 @@ private struct MiniWindow: View {
             .padding(.leading, 3)
             HStack(spacing: 2.5) {
                 ForEach(0 ..< 2, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 2.5, style: .continuous).fill(theme.background.color)
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(paneFill ?? theme.background.color)
                 }
             }
         }
@@ -214,25 +222,42 @@ private struct DiagonalHalf: Shape {
 private struct StylePreview: View {
     let style: InterfaceStyle
     let theme: Theme
+    let themeTint: Bool
+
+    private var neutralPane: Color {
+        theme.isDark ? Color(white: 0.12) : Color.white
+    }
 
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.96, green: 0.5, blue: 0.35), Color(red: 0.45, green: 0.25, blue: 0.75)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             Circle().fill(Color(red: 1, green: 0.85, blue: 0.4)).frame(width: 26).offset(x: -18, y: -10)
-            switch style {
-            case .themed:
-                MiniWindow(theme: theme).padding(9)
-            case .modern:
-                MiniWindow(theme: theme, chromeOpacity: 0.25)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.white.opacity(0.45), lineWidth: 0.6))
-                    .padding(9)
-            case .blended:
-                MiniWindow(theme: theme, chromeOpacity: 0.6)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .padding(9)
-            }
+            preview
+        }
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        switch (style, themeTint) {
+        case (.classic, true):
+            MiniWindow(theme: theme).padding(9)
+        case (.classic, false):
+            MiniWindow(theme: theme, chromeOpacity: 0.15, paneFill: neutralPane)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.white.opacity(0.3), lineWidth: 0.6))
+                .padding(9)
+        case (.glass, true):
+            MiniWindow(theme: theme, chromeOpacity: 0.25)
+                .background(theme.background.color.opacity(0.28), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.white.opacity(0.45), lineWidth: 0.6))
+                .padding(9)
+        case (.glass, false):
+            MiniWindow(theme: theme, chromeOpacity: 0.15, paneFill: neutralPane)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.white.opacity(0.3), lineWidth: 0.6))
+                .padding(9)
         }
     }
 }

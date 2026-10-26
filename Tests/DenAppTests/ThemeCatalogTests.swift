@@ -16,7 +16,8 @@ import DenVT
         #expect(ThemeCatalog.named(ThemeCatalog.defaultLight)?.isDark == false)
     }
 
-    /// Themes saved under a generated theme's old name still load, as the renamed theme.
+    /// Themes saved under a retired generated name still load as the Rex
+    /// theme that replaced it.
     @Test func formerNamesResolveToRenamedThemes() {
         let names = Set((ThemeCatalog.dark + ThemeCatalog.light).map(\.name))
         #expect(ThemeCatalog.renamed.count == 41)
@@ -37,5 +38,10 @@ import DenVT
 
         let dracula = try #require(ThemeCatalog.named("Dracula"))
         #expect(dracula.background == RGB(hex: 0x282A36) && dracula.accentRGB == RGB(hex: 0xBD93F9))
+
+        let rex = try #require(ThemeCatalog.named("Abyssal Trench"))
+        #expect(rex.background == RGB(hex: 0x06101A) && rex.foreground == RGB(hex: 0xB8CDD9))
+        #expect(rex.cursor == RGB(hex: 0x4FE3C1) && rex.ansi[15] == RGB(hex: 0xDCEBF3))
+        #expect(rex.accentRGB == RGB(hex: 0x4FE3C1))
     }
 }

@@ -316,7 +316,7 @@ struct CommandPalette: View {
             selection = model.themesForCurrentAppearance.firstIndex { $0.name == model.selectedThemeName } ?? 0
         case .interfaceStyle:
             query = ""
-            selection = InterfaceStyle.allCases.firstIndex(of: model.interfaceStyle) ?? 0
+            selection = (InterfaceStyle.allCases.firstIndex(of: model.interfaceStyle) ?? 0) + 1
         default: query = ""
         }
     }
@@ -436,7 +436,11 @@ struct CommandPalette: View {
                             action: .run { model.setConfig("ui_font", .string(family)) })
             }
         case .interfaceStyle:
-            return InterfaceStyle.allCases.map { style in
+            let tint = PaletteItem(id: "style-theme-tint", title: "Theme Tint",
+                                   detail: "Apply the selected theme's colors to interface surfaces",
+                                   checked: model.themeTint, keepOpen: true,
+                                   action: .run { model.themeTint.toggle() })
+            return [tint] + InterfaceStyle.allCases.map { style in
                 PaletteItem(id: "style-\(style.rawValue)", title: style.title, checked: style == model.interfaceStyle,
                             interfaceStyle: style, action: .run {
                                 model.interfaceStyle = style
@@ -566,6 +570,8 @@ struct CommandPalette: View {
                         action: .push(.interfaceFont)),
             PaletteItem(id: "change-style", title: "Change Interface Style", detail: model.interfaceStyle.title, submenu: true,
                         action: .push(.interfaceStyle)),
+            PaletteItem(id: "theme-tint", title: "Theme Tint", checked: model.themeTint, keepOpen: true,
+                        action: .run { model.themeTint.toggle() }),
             PaletteItem(id: "density-comfortable", title: Density.comfortable.title, checked: model.density == .comfortable,
                         action: .run { withAnimation(.den) { model.density = .comfortable } }),
             PaletteItem(id: "density-compact", title: Density.compact.title, checked: model.density == .compact,

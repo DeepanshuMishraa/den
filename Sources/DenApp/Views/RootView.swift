@@ -45,6 +45,7 @@ struct RootView: View {
         .animation(.den, value: model.zenMode)
         .animation(.den, value: model.density)
         .animation(.easeInOut(duration: 0.25), value: model.effectiveInterfaceStyle)
+        .animation(.easeInOut(duration: 0.25), value: model.themeTint)
         .animation(.easeOut(duration: 0.18), value: model.toast)
         .animation(.denFast, value: model.showActivityMenu)
         .animation(.easeOut(duration: 0.12), value: model.leaderPending)
@@ -290,7 +291,7 @@ struct RootView: View {
                 if !position.isTop {
                     Spacer()
                 }
-                ToastView(toast: toast, theme: model.theme, style: model.effectiveInterfaceStyle,
+                ToastView(toast: toast, theme: model.theme, style: model.effectiveInterfaceStyle, themeTint: model.themeTint,
                           fontFamily: model.uiFontFamily, fontSize: model.uiFontSize - 1,
                           onAction: { model.performToastAction($0) })
                     .frame(maxWidth: .infinity, alignment: position.frameAlignment)

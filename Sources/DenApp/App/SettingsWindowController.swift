@@ -8,6 +8,13 @@ import SwiftUI
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let model: AppModel
     private let backdropGlass: NSView = SettingsWindowController.makeGlass()
+    private let backdropBlur: NSVisualEffectView = {
+        let blur = NSVisualEffectView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        return blur
+    }()
 
     private static func makeGlass() -> NSView {
         if #available(macOS 26, *) {
@@ -43,7 +50,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let host = NSHostingView(rootView: SettingsView().environment(model))
         host.sizingOptions = []
         let container = NSView()
-        for view in [backdropGlass, host] {
+        for view in [backdropBlur, backdropGlass, host] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
             NSLayoutConstraint.activate([
@@ -73,15 +80,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         model.isRecordingShortcut = false
     }
 
-    /// Same appearance and backdrop as the main window: glass only for the
-    /// Modern style, so Themed stays opaque and Blended frosted.
+    /// Same appearance and backdrop as the main window: glass for Glass,
+    /// the native window for untinted Classic, and no backdrop when
+    /// Classic paints the theme's opaque window.
     private func followTheme() {
         withObservationTracking {
             window?.appearance = model.theme.nsAppearance
+            let backdrop = model.effectiveBackdrop
+            backdropGlass.isHidden = backdrop != .glass
+            backdropBlur.isHidden = backdrop != .system
+            backdropBlur.material = backdrop == .system ? .windowBackground : .hudWindow
+            backdropBlur.appearance = model.theme.nsAppearance
             backdropGlass.appearance = model.theme.nsAppearance
-            backdropGlass.isHidden = model.effectiveInterfaceStyle.backdrop == .none
             if #available(macOS 26, *), let glass = backdropGlass as? NSGlassEffectView {
-                glass.tintColor = model.theme.glassTint
+                glass.tintColor = model.themeTint ? model.theme.glassTint : nil
             }
         } onChange: { [weak self] in
             Task { @MainActor in self?.followTheme() }

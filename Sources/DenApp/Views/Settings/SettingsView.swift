@@ -49,7 +49,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     /// Words a search should find this pane by, beyond its title.
     var keywords: [String] {
         switch self {
-        case .appearance: ["light", "dark", "system", "style", "glass", "modern", "themed", "blended", "tabs", "vertical",
+        case .appearance: ["light", "dark", "system", "style", "glass", "classic", "theme tint", "tint", "tabs", "vertical",
                            "horizontal", "sidebar", "zen", "activity", "density", "compact", "pane", "headers", "border", "focus", "font", "ui font", "interface font", "terminal font"]
         case .themes: ["color", "palette", "import", "ghostty", "json"]
         case .terminal: ["font", "size", "ligatures", "smoothing", "contrast", "cursor", "blink", "option", "alt", "keyboard"]
@@ -88,7 +88,7 @@ struct SettingsView: View {
             HStack(spacing: 0) {
                 sidebar(compact: compact)
                     .frame(width: compact ? 64 : 224)
-                    .background(surfaces.windowBottom.opacity(model.effectiveInterfaceStyle == .themed ? 1 : 0.5))
+                    .background(surfaces.windowBottom.opacity(model.hasOpaqueSurfaces ? 1 : 0.5))
                 theme.separator.frame(width: 0.5)
                 detail(compact: compact)
             }

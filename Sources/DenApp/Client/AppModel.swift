@@ -464,11 +464,17 @@ final class AppModel {
         }
     }
     var interfaceStyle: InterfaceStyle { didSet { defaults.set(interfaceStyle.rawValue, forKey: "interfaceStyle") } }
+    /// Applies the selected theme's colors to interface surfaces. Off uses
+    /// macOS's neutral surfaces instead; terminal colors stay themed.
+    var themeTint: Bool { didSet { defaults.set(themeTint, forKey: "themeTint") } }
     /// Set while hovering a style in the palette; reverted on dismiss.
     var previewInterfaceStyle: InterfaceStyle?
     var effectiveInterfaceStyle: InterfaceStyle { previewInterfaceStyle ?? interfaceStyle }
+    var effectiveBackdrop: InterfaceStyle.Backdrop { effectiveInterfaceStyle.backdrop(themeTint: themeTint) }
+    /// Classic with the theme applied paints its own opaque window.
+    var hasOpaqueSurfaces: Bool { effectiveInterfaceStyle == .classic && themeTint }
     var density: Density { didSet { defaults.set(density.rawValue, forKey: "density") } }
-    var surfaces: Surfaces { Surfaces(theme: theme, style: effectiveInterfaceStyle) }
+    var surfaces: Surfaces { Surfaces(theme: theme, style: effectiveInterfaceStyle, themeTint: themeTint) }
     var fontFamily: String { didSet { defaults.set(fontFamily, forKey: "fontFamily") } }
     var fontSize: CGFloat { didSet { defaults.set(Double(fontSize), forKey: "fontSize") } }
     /// Den's own text (toasts, pickers). The config can split it from the
@@ -572,12 +578,14 @@ final class AppModel {
             transition: CursorBlink.Transition(rawValue: d.string(forKey: "cursorBlinkTransition") ?? "") ?? .smooth,
             pause: CursorBlink.Pause(rawValue: d.string(forKey: "cursorBlinkPause") ?? "") ?? .normal
         )
-        interfaceStyle = InterfaceStyle(rawValue: d.string(forKey: "interfaceStyle") ?? "") ?? .themed
+        let storedStyle = d.string(forKey: "interfaceStyle") ?? ""
+        interfaceStyle = InterfaceStyle(stored: storedStyle) ?? .glass
+        themeTint = d.object(forKey: "themeTint") as? Bool ?? InterfaceStyle.storedThemeTint(storedStyle) ?? true
         density = Density(rawValue: d.string(forKey: "density") ?? "") ?? .comfortable
         fontFamily = d.string(forKey: "fontFamily") ?? FontMetrics.defaultFamily
         fontSize = CGFloat(d.object(forKey: "fontSize") as? Double ?? Double(FontMetrics.defaultSize))
         appearanceMode = AppearanceMode(rawValue: d.string(forKey: "appearance") ?? "") ?? .system
-        // Map names stored before Den's generated themes were renamed.
+        // Map names stored before Rex's themes replaced the generated ones.
         let storedLight = d.string(forKey: "lightTheme") ?? ThemeCatalog.defaultLight
         let storedDark = d.string(forKey: "darkTheme") ?? ThemeCatalog.defaultDark
         lightThemeName = ThemeCatalog.renamed[storedLight] ?? storedLight

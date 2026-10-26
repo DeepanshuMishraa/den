@@ -131,11 +131,11 @@ final class DenWindow: NSWindow {
 @MainActor
 final class DenWindowController: NSWindowController, NSWindowDelegate {
     let model: AppModel
-    /// Blended's behind-window blur. The SwiftUI layers above it carry the
-    /// theme color at partial opacity, so the blurred desktop shows through.
+    /// The native window material behind untinted Classic.
     private let backdropBlur = NSVisualEffectView()
-    /// Modern's Liquid Glass, tinted with the theme so dark themes don't
-    /// read milky grey. Before macOS 26 it falls back to a frosted blur.
+    /// Glass's Liquid Glass, tinted with the theme when the theme tint is on
+    /// so dark themes don't read milky grey. Before macOS 26 it falls back to
+    /// a frosted blur.
     private let backdropGlass: NSView = DenWindowController.makeGlass()
 
     private static func makeGlass() -> NSView {
@@ -225,14 +225,17 @@ final class DenWindowController: NSWindowController, NSWindowDelegate {
     private func followTheme() {
         withObservationTracking {
             window?.appearance = model.theme.nsAppearance
-            let backdrop = model.effectiveInterfaceStyle.backdrop
+            let backdrop = model.effectiveBackdrop
             backdropGlass.isHidden = backdrop != .glass
-            backdropBlur.isHidden = backdrop != .blur
+            backdropBlur.isHidden = backdrop != .system
+            // Untinted Classic uses the native window background; Glass
+            // frosts whatever is behind the window.
+            backdropBlur.material = backdrop == .system ? .windowBackground : .hudWindow
             // Match the blur's light/dark rendering to the theme, not the system.
             backdropGlass.appearance = model.theme.nsAppearance
             backdropBlur.appearance = model.theme.nsAppearance
             if #available(macOS 26, *), let glass = backdropGlass as? NSGlassEffectView {
-                glass.tintColor = model.theme.glassTint
+                glass.tintColor = model.themeTint ? model.theme.glassTint : nil
             }
             // Read so a layout switch also re-places the traffic lights.
             _ = model.tabStyle

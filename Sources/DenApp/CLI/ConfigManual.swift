@@ -226,7 +226,8 @@ enum ConfigManual {
             appearance          string   \(AppearanceMode.allCases.map(\.rawValue).joined(separator: " | "))
             lightTheme          string   theme used in light mode, default "\(ThemeCatalog.defaultLight)"
             darkTheme           string   theme used in dark mode, default "\(ThemeCatalog.defaultDark)"
-            interfaceStyle      string   \(InterfaceStyle.allCases.map(\.rawValue).joined(separator: " | ")), default themed
+            interfaceStyle      string   \(InterfaceStyle.allCases.map(\.rawValue).joined(separator: " | ")), default glass
+            themeTint           bool     apply the selected theme's colors to interface surfaces, default true
             density             string   \(Density.allCases.map(\.rawValue).joined(separator: " | "))
             tabStyle            string   horizontal | vertical
             sidebarCollapsed    bool     vertical tabs folded away

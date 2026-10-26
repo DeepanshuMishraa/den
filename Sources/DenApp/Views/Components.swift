@@ -211,15 +211,15 @@ struct IconButton: View {
 }
 
 /// Den's toast: a floating glass pill pinned to the bottom edge of the
-/// window, as in Superlogical's Rex. The pill blurs what is behind it and
-/// tints the blur with the active theme; how much theme shows follows the
-/// interface style (Modern most see-through, Themed opaque). A success
+/// window, as in Superlogical's Rex. The pill blurs what is behind it and,
+/// with the theme tint on, colors the blur with the active theme. A success
 /// badge, a single-line message that ticks over when it is too long to
 /// fit, and capsule buttons with their shortcuts printed inside.
 struct ToastView: View {
     let toast: AppModel.Toast
     let theme: Theme
     let style: InterfaceStyle
+    let themeTint: Bool
     let fontFamily: String
     let fontSize: CGFloat
     let onAction: (UUID) -> Void
@@ -348,14 +348,15 @@ struct ToastView: View {
         }
     }
 
-    /// The capsule behind the toast follows the interface style: opaque
-    /// for Themed, theme-tinted Liquid Glass for Modern, a frosted blur for
-    /// Blended. Each gets a hairline border and a glossy top highlight.
+    /// The capsule behind the toast follows the interface style and theme
+    /// tint: liquid glass for Glass, opaque theme colors for tinted Classic,
+    /// and the native material for untinted Classic. Each gets a hairline
+    /// border and a glossy top highlight.
     @ViewBuilder
     private var toastGlass: some View {
         let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
-        switch style {
-        case .modern:
+        switch (style, themeTint) {
+        case (.glass, true):
             if #available(macOS 26, *) {
                 Color.clear
                     .glassEffect(.regular.tint(Color(nsColor: theme.glassTint)), in: shape)
@@ -363,11 +364,21 @@ struct ToastView: View {
                     .overlay(gloss(shape))
                     .shadow(color: .black.opacity(theme.isDark ? 0.4 : 0.15), radius: 20, y: 8)
             } else {
-                frosted(shape)
+                frosted(shape, themeOpacity: 0.82)
             }
-        case .blended:
-            frosted(shape)
-        case .themed:
+        case (.glass, false):
+            if #available(macOS 26, *) {
+                Color.clear
+                    .glassEffect(.regular, in: shape)
+                    .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
+                    .overlay(gloss(shape))
+                    .shadow(color: .black.opacity(theme.isDark ? 0.4 : 0.15), radius: 20, y: 8)
+            } else {
+                systemFrosted(shape)
+            }
+        case (.classic, false):
+            systemFrosted(shape)
+        case (.classic, true):
             shape
                 .fill(theme.isDark ? theme.background.lightened(0.06).color : Color.white)
                 .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
@@ -376,13 +387,22 @@ struct ToastView: View {
         }
     }
 
-    private func frosted(_ shape: RoundedRectangle) -> some View {
+    private func frosted(_ shape: RoundedRectangle, themeOpacity: Double) -> some View {
         let tint = theme.isDark
-            ? theme.background.darkened(0.25).color.opacity(style == .modern ? 0.55 : 0.82)
-            : Color.white.opacity(style == .modern ? 0.55 : 0.85)
+            ? theme.background.darkened(0.25).color.opacity(themeOpacity)
+            : Color.white.opacity(themeOpacity)
         return shape
             .fill(.ultraThinMaterial)
             .overlay(shape.fill(tint))
+            .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
+            .overlay(gloss(shape))
+            .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)
+    }
+
+    /// Untinted surfaces keep the native material and add no theme color.
+    private func systemFrosted(_ shape: RoundedRectangle) -> some View {
+        shape
+            .fill(.regularMaterial)
             .overlay(shape.strokeBorder(theme.menuBorder, lineWidth: 0.5))
             .overlay(gloss(shape))
             .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.2), radius: 22, y: 10)

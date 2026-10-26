@@ -46,7 +46,7 @@ struct Theme: Identifiable, Equatable, Sendable {
     /// Light themes get Den's pastel wash: a pink-ish top easing into a warm
     /// bottom, both derived from the theme's accent so each theme differs.
     /// Dark chrome sits about 18% below the terminal, as measured across
-    /// seven themes in Superlogical's Themed style.
+    /// seven themes in Superlogical's Use Theme style.
     var windowTop: Color {
         isDark ? background.mixed(with: accentRGB, 0.06).darkened(0.18).color
             : background.mixed(with: pastel(accentRGB.rotated(100)), 0.55).color
@@ -96,7 +96,7 @@ struct Theme: Identifiable, Equatable, Sendable {
     }
     var menuBorder: Color { isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.10) }
     var nsAppearance: NSAppearance? { NSAppearance(named: isDark ? .darkAqua : .aqua) }
-    /// Tint for Modern's Liquid Glass: the theme's background, strong
+    /// Tint for Glass's Liquid Glass: the theme's background, strong
     /// enough that dark themes don't turn milky grey.
     var glassTint: NSColor { background.nsColor.withAlphaComponent(isDark ? 0.6 : 0.45) }
 }
