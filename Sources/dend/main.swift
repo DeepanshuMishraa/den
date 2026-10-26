@@ -15,6 +15,14 @@ if arguments.contains("--version") {
     exit(0)
 }
 
+// Asked by the running dend, which can't see grants macOS made after it
+// started: a new process reports what the next dend will get. Prints the
+// JSON `HostPermissions` and exits before touching the socket.
+if arguments.contains("--check-permissions") {
+    FileHandle.standardOutput.write(ControlCoding.encode(HostPermissions.probe()))
+    exit(0)
+}
+
 // Den.app's SSH transport: relay stdin/stdout to this host's dend.
 if arguments.contains("--stdio") { StdioProxy.run(socketPath: socketPath) }
 

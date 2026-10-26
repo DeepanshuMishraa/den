@@ -69,7 +69,18 @@ import DenProtocol
     @Test func permissionsAreReportedForDendItself() async throws {
         let c = try await connect()
         guard case .permissions(let reported)? = try c.control(.permissions) else { Issue.record("no permissions reply"); return }
-        // The server runs in this process, so a direct probe must agree.
+        // The test runner isn't dend, so the fresh-launch probe is skipped and
+        // the reply is this process's direct probe.
         #expect(reported == HostPermissions.probe())
+        #expect(reported == HostPermissions.report())
+    }
+
+    /// A grant given while dend runs is visible to a new process but not to
+    /// the old one; the app must offer a restart, not pretend it's missing.
+    @Test func grantsGivenToANewProcessNeedARestart() {
+        #expect(HostPermissions.Access.resolve(current: .missing, fresh: .granted) == .needsRestart)
+        #expect(HostPermissions.Access.resolve(current: .missing, fresh: .missing) == .missing)
+        #expect(HostPermissions.Access.resolve(current: .granted, fresh: .missing) == .granted)
+        #expect(HostPermissions.Access.resolve(current: .notApplicable, fresh: .notApplicable) == .notApplicable)
     }
 }

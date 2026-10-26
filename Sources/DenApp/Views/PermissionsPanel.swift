@@ -78,7 +78,7 @@ struct PermissionsPanel: View {
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(theme.menuBorder, lineWidth: 0.5))
 
             HStack(alignment: .center, spacing: 12) {
-                Text("These go to dend, the process that runs your shells. For Full Disk Access, drag dend from the Finder window into the list.")
+                Text(footer)
                     .uiFont(size: 11.5)
                     .foregroundStyle(theme.tertiaryText)
                     .lineSpacing(2)
@@ -101,6 +101,13 @@ struct PermissionsPanel: View {
         }
         .onAppear { KeyboardFocus.takeFromTerminal { focused = true } }
         .refreshesPermissions()
+    }
+
+    private var footer: String {
+        guard !DendPermission.allCases.contains(where: { $0.access(model) == .needsRestart }) else {
+            return "macOS has the grant, but dend started before you gave it. Restart dend to apply it; its sessions will end."
+        }
+        return "These go to dend, the process that runs your shells. For Full Disk Access, drag dend from the Finder window into the list."
     }
 }
 
@@ -146,6 +153,14 @@ struct PermissionStatus: View {
                 .uiFont(size: 12, weight: .medium)
                 .foregroundStyle(.green)
                 .frame(height: 28)
+        case .needsRestart?:
+            VStack(alignment: .trailing, spacing: 3) {
+                PillButton(title: "Restart dend…", theme: theme) { model.restartDendForPermissions() }
+                    .help("macOS has this grant, but this dend started before you gave it. Restarting applies it and ends dend's sessions.")
+                Text("Granted; restart to apply")
+                    .uiFont(size: 10.5)
+                    .foregroundStyle(theme.tertiaryText)
+            }
         case .notApplicable?:
             EmptyView()
         case .missing?, nil:

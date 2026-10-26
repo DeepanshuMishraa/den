@@ -1185,6 +1185,9 @@ struct PermissionSettings: View {
 
     private var footer: String {
         let base = "Granted to dend, the process that runs your shells, so every shell and agent inherits them. Turn one off in System Settings to take it back."
+        if DendPermission.allCases.contains(where: { $0.access(model) == .needsRestart }) {
+            return "macOS has a grant dend can't use until it restarts, which ends its sessions. " + base
+        }
         return model.permissions == nil ? "dend hasn't reported its access yet; it may be from an older Den. " + base : base
     }
 

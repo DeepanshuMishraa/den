@@ -1477,6 +1477,34 @@ final class AppModel {
         PrivacySettings.open(.screenRecording)
     }
 
+    /// macOS has a grant this dend can't use because it launched before the
+    /// grant was given. Only a new dend applies it, and restarting ends every
+    /// session it runs, so ask before doing it.
+    func restartDendForPermissions() {
+        showActionToast("Restart dend to apply the permission macOS gave it?",
+                        tone: .warning,
+                        detail: "This dend started before you gave it the grant, so it keeps reporting it as missing until it restarts. Restarting ends every session dend runs.",
+                        actions: [
+                            ("Restart dend", nil, { [weak self] in Task { await self?.restartLocalDend() } }),
+                            ("Cancel", nil, {}),
+                        ])
+    }
+
+    private func restartLocalDend() async {
+        // End the old connection first; the kill then finishes closing it
+        // before the replacement connects.
+        connections[.local]?.disconnect("Restarting dend to apply macOS permissions. Its sessions are ending.")
+        do {
+            try await DendLauncher.stopRunning()
+        } catch {
+            connectionState = .disconnected(error.description)
+            return
+        }
+        // The welcome that follows re-reads the grants, now from the new
+        // process.
+        await connect()
+    }
+
     /// Why the session on screen has nothing to show, when its host is
     /// remote and not connected.
     var currentHostProblem: (host: RemoteHost.ID, message: String)? {

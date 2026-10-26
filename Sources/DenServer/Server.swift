@@ -399,11 +399,11 @@ public actor DenServer {
             return .ok
 
         case .permissions:
-            return .permissions(HostPermissions.probe())
+            return .permissions(HostPermissions.report())
 
         case .requestScreenRecording:
             HostPermissions.requestScreenRecording()
-            return .permissions(HostPermissions.probe())
+            return .permissions(HostPermissions.report())
         }
     }
 

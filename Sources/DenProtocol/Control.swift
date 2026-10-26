@@ -70,6 +70,9 @@ public enum ControlReply: Codable, Equatable, Sendable {
 public struct HostPermissions: Codable, Equatable, Sendable {
     public enum Access: String, Codable, Sendable {
         case granted, missing
+        /// macOS has the grant, but this dend launched before it was given,
+        /// so it can't use it until it restarts (which ends its sessions).
+        case needsRestart
         /// Not a macOS host.
         case notApplicable
     }
