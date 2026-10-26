@@ -190,6 +190,8 @@ struct IconButton: View {
     var size: CGFloat = 13
     var weight: Font.Weight = .medium
     var frame = CGSize(width: 26, height: 24)
+    /// Overrides the theme's ink, e.g. on a program-colored pane header.
+    var ink: Color? = nil
     var enabled = true
     let action: () -> Void
     @Environment(AppModel.self) private var model
@@ -199,9 +201,9 @@ struct IconButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: weight))
-                .foregroundStyle(enabled ? model.theme.secondaryText : model.theme.tertiaryText.opacity(0.6))
+                .foregroundStyle(enabled ? (ink ?? model.theme.secondaryText) : (ink ?? model.theme.tertiaryText).opacity(0.6))
                 .frame(width: frame.width, height: frame.height)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hovering && enabled ? model.theme.hover : .clear))
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hovering && enabled ? (ink.map { $0.opacity(0.12) } ?? model.theme.hover) : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.hitArea)

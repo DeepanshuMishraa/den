@@ -38,34 +38,40 @@ struct PaneCard: View {
         let kind = model.program(for: pane)
         let islands = model.density == .comfortable
         let radius = model.density.cornerRadius
+        // A full-screen program's background colors the pane and its header;
+        // the ink flips to stay readable on it.
+        let programBackground = model.matchProgramBackgrounds ? model.paneProgramBackgrounds[pane] : nil
+        let ink: Color? = programBackground.map { $0.luminance > 0.45 ? .black : .white }
+        let activeInk = ink ?? theme.chromeText
+        let inactiveInk = ink?.opacity(0.62) ?? theme.secondaryText
 
         VStack(spacing: 0) {
             if model.showPaneHeaders {
                 HStack(spacing: 7) {
-                    HeaderGlyph(kind: kind, color: focused ? theme.chromeText : theme.secondaryText)
+                    HeaderGlyph(kind: kind, color: focused ? activeInk : inactiveInk)
                     Text(model.title(for: pane))
                         .uiFont(size: 13, weight: .semibold)
-                        .foregroundStyle(focused || !multiple ? theme.chromeText : theme.secondaryText)
+                        .foregroundStyle(focused || !multiple ? activeInk : inactiveInk)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 8)
                     // Narrow panes drop their buttons rather than overflow.
                     if width > 190 {
                     HStack(spacing: 0) {
-                        IconButton(symbol: "rectangle.split.2x1", size: 12.5, frame: CGSize(width: 24, height: 22)) {
+                        IconButton(symbol: "rectangle.split.2x1", size: 12.5, frame: CGSize(width: 24, height: 22), ink: ink) {
                             model.focus(pane); model.split(.horizontal)
                         }
                         .denTooltip("Split Right", command: .splitRight)
-                        IconButton(symbol: "rectangle.split.1x2", size: 12.5, frame: CGSize(width: 24, height: 22)) {
+                        IconButton(symbol: "rectangle.split.1x2", size: 12.5, frame: CGSize(width: 24, height: 22), ink: ink) {
                             model.focus(pane); model.split(.vertical)
                         }
                         .denTooltip("Split Down", command: .splitDown)
                         IconButton(symbol: model.zoomedPane == pane ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                                   size: 11.5, frame: CGSize(width: 24, height: 22), enabled: multiple) {
+                                   size: 11.5, frame: CGSize(width: 24, height: 22), ink: ink, enabled: multiple) {
                             model.focus(pane); model.toggleZoom()
                         }
                         .denTooltip("Zoom", command: .zoomPane)
-                        IconButton(symbol: "xmark", size: 11.5, frame: CGSize(width: 24, height: 22), enabled: multiple) {
+                        IconButton(symbol: "xmark", size: 11.5, frame: CGSize(width: 24, height: 22), ink: ink, enabled: multiple) {
                             model.close(pane)
                         }
                         .denTooltip("Close", command: .closePane)
@@ -90,7 +96,7 @@ struct PaneCard: View {
                 }
                 .padding(.top, model.showPaneHeaders ? 0 : 6)
         }
-        .background(model.surfaces.card)
+        .background(programBackground.map { AnyShapeStyle($0.color) } ?? model.surfaces.card)
         .clipShape(RoundedRectangle(cornerRadius: islands ? radius : 0, style: .continuous))
         .overlay {
             // Islands get a lit edge; compact panes are one flat surface.

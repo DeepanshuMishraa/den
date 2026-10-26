@@ -65,6 +65,10 @@ struct AppearanceSettings: View {
                 SettingsToggle(title: "Show pane headers", isOn: Binding(
                     get: { model.showPaneHeaders },
                     set: { value in withAnimation(.den) { model.showPaneHeaders = value } }))
+                SettingsToggle(title: "Match program backgrounds",
+                               detail: "Color a pane and its header with the background a full-screen program such as an editor paints.",
+                               isOn: Binding(get: { model.matchProgramBackgrounds },
+                                             set: { value in withAnimation(.easeInOut(duration: 0.18)) { model.matchProgramBackgrounds = value } }))
                 SettingsToggle(title: "Focus border", detail: "Ring the focused pane in the theme's accent color.", inConfigFile: true,
                                isOn: Binding(get: { model.config.paneBorder },
                                              set: { model.setConfig("pane_border", .bool($0)) }))

@@ -50,7 +50,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var keywords: [String] {
         switch self {
         case .appearance: ["light", "dark", "system", "style", "glass", "classic", "theme tint", "tint", "tabs", "vertical",
-                           "horizontal", "sidebar", "zen", "activity", "density", "compact", "pane", "headers", "border", "focus", "font", "ui font", "interface font", "terminal font"]
+                           "horizontal", "sidebar", "zen", "activity", "density", "compact", "pane", "headers", "border", "focus", "program", "background", "program background", "font", "ui font", "interface font", "terminal font"]
         case .themes: ["color", "palette", "import", "ghostty", "json"]
         case .terminal: ["font", "size", "ligatures", "smoothing", "contrast", "cursor", "blink", "option", "alt", "keyboard"]
         case .shortcuts: ["keys", "keybind", "leader", "hotkey", "binding"]

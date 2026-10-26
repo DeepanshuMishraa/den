@@ -191,18 +191,21 @@ struct FrameBuilder {
     let ligatures: Bool
     /// 1 solid, 0 hidden: where a blinking cursor is in its cycle.
     let cursorOpacity: Float
+    /// The program background detected last frame, so a near-tie between
+    /// close shades does not strobe the pane.
+    let previousProgramBackground: RGB?
 
     var backgrounds: [RectInstance] = []
     var selections: [RectInstance] = []
     var decorations: [RectInstance] = []
     var glyphs: [GlyphInstance] = []
-    /// Premultiplied fill for the whole view, padding included. Nil when the
-    /// app draws on the card (or its canvas folds into it): the view stays
-    /// transparent so the card's gradient shows through.
-    var clear: SIMD4<Float>?
+    /// The background a full-screen program paints, which the pane card and
+    /// its header take on. Nil when the program draws on the card.
+    var programBackground: RGB?
 
     init(metrics: FontMetrics, atlas: GlyphAtlas, pipelines: RenderPipelines, origin: SIMD2<Float>, theme: Theme,
-         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool, cursorOpacity: Float = 1) {
+         cursorFocused: Bool, showCursor: Bool, contrastCorrection: Bool, ligatures: Bool, cursorOpacity: Float = 1,
+         previousProgramBackground: RGB? = nil) {
         self.metrics = metrics
         self.atlas = atlas
         self.pipelines = pipelines
@@ -213,6 +216,7 @@ struct FrameBuilder {
         self.contrastCorrection = contrastCorrection
         self.ligatures = ligatures
         self.cursorOpacity = cursorOpacity
+        self.previousProgramBackground = previousProgramBackground
     }
 
     /// Adjacent ASCII cells of one row and font style, drawn shaped when the
@@ -273,8 +277,6 @@ struct FrameBuilder {
     mutating func build(_ state: VTRenderState) {
         let colors = state.colors
         let defaultBg = colors.background
-        // Cell fills wait until the whole grid is seen: whether the app has
-        // a canvas to fold decides how each one draws.
         var cellBackgrounds: [(SIMD4<Float>, RGB)] = []
         var coverage: [RGB: Int] = [:]
         let cw = Float(metrics.cellWidth), ch = Float(metrics.cellHeight)
@@ -407,16 +409,11 @@ struct FrameBuilder {
         selections = selectionRects
 
         let (cols, rows) = state.size
-        let fold = BackgroundFold(theme: theme.background, defaultBackground: defaultBg, coverage: coverage, cellCount: cols * rows)
-        clear = fold.clear
-        var layers: [RGB: SIMD4<Float>?] = [:]
+        programBackground = ProgramBackground.detect(
+            theme: theme.background, defaultBackground: defaultBg, counts: coverage,
+            cellCount: cols * rows, previous: previousProgramBackground)
         for (rect, color) in cellBackgrounds {
-            let layer = layers[color] ?? {
-                let l = fold.layer(color)
-                layers[color] = l
-                return l
-            }()
-            if let layer { backgrounds.append(RectInstance(rect: rect, color: layer)) }
+            backgrounds.append(RectInstance(rect: rect, color: color.simd()))
         }
 
         if let cursor {

@@ -26,6 +26,9 @@ final class TerminalView: MTKView {
     private var scrollRemainder: CGFloat = 0
     private var pressedButtons = 0
     private var selecting = false
+    /// The program background shown for this pane, carried between frames so
+    /// a near-tie between close shades does not strobe the pane and header.
+    private var programBackground: RGB?
     /// The cell under the mouse while a click there would open a link.
     private var linkCell: (col: Int, row: Int)?
     /// The link under the mouse, underlined and opened by a click.
@@ -246,7 +249,8 @@ final class TerminalView: MTKView {
             showCursor: mode == .interactive,
             contrastCorrection: replica?.contrastCorrection ?? false,
             ligatures: model.fontLigatures,
-            cursorOpacity: cursorOpacity
+            cursorOpacity: cursorOpacity,
+            previousProgramBackground: mode == .interactive ? programBackground : nil
         )
         drawnCursorOpacity = frame.cursorOpacity
         var gridSize = SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height))
@@ -257,6 +261,16 @@ final class TerminalView: MTKView {
             do {
                 try renderState.update(from: replica.terminal)
                 frame.build(renderState)
+                if mode == .interactive {
+                    programBackground = frame.programBackground
+                    if model.matchProgramBackgrounds,
+                       model.paneProgramBackgrounds[paneID] != frame.programBackground {
+                        let detected = frame.programBackground
+                        Task { @MainActor [weak model] in
+                            model?.reportProgramBackground(detected, for: paneID)
+                        }
+                    }
+                }
                 placements = try replica.terminal.imagePlacements(cellWidth: Float(metrics.cellWidth), cellHeight: Float(metrics.cellHeight))
                 refreshHover()
                 if let hoveredLink { frame.underline(hoveredLink) }
@@ -271,8 +285,9 @@ final class TerminalView: MTKView {
             }
         }
 
-        let clear = frame.clear ?? .zero
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: Double(clear.x), green: Double(clear.y), blue: Double(clear.z), alpha: Double(clear.w))
+        // The terminal draws its own backgrounds; the view itself stays
+        // transparent so the pane card shows through the padding.
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         pass.colorAttachments[0].loadAction = .clear
         guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
 

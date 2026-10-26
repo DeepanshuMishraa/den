@@ -447,6 +447,18 @@ final class AppModel {
     /// with what it's doing and since when.
     var activityMode: Bool { didSet { defaults.set(activityMode, forKey: "activityMode") } }
     var showPaneHeaders: Bool { didSet { defaults.set(showPaneHeaders, forKey: "showPaneHeaders") } }
+    /// Color a pane and its header with the background a full-screen program
+    /// paints, as Rex does.
+    var matchProgramBackgrounds: Bool {
+        didSet {
+            defaults.set(matchProgramBackgrounds, forKey: "matchProgramBackgrounds")
+            guard oldValue != matchProgramBackgrounds else { return }
+            paneProgramBackgrounds.removeAll()
+            for replica in replicas.values { replica.touch() }
+        }
+    }
+    /// The background detected for each pane, reported by its terminal view.
+    private(set) var paneProgramBackgrounds: [PaneID: RGB] = [:]
     var contrastCorrection: Bool { didSet { defaults.set(contrastCorrection, forKey: "acc"); refreshReplicas() } }
     /// Terminal text drawn with the font's ligatures (`->` as an arrow).
     var fontLigatures: Bool { didSet { defaults.set(fontLigatures, forKey: "fontLigatures"); refreshReplicas() } }
@@ -569,6 +581,7 @@ final class AppModel {
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
         if let folder = d.string(forKey: "pathPickerFolder") { pathPickerFolders[.local] = folder }
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
+        matchProgramBackgrounds = d.object(forKey: "matchProgramBackgrounds") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
         fontLigatures = d.bool(forKey: "fontLigatures")
         fontSmoothing = d.bool(forKey: "fontSmoothing")
@@ -750,6 +763,7 @@ final class AppModel {
 
     private func dropPane(_ id: PaneID) {
         replicas.removeValue(forKey: id)
+        paneProgramBackgrounds.removeValue(forKey: id)
         sentSizes.removeValue(forKey: id)
         metas.removeValue(forKey: id)
         titles.removeValue(forKey: id)
@@ -999,6 +1013,7 @@ final class AppModel {
         let live = Set(layouts.values.flatMap { $0.tabs.flatMap(\.root.panes) })
         for id in replicas.keys where !live.contains(id) {
             replicas.removeValue(forKey: id)
+            paneProgramBackgrounds.removeValue(forKey: id)
             sentSizes.removeValue(forKey: id)
         }
 
@@ -2248,6 +2263,13 @@ final class AppModel {
 
     private func refreshReplicas() {
         for replica in replicas.values { replica.apply(theme: theme, contrastCorrection: contrastCorrection) }
+    }
+
+    /// Called by a pane's terminal view when the program background it
+    /// detects changes.
+    func reportProgramBackground(_ color: RGB?, for pane: PaneID) {
+        guard matchProgramBackgrounds, paneProgramBackgrounds[pane] != color else { return }
+        paneProgramBackgrounds[pane] = color
     }
 
     // MARK: Titles

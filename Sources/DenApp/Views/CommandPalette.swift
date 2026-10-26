@@ -316,7 +316,7 @@ struct CommandPalette: View {
             selection = model.themesForCurrentAppearance.firstIndex { $0.name == model.selectedThemeName } ?? 0
         case .interfaceStyle:
             query = ""
-            selection = (InterfaceStyle.allCases.firstIndex(of: model.interfaceStyle) ?? 0) + 1
+            selection = InterfaceStyle.allCases.firstIndex(of: model.interfaceStyle) ?? 0
         default: query = ""
         }
     }
@@ -436,11 +436,7 @@ struct CommandPalette: View {
                             action: .run { model.setConfig("ui_font", .string(family)) })
             }
         case .interfaceStyle:
-            let tint = PaletteItem(id: "style-theme-tint", title: "Theme Tint",
-                                   detail: "Apply the selected theme's colors to interface surfaces",
-                                   checked: model.themeTint, keepOpen: true,
-                                   action: .run { model.themeTint.toggle() })
-            return [tint] + InterfaceStyle.allCases.map { style in
+            return InterfaceStyle.allCases.map { style in
                 PaletteItem(id: "style-\(style.rawValue)", title: style.title, checked: style == model.interfaceStyle,
                             interfaceStyle: style, action: .run {
                                 model.interfaceStyle = style
@@ -601,6 +597,8 @@ struct CommandPalette: View {
                         action: .run { withAnimation(.den) { model.zenMode.toggle() } }),
             PaletteItem(id: "headers", title: model.showPaneHeaders ? "Hide Pane Headers" : "Show Pane Headers",
                         action: .run { withAnimation(.den) { model.showPaneHeaders.toggle() } }),
+            PaletteItem(id: "program-backgrounds", title: "Match Program Backgrounds", checked: model.matchProgramBackgrounds,
+                        keepOpen: true, action: .run { model.matchProgramBackgrounds.toggle() }),
             PaletteItem(id: "pane-border", title: model.config.paneBorder ? "Hide Focused Pane Border" : "Show Focused Pane Border",
                         action: .run { model.setConfig("pane_border", .bool(!model.config.paneBorder)) }),
             PaletteItem(id: "permissions", title: "Grant Permissions…", detail: "Full Disk Access, Screen Recording",

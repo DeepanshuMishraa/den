@@ -235,6 +235,7 @@ enum ConfigManual {
             activityMode        bool     sidebar lists only tabs with agents/status
             zenMode             bool     tab bar/sidebar hidden until hovered at the edge
             showPaneHeaders     bool     default true
+            matchProgramBackgrounds bool color a pane and its header with a full-screen program's background, default true
             acc                 bool     automatic contrast correction, default true
 
             Builds run with `swift run` keep their defaults under a different
