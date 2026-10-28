@@ -25,6 +25,11 @@ struct TitleBar: View {
                 // Room between the session switcher and the first tab.
                 .padding(.trailing, 8)
             TabStrip()
+            if model.paneDrag?.drop == .newTab {
+                NewTabDropPill(theme: model.theme)
+                    .frame(height: Self.height)
+                    .transition(.scale(scale: 0.85, anchor: .leading).combined(with: .opacity))
+            }
             Spacer(minLength: 0)
             HStack(spacing: 2) {
                 ActivityModeToggle()
@@ -37,6 +42,8 @@ struct TitleBar: View {
             .padding(.trailing, 8)
         }
         .frame(height: Self.height + Self.peekHeight * peek, alignment: .top)
+        .animation(.denFast, value: model.paneDrag?.drop == .newTab)
+        .paneDropTabStrip(model: model)
         .background(TitleBarBackground())
     }
 }
@@ -171,7 +178,9 @@ struct TabStrip: View {
                         selection: selection,
                         showDivider: showDivider(after: index, tabs: tabs)
                     )
-                    .tabCard(tab, edge: .bottom, enabled: dragging == nil && model.overview == .none)
+                    .paneDropHighlight(model.paneDrag?.drop == .tab(tab.id), theme: model.theme, radius: 15)
+                    .paneDropTab(tab.id, model: model)
+                    .tabCard(tab, edge: .bottom, enabled: dragging == nil && model.paneDrag == nil && model.overview == .none)
                     .onHover { inside in
                         if inside { hovered = tab.id } else if hovered == tab.id { hovered = nil }
                     }
@@ -292,10 +301,7 @@ struct TabItem: View {
         .background(alignment: .top) {
             ZStack {
                 if active {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(theme.activeTab)
-                        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(theme.activeTabBorder, lineWidth: 0.5))
-                        .shadow(color: .black.opacity(theme.isDark ? 0.2 : 0.06), radius: 1.5, y: 0.5)
+                    Elevated(shape: RoundedRectangle(cornerRadius: radius, style: .continuous), theme: theme)
                         .matchedGeometryEffect(id: "selection", in: selection)
                 } else if hovered {
                     RoundedRectangle(cornerRadius: radius, style: .continuous).fill(theme.hover)

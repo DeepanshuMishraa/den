@@ -31,6 +31,7 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 1.04)))
             }
 
+            if expose == 0 { SplitGhostCard() }
             overlays
             PaneDragGhost()
         }
@@ -128,7 +129,7 @@ struct RootView: View {
                         PaneCard(pane: zoomed, tab: tab.id)
                             .transition(.scale(scale: 0.97).combined(with: .opacity))
                     } else {
-                        SplitTreeView(node: tab.root, tab: tab.id)
+                        PaneDeck(tab: tab)
                     }
                 }
                 .id(tab.id)

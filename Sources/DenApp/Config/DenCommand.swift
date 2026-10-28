@@ -62,6 +62,7 @@ enum DenCommand: String, CaseIterable {
     case movePaneRight = "move_pane_right"
     case movePaneUp = "move_pane_up"
     case movePaneDown = "move_pane_down"
+    case movePaneToNewTab = "move_pane_to_new_tab"
 
     case addRemoteHost = "add_remote_host"
     case changeSession = "change_session"
@@ -145,6 +146,7 @@ enum DenCommand: String, CaseIterable {
         case .movePaneRight: "Move Pane Right"
         case .movePaneUp: "Move Pane Up"
         case .movePaneDown: "Move Pane Down"
+        case .movePaneToNewTab: "Move Pane to New Tab"
         case .addRemoteHost: "Add Remote Host…"
         case .changeSession: "Change Session…"
         case .goToSession: "Go to Session…"
@@ -218,6 +220,7 @@ enum DenCommand: String, CaseIterable {
         case .movePaneRight: "opt+cmd+right"
         case .movePaneUp: "opt+cmd+up"
         case .movePaneDown: "opt+cmd+down"
+        case .movePaneToNewTab: "leader+b"
         case .addRemoteHost: "leader+x"
         case .changeSession: "leader+s"
         case .renameTab: "leader+r"
@@ -314,6 +317,7 @@ enum DenCommand: String, CaseIterable {
         case .movePaneRight: animated { model.moveFocusedPane(.right) }
         case .movePaneUp: animated { model.moveFocusedPane(.up) }
         case .movePaneDown: animated { model.moveFocusedPane(.down) }
+        case .movePaneToNewTab: model.moveFocusedPaneToNewTab()
         case .addRemoteHost: model.palette = .addHost
         case .changeSession: withAnimation(.denFast) { model.showSessionMenu.toggle() }
         // Without a number (menu, palette) start with the session picker.

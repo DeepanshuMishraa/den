@@ -1,5 +1,41 @@
+import AppKit
 import DenProtocol
 import SwiftUI
+
+/// Follows a ⌘-drag of a pane at the window level. The terminal view that
+/// picked the pane up leaves the window when hovering a tab opens it, and a
+/// view only gets the drag and release while it's in the window, so a drag
+/// tracked by the view would never drop.
+@MainActor
+enum PaneDragTracker {
+    private static var monitor: Any?
+
+    static func start(_ model: AppModel) {
+        stop()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak model] event in
+            let height = event.window?.contentView?.bounds.height ?? 0
+            let point = CGPoint(x: event.locationInWindow.x, y: height - event.locationInWindow.y)
+            let released = event.type == .leftMouseUp
+            MainActor.assumeIsolated {
+                if released {
+                    stop()
+                    model?.endPaneDrag()
+                    NSCursor.arrow.set()
+                } else {
+                    NSCursor.closedHand.set()
+                    model?.updatePaneDrag(at: point)
+                }
+            }
+            // The drag is Den's; no view (or program) sees it.
+            return nil
+        }
+    }
+
+    static func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}
 
 /// ⌘-drag a pane onto another to rearrange: every other pane shows its drop
 /// regions (four edges to dock beside it, the middle square to swap), the
@@ -131,5 +167,51 @@ struct PaneDragGhost: View {
             .position(x: drag.point.x + 70, y: drag.point.y + 24)
             .allowsHitTesting(false)
         }
+    }
+}
+
+extension View {
+    /// Registers a tab's frame so a dragged pane can be dropped on it.
+    func paneDropTab(_ tab: TabID, model: AppModel) -> some View {
+        onGeometryChange(for: CGRect.self) { $0.frame(in: .named(RootView.space)) } action: { model.tabFrames[tab] = $0 }
+            .onDisappear { model.tabFrames[tab] = nil }
+    }
+
+    /// Registers the tab bar or sidebar: a pane dropped on it away from any
+    /// tab gets a new tab.
+    func paneDropTabStrip(model: AppModel) -> some View {
+        onGeometryChange(for: CGRect.self) { $0.frame(in: .named(RootView.space)) } action: { model.tabStripFrame = $0 }
+            .onDisappear { model.tabStripFrame = nil }
+    }
+
+    /// Lights a tab while a dragged pane hovers it.
+    func paneDropHighlight(_ lit: Bool, theme: Theme, radius: CGFloat) -> some View {
+        overlay {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(theme.accent.opacity(lit ? 0.16 : 0))
+                .strokeBorder(theme.accent.opacity(lit ? 0.9 : 0), lineWidth: 1.5)
+                .allowsHitTesting(false)
+        }
+        .scaleEffect(lit ? 1.04 : 1)
+        .animation(.denFast, value: lit)
+    }
+}
+
+/// Where a dragged pane would open as a tab of its own, at the end of the
+/// tab bar or sidebar, while it hovers there.
+struct NewTabDropPill: View {
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "plus.rectangle.on.rectangle").font(.system(size: 11.5, weight: .semibold))
+            Text("New Tab").uiFont(size: 12.5, weight: .semibold)
+        }
+        .foregroundStyle(theme.accent)
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(theme.accent.opacity(0.14)))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(theme.accent.opacity(0.8), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])))
+        .allowsHitTesting(false)
     }
 }

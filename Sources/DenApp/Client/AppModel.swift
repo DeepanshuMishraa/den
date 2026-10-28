@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 import DenProtocol
 import DenVT
 
@@ -61,7 +62,12 @@ final class AppModel {
     /// Each host user's home folder, for `~` in titles and paths.
     private(set) var hostHomes: [HostID: String] = [.local: NSHomeDirectory()]
     private(set) var layouts: [SessionID: SessionLayout] = [:]
-    private(set) var currentSession: SessionID?
+    private(set) var currentSession: SessionID? {
+        didSet {
+            // The session you left starts its countdown to folding.
+            if let old = oldValue, old != currentSession { sessionWentIdle(old) }
+        }
+    }
     private var activeTabs: [SessionID: TabID] = [:]
     private(set) var focusedPanes: [TabID: PaneID] = [:]
     var zoomedPane: PaneID?
@@ -406,6 +412,82 @@ final class AppModel {
         if collapsedHosts.remove(host.storageKey) == nil { collapsedHosts.insert(host.storageKey) }
     }
 
+    /// Sessions folded to one line in the sidebar, their tabs' icons
+    /// stacked, as in Rex. Remembered across launches.
+    private(set) var foldedSessions: Set<SessionID> {
+        didSet { defaults.set(foldedSessions.map(\.raw.uuidString), forKey: "foldedSessions") }
+    }
+    /// Sessions you're not in fold on their own once nothing touches them for
+    /// a few seconds.
+    var autoFoldSessions: Bool {
+        didSet {
+            defaults.set(autoFoldSessions, forKey: "autoFoldSessions")
+            if !autoFoldSessions { idleFolded.removeAll() }
+        }
+    }
+    /// Sessions folded by `autoFoldSessions`; the one you're in never is.
+    private(set) var idleFolded: Set<SessionID> = []
+    /// Folded sessions opened for a look; each folds back once idle.
+    private(set) var unfoldedForNow: Set<SessionID> = []
+    @ObservationIgnored private var idleTasks: [SessionID: Task<Void, Never>] = [:]
+    private static let idleFoldDelay: Duration = .seconds(5)
+
+    /// Whether the sidebar shows the session as its one-line stack.
+    func isFolded(_ session: SessionID) -> Bool {
+        guard !unfoldedForNow.contains(session) else { return false }
+        return foldedSessions.contains(session) || (idleFolded.contains(session) && canIdleFold(session))
+    }
+
+    private func canIdleFold(_ session: SessionID) -> Bool {
+        autoFoldSessions && session != currentSession && tabs(in: session).count > 1
+    }
+
+    /// The header's chevron: folds the session, or unfolds it for good
+    /// (until it next goes idle, with `autoFoldSessions` on).
+    func toggleFolded(_ session: SessionID) {
+        idleTasks.removeValue(forKey: session)?.cancel()
+        unfoldedForNow.remove(session)
+        if isFolded(session) {
+            foldedSessions.remove(session)
+            idleFolded.remove(session)
+        } else {
+            foldedSessions.insert(session)
+        }
+    }
+
+    /// Opens a folded session for a look; it folds back once idle.
+    func unfoldForNow(_ session: SessionID) {
+        guard isFolded(session) else { return }
+        unfoldedForNow.insert(session)
+        idleFolded.remove(session)
+        sessionWentIdle(session)
+    }
+
+    /// The pointer over a session holds off folding; leaving starts the
+    /// countdown.
+    func hoverSession(_ session: SessionID, inside: Bool) {
+        if inside {
+            idleTasks.removeValue(forKey: session)?.cancel()
+        } else {
+            sessionWentIdle(session)
+        }
+    }
+
+    /// Starts a session's countdown to folding: shown in the sidebar, left
+    /// by the pointer, or switched away from.
+    func sessionWentIdle(_ session: SessionID) {
+        idleTasks[session]?.cancel()
+        idleTasks[session] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.idleFoldDelay)
+            guard !Task.isCancelled, let self else { return }
+            self.idleTasks[session] = nil
+            withAnimation(.den) {
+                self.unfoldedForNow.remove(session)
+                if self.canIdleFold(session) { self.idleFolded.insert(session) }
+            }
+        }
+    }
+
     func toggleSidebar() {
         if tabStyle == .vertical { sidebarCollapsed.toggle() } else { tabStyle = .vertical }
     }
@@ -447,6 +529,18 @@ final class AppModel {
     /// with what it's doing and since when.
     var activityMode: Bool { didSet { defaults.set(activityMode, forKey: "activityMode") } }
     var showPaneHeaders: Bool { didSet { defaults.set(showPaneHeaders, forKey: "showPaneHeaders") } }
+    /// A new split evens out the panes beside it instead of halving the
+    /// one it came from.
+    var balancePanes: Bool { didSet { defaults.set(balancePanes, forKey: "balancePanes") } }
+    /// A sound when a program finishes, fails or needs you.
+    var statusSounds: Bool { didSet { defaults.set(statusSounds, forKey: "statusSounds") } }
+    /// The same moments as a system notification while Den isn't in front.
+    var statusNotifications: Bool {
+        didSet {
+            defaults.set(statusNotifications, forKey: "statusNotifications")
+            if statusNotifications, !oldValue { StatusNotifier.requestAuthorization() }
+        }
+    }
     /// Color a pane and its header with the background a full-screen program
     /// paints, as Rex does.
     var matchProgramBackgrounds: Bool {
@@ -539,6 +633,9 @@ final class AppModel {
     /// it on a timer.
     @ObservationIgnored private var lastOutput: [PaneID: Date] = [:]
     @ObservationIgnored private var pendingFocus: PaneID?
+    /// A pane split off with `balancePanes` on: once it shows up in a
+    /// layout, its tab's splits even out.
+    @ObservationIgnored private var pendingBalance: PaneID?
     @ObservationIgnored private var pendingSession: SessionID?
     @ObservationIgnored private var creatingFirstSession = false
     /// Grid size used for panes the server creates before their view exists.
@@ -576,11 +673,16 @@ final class AppModel {
         sidebarCollapsed = d.bool(forKey: "sidebarCollapsed")
         sidebarSide = SidebarSide(rawValue: d.string(forKey: "sidebarSide") ?? "") ?? .left
         collapsedHosts = Set(d.stringArray(forKey: "collapsedHosts") ?? [])
+        foldedSessions = Set((d.stringArray(forKey: "foldedSessions") ?? []).compactMap(UUID.init(uuidString:)).map(SessionID.init))
+        autoFoldSessions = d.object(forKey: "autoFoldSessions") as? Bool ?? true
         activityMode = d.bool(forKey: "activityMode")
         zenMode = d.bool(forKey: "zenMode")
         recentPaths = d.stringArray(forKey: "recentPaths") ?? []
         if let folder = d.string(forKey: "pathPickerFolder") { pathPickerFolders[.local] = folder }
         showPaneHeaders = d.object(forKey: "showPaneHeaders") as? Bool ?? true
+        balancePanes = d.object(forKey: "balancePanes") as? Bool ?? true
+        statusSounds = d.object(forKey: "statusSounds") as? Bool ?? true
+        statusNotifications = d.object(forKey: "statusNotifications") as? Bool ?? true
         matchProgramBackgrounds = d.object(forKey: "matchProgramBackgrounds") as? Bool ?? true
         contrastCorrection = d.object(forKey: "acc") as? Bool ?? true
         fontLigatures = d.bool(forKey: "fontLigatures")
@@ -614,6 +716,8 @@ final class AppModel {
         // Before the updater, which marks this launch in the defaults.
         announceUpdateIfNeeded(d)
         updateController = UpdateController(model: self)
+        StatusNotifier.onOpen = { [weak self] pane in self?.focus(pane) }
+        if statusNotifications { StatusNotifier.requestAuthorization() }
     }
 
     // MARK: What's new
@@ -722,7 +826,8 @@ final class AppModel {
             sessionHosts[id] ?? .local
         case .renameTab(let tab, _), .moveTab(let tab, _), .setSplitRatio(let tab, _, _):
             host(ofTab: tab)
-        case .splitPane(let pane, _, _, _), .closePane(let pane), .movePane(let pane, _, _), .input(let pane, _), .resize(let pane, _):
+        case .splitPane(let pane, _, _, _), .closePane(let pane), .movePane(let pane, _, _), .movePaneToNewTab(let pane, _, _),
+             .input(let pane, _), .resize(let pane, _):
             paneHosts[pane] ?? .local
         case .hello, .listSessions, .subscribe, .createSession, .listDirectory, .control:
             .local
@@ -966,7 +1071,10 @@ final class AppModel {
 
         case .programStatus(let id, let records):
             if statusSyncPending.remove(id) == nil, let sound = StatusChime.sound(old: programStatus[id] ?? [], new: records) {
-                chime.play(sound)
+                if statusSounds { chime.play(sound) }
+                if statusNotifications, !NSApp.isActive {
+                    StatusNotifier.post(sound, pane: id, title: title(for: id), message: StatusRecords(records).headline?.msg)
+                }
             }
             let before = StatusRecords(programStatus[id] ?? []).headline?.phase
             if statusSince[id] == nil || StatusRecords(records).headline?.phase != before { statusSince[id] = Date() }
@@ -1008,7 +1116,11 @@ final class AppModel {
     private func apply(_ layout: SessionLayout) {
         let sid = layout.session.id
         let previous = layouts[sid]
-        layouts[sid] = layout
+        if Date() < layoutAnimationUntil {
+            withAnimation(.den) { layouts[sid] = layout }
+        } else {
+            layouts[sid] = layout
+        }
 
         let live = Set(layouts.values.flatMap { $0.tabs.flatMap(\.root.panes) })
         for id in replicas.keys where !live.contains(id) {
@@ -1022,6 +1134,10 @@ final class AppModel {
             focusedPanes[tab.id] = pending
             pendingFocus = nil
             if currentSession != sid { switchSession(sid) }
+        }
+        if let pending = pendingBalance, let tab = layout.tabs.first(where: { $0.root.contains(pending) }) {
+            pendingBalance = nil
+            for (path, ratio) in tab.root.balancedRatios() { setRatio(tab: tab.id, path: path, ratio: ratio) }
         }
         if activeTabs[sid].map({ id in layout.tabs.contains { $0.id == id } }) != true {
             // A closed tab hands over to the one before it, like a browser.
@@ -1481,19 +1597,35 @@ final class AppModel {
     /// grant was given. Only a new dend applies it, and restarting ends every
     /// session it runs, so ask before doing it.
     func restartDendForPermissions() {
-        showActionToast("Restart dend to apply the permission macOS gave it?",
+        showActionToast("Restart dend?",
                         tone: .warning,
-                        detail: "This dend started before you gave it the grant, so it keeps reporting it as missing until it restarts. Restarting ends every session dend runs.",
+                        detail: "It started before macOS granted the permission, so it can't use it yet. Restarting ends its sessions.",
                         actions: [
-                            ("Restart dend", nil, { [weak self] in Task { await self?.restartLocalDend() } }),
+                            ("Restart dend", nil, { [weak self] in
+                                Task { await self?.restartLocalDend(reason: "Restarting dend to apply macOS permissions. Its sessions are ending.") }
+                            }),
                             ("Cancel", nil, {}),
                         ])
     }
 
-    private func restartLocalDend() async {
+    /// Restarts this Mac's dend on request, e.g. to pick up a newer build.
+    /// Its sessions end, so ask first.
+    func restartDend() {
+        showActionToast("Restart dend?",
+                        tone: .warning,
+                        detail: "Every session on this Mac ends, and their programs stop. A fresh dend starts in their place.",
+                        actions: [
+                            ("Restart dend", nil, { [weak self] in
+                                Task { await self?.restartLocalDend(reason: "Restarting dend. Its sessions are ending.") }
+                            }),
+                            ("Cancel", nil, {}),
+                        ])
+    }
+
+    private func restartLocalDend(reason: String) async {
         // End the old connection first; the kill then finishes closing it
         // before the replacement connects.
-        connections[.local]?.disconnect("Restarting dend to apply macOS permissions. Its sessions are ending.")
+        connections[.local]?.disconnect(reason)
         do {
             try await DendLauncher.stopRunning()
         } catch {
@@ -1671,8 +1803,8 @@ final class AppModel {
         reloadCustomThemes()
     }
 
-    func newTab(cwd: String? = nil) {
-        guard let session = currentSession else { return }
+    func newTab(cwd: String? = nil, in session: SessionID? = nil) {
+        guard let session = session ?? currentSession else { return }
         let pane = PaneID()
         pendingFocus = pane
         overview = .none
@@ -1683,11 +1815,17 @@ final class AppModel {
         guard let target = focused else { return newTab() }
         let pane = PaneID()
         pendingFocus = pane
+        pendingBalance = balancePanes ? pane : nil
+        if zoomedPane == nil { showSplitGhost(over: target, axis: axis) }
+        animateLayouts()
         zoomedPane = nil
         send(.splitPane(target: target, new: pane, axis: axis, size: sentSizes[target] ?? defaultGridSize))
     }
 
-    func close(_ pane: PaneID) { send(.closePane(pane)) }
+    func close(_ pane: PaneID) {
+        animateLayouts()
+        send(.closePane(pane))
+    }
 
     /// Moves `pane` beside `target` (or swaps them) within their tab. Needs
     /// a dend that speaks protocol 4; an older one would drop the connection.
@@ -1696,25 +1834,91 @@ final class AppModel {
             lastError = "The running dend is older than this Den and can't move panes. Your panes are unchanged. Quit dend (its shells end) and reopen Den to use the new one."
             return
         }
+        let crossTab = locate(pane)?.1.id != locate(target)?.1.id
+        if crossTab {
+            guard (protocols[host(ofPane: pane)] ?? 0) >= 9 else { return dendTooOldToMoveAcrossTabs() }
+            pendingFocus = pane
+        }
+        animateLayouts()
         send(.movePane(pane, to: target, placement: placement))
     }
 
+    /// Takes `pane` out of its tab into a new tab at the end of the session.
+    func movePaneToNewTab(_ pane: PaneID) {
+        guard let (sid, tab) = locate(pane), tab.root.panes.count > 1 else { return }
+        guard (protocols[host(ofPane: pane)] ?? 0) >= 9 else { return dendTooOldToMoveAcrossTabs() }
+        pendingFocus = pane
+        animateLayouts()
+        send(.movePaneToNewTab(pane, tab: TabID(), index: UInt16(clamping: tabs(in: sid).count)))
+    }
+
+    func moveFocusedPaneToNewTab() { focused.map(movePaneToNewTab) }
+
+    private func dendTooOldToMoveAcrossTabs() {
+        lastError = "The running dend is older than this Den and can only move panes within a tab. Your panes are unchanged. Restart dend (its shells end) to move panes between tabs."
+    }
+
+    /// Layouts arriving in the next moment spring from the old frames to the
+    /// new: the answer to a split, move or close made here. Divider drags
+    /// don't call this, so a resize tracks the pointer.
+    private func animateLayouts() { layoutAnimationUntil = Date().addingTimeInterval(0.6) }
+    @ObservationIgnored private var layoutAnimationUntil = Date.distantPast
+
     // MARK: ⌘-drag panes
+
+    /// Where a dragged pane lands.
+    enum PaneDropTarget: Equatable {
+        /// Beside a pane of the tab on screen, or swapped with it.
+        case pane(PaneID, PanePlacement)
+        /// Into another tab, right of its focused pane.
+        case tab(TabID)
+        /// The tab bar's empty space: a tab of its own.
+        case newTab
+    }
 
     struct PaneDragState: Equatable {
         let source: PaneID
         /// Pointer, in window (SwiftUI global) coordinates.
         var point: CGPoint
-        var target: PaneID?
-        var placement: PanePlacement?
+        var drop: PaneDropTarget?
     }
+
+    /// Tab bar or sidebar tabs and the strip around them, in `RootView.space`,
+    /// for dropping a dragged pane on a tab.
+    @ObservationIgnored var tabFrames: [TabID: CGRect] = [:]
+    @ObservationIgnored var tabStripFrame: CGRect?
+    /// Holding a dragged pane over a tab opens it, so it can go beside a
+    /// particular pane there.
+    @ObservationIgnored private var tabHover: (tab: TabID, task: Task<Void, Never>)?
     private(set) var paneDrag: PaneDragState?
     /// Each visible pane's frame in window coordinates, for drop hit-testing.
     @ObservationIgnored var paneFrames: [PaneID: CGRect] = [:]
 
-    /// Only when the tab has somewhere to move the pane to.
+    /// A split in flight: an outlined card grows out of the split pane,
+    /// where the new one lands, then fades as the real pane takes its place.
+    struct SplitGhost: Equatable {
+        let id = UUID()
+        /// The split pane's frame before the split, in `RootView.space`.
+        let frame: CGRect
+        let axis: SplitAxis
+    }
+    private(set) var splitGhost: SplitGhost?
+
+    private func showSplitGhost(over target: PaneID, axis: SplitAxis) {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let frame = paneFrames[target] else { return }
+        let ghost = SplitGhost(frame: frame, axis: axis)
+        splitGhost = ghost
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(340))
+            guard self?.splitGhost == ghost else { return }
+            self?.splitGhost = nil
+        }
+    }
+
+    /// Only when the pane has somewhere to go: another pane in its tab, or
+    /// another tab.
     func beginPaneDrag(_ pane: PaneID, at point: CGPoint) -> Bool {
-        guard let tab = activeLayout, tab.root.contains(pane), tab.root.panes.count > 1 else { return false }
+        guard let tab = activeLayout, tab.root.contains(pane), tab.root.panes.count > 1 || tabs.count > 1 else { return false }
         paneDrag = PaneDragState(source: pane, point: point)
         return true
     }
@@ -1722,19 +1926,58 @@ final class AppModel {
     func updatePaneDrag(at point: CGPoint) {
         guard var drag = paneDrag, let tab = activeLayout else { return }
         drag.point = point
-        let target = tab.root.panes.first { $0 != drag.source && paneFrames[$0]?.contains(point) == true }
-        drag.target = target
-        drag.placement = target.flatMap { id in
-            paneFrames[id].map { frame in PaneDrag.placement(at: CGPoint(x: point.x - frame.minX, y: point.y - frame.minY), in: frame.size) }
-        }
+        drag.drop = dropTarget(for: drag.source, at: point, in: tab)
+        if case .tab(let id)? = drag.drop { hoverTab(id) } else { cancelTabHover() }
         if drag != paneDrag { paneDrag = drag }
     }
 
-    /// Drops where the pointer is; outside any other pane it's a no-op.
+    private func dropTarget(for source: PaneID, at point: CGPoint, in tab: TabLayout) -> PaneDropTarget? {
+        if let target = tab.root.panes.first(where: { $0 != source && paneFrames[$0]?.contains(point) == true }),
+           let frame = paneFrames[target] {
+            return .pane(target, PaneDrag.placement(at: CGPoint(x: point.x - frame.minX, y: point.y - frame.minY), in: frame.size))
+        }
+        if let over = tabs.first(where: { tabFrames[$0.id]?.contains(point) == true }) {
+            return over.id == tab.id ? nil : .tab(over.id)
+        }
+        // A tab's only pane already has a tab of its own.
+        let alone = locate(source)?.1.root.panes.count == 1
+        if !alone, tabStripFrame?.contains(point) == true { return .newTab }
+        return nil
+    }
+
+    private func hoverTab(_ tab: TabID) {
+        guard tabHover?.tab != tab else { return }
+        tabHover?.task.cancel()
+        let task = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled, let self, self.paneDrag != nil else { return }
+            self.tabHover = nil
+            self.selectTab(tab)
+        }
+        tabHover = (tab, task)
+    }
+
+    private func cancelTabHover() {
+        tabHover?.task.cancel()
+        tabHover = nil
+    }
+
+    /// Drops where the pointer is; anywhere else it's a no-op.
     func endPaneDrag() {
         guard let drag = paneDrag else { return }
         paneDrag = nil
-        if let target = drag.target, let placement = drag.placement { movePane(drag.source, to: target, placement: placement) }
+        cancelTabHover()
+        switch drag.drop {
+        case .pane(let target, let placement)?:
+            movePane(drag.source, to: target, placement: placement)
+        case .tab(let id)?:
+            guard let tab = tabs.first(where: { $0.id == id }), let target = focusedPanes[id] ?? tab.root.panes.first else { return }
+            movePane(drag.source, to: target, placement: .right)
+        case .newTab?:
+            movePaneToNewTab(drag.source)
+        case nil:
+            break
+        }
     }
 
     /// Swaps the focused pane with its neighbor in `direction`; focus

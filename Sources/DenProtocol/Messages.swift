@@ -2,8 +2,9 @@ import Foundation
 
 /// What this build speaks. 4 added `movePane`, 5 `listDirectory`, 6 the
 /// `den` CLI's control channel, 7 libtermy snapshots (and the snapshot
-/// version in `hello`), 8 `needsRestart` in `HostPermissions.Access`.
-public let protocolVersion: UInt16 = 8
+/// version in `hello`), 8 `needsRestart` in `HostPermissions.Access`,
+/// 9 `movePaneToNewTab` and `movePane` across a session's tabs.
+public let protocolVersion: UInt16 = 9
 /// The oldest version dend still serves, and what clients say hello with so
 /// an older dend (which wants an exact match) keeps working. Features newer
 /// than this are used only when dend's welcome reports a version that has them.
@@ -33,7 +34,11 @@ public enum ClientMessage: Equatable, Sendable {
     case setSplitRatio(tab: TabID, path: [UInt8], ratio: Float)
     case closePane(PaneID)
     /// Protocol 4: moves a pane within its tab, beside `to` or swapped with it.
+    /// Protocol 9: `to` may be in another tab of the same session.
     case movePane(PaneID, to: PaneID, placement: PanePlacement)
+    /// Protocol 9: takes a pane out of its tab into a new tab `tab`, inserted
+    /// at `index` in its session.
+    case movePaneToNewTab(PaneID, tab: TabID, index: UInt16)
     case input(PaneID, Data)
     case resize(PaneID, GridSize)
     /// Protocol 5: the entries of a folder on dend's host, so a remote
@@ -198,6 +203,8 @@ extension ClientMessage {
             w.u8(0x0A); w.uuid(id.raw)
         case .movePane(let pane, let target, let placement):
             w.u8(0x0F); w.uuid(pane.raw); w.uuid(target.raw); w.u8(placement.rawValue)
+        case .movePaneToNewTab(let pane, let tab, let index):
+            w.u8(0x12); w.uuid(pane.raw); w.uuid(tab.raw); w.u16(index)
         case .input(let id, let bytes):
             w.u8(0x0B); w.uuid(id.raw); w.bytes(bytes)
         case .resize(let id, let size):
@@ -248,6 +255,9 @@ extension ClientMessage {
             let raw = try r.u8("move.placement")
             guard let placement = PanePlacement(rawValue: raw) else { throw .invalidTag(raw, type: "PanePlacement") }
             return .movePane(pane, to: target, placement: placement)
+        case 0x12:
+            return .movePaneToNewTab(PaneID(try r.uuid("breakPane.pane")), tab: TabID(try r.uuid("breakPane.tab")),
+                                     index: try r.u16("breakPane.index"))
         case 0x0B: return .input(PaneID(try r.uuid("input.id")), try r.bytes("input.bytes"))
         case 0x0C: return .resize(PaneID(try r.uuid("resize.id")), try r.gridSize("resize.size"))
         case 0x10: return .listDirectory(request: try r.u32("list.request"), path: try r.string("list.path"))

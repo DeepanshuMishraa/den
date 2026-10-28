@@ -573,8 +573,8 @@ final class TerminalView: MTKView {
         }
         // ⌘-drag picks the pane up to move it.
         if mode == .interactive, event.modifierFlags.contains(.command), let model, model.beginPaneDrag(paneID, at: windowPoint(event)) {
-            draggingPane = true
             NSCursor.closedHand.set()
+            PaneDragTracker.start(model)
             return
         }
         if wantsSelection(event) {
@@ -592,12 +592,6 @@ final class TerminalView: MTKView {
             swallowingClick = false
             return
         }
-        if draggingPane {
-            draggingPane = false
-            model?.endPaneDrag()
-            updateCursor(event.modifierFlags)
-            return
-        }
         if selecting {
             // Checked before the release, whose copy-on-select clears it.
             let selected = replica?.terminal.selectedText() != nil
@@ -612,10 +606,6 @@ final class TerminalView: MTKView {
 
     override func mouseDragged(with event: NSEvent) {
         if swallowingClick { return }
-        if draggingPane {
-            NSCursor.closedHand.set()
-            return model?.updatePaneDrag(at: windowPoint(event)) ?? ()
-        }
         if selecting { return select(event, .drag) }
         mouseReport(event, .motion, .left)
     }
@@ -648,12 +638,11 @@ final class TerminalView: MTKView {
         updateCursor(event.modifierFlags)
     }
 
-    private var draggingPane = false
     /// A ⌘-click opened a link on press; its drag and release go nowhere.
     private var swallowingClick = false
 
     private func updateCursor(_ flags: NSEvent.ModifierFlags) {
-        guard mode == .interactive, !draggingPane else { return }
+        guard mode == .interactive, model?.paneDrag == nil else { return }
         if hoveredLink != nil { return NSCursor.pointingHand.set() }
         let movable = (model?.activeLayout?.root.panes.count ?? 0) > 1
         (flags.contains(.command) && movable ? NSCursor.openHand : NSCursor.iBeam).set()

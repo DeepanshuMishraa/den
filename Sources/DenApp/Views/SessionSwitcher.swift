@@ -195,7 +195,9 @@ struct SessionMenu: View {
         .foregroundStyle(fg)
         .padding(.horizontal, 8)
         .frame(height: 26)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(highlighted ? theme.accent : .clear))
+        .background {
+            if highlighted { Elevated(shape: RoundedRectangle(cornerRadius: 6, style: .continuous), theme: theme, fill: theme.accent) }
+        }
     }
 
     /// A host's name with a status dot; right-click a remote one to remove it.

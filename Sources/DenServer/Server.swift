@@ -296,9 +296,35 @@ public actor DenServer {
         case .movePane(let pane, let target, let placement):
             guard let sid = paneSession[pane], let session = session(sid),
                   let i = session.tabs.firstIndex(where: { $0.root.contains(pane) }),
-                  let moved = session.tabs[i].root.moving(pane, to: target, placement: placement) else { return }
-            session.tabs[i].root = moved
+                  let j = session.tabs.firstIndex(where: { $0.root.contains(target) }) else { return }
+            if i == j {
+                guard let moved = session.tabs[i].root.moving(pane, to: target, placement: placement) else { return }
+                session.tabs[i].root = moved
+            } else {
+                guard let moved = SplitNode.moving(pane, from: session.tabs[i].root, to: target, in: session.tabs[j].root,
+                                                   placement: placement) else { return }
+                session.tabs[j].root = moved.dest
+                if let source = moved.source {
+                    session.tabs[i].root = source
+                } else {
+                    // The pane was its tab's last; the tab goes with it.
+                    let closed = session.tabs.remove(at: i).id
+                    emit(.tabClosed(session: sid, tab: closed))
+                }
+                broadcastSessions()
+            }
             broadcastLayout(session)
+            emit(.layoutChanged(session: sid))
+
+        case .movePaneToNewTab(let pane, let tabID, let index):
+            guard let sid = paneSession[pane], let session = session(sid),
+                  let i = session.tabs.firstIndex(where: { $0.root.contains(pane) }),
+                  let rest = session.tabs[i].root.removing(pane) else { return }
+            session.tabs[i].root = rest
+            session.tabs.insert(TabLayout(id: tabID, root: .pane(pane)), at: min(Int(index), session.tabs.count))
+            broadcastLayout(session)
+            broadcastSessions()
+            emit(.tabCreated(session: sid, tab: tabID))
             emit(.layoutChanged(session: sid))
 
         case .closePane(let id):

@@ -155,6 +155,22 @@ extension SplitNode {
         }
     }
 
+    /// Protocol 9: moves `pane` out of `source` into another tab's tree,
+    /// beside `target` or swapped with it. The new `source` is nil when the
+    /// pane was its only one. Nil when `pane` or `target` is missing, or
+    /// both trees are the same tab (use `moving(_:to:placement:)`).
+    public static func moving(_ pane: PaneID, from source: SplitNode, to target: PaneID, in dest: SplitNode,
+                              placement: PanePlacement) -> (source: SplitNode?, dest: SplitNode)? {
+        guard source.contains(pane), dest.contains(target), !dest.contains(pane), !source.contains(target) else { return nil }
+        switch placement {
+        case .swap:
+            return (source.mapPanes { $0 == pane ? target : $0 }, dest.mapPanes { $0 == target ? pane : $0 })
+        case .left, .right, .above, .below:
+            let axis: SplitAxis = placement == .left || placement == .right ? .horizontal : .vertical
+            return (source.removing(pane), dest.splitting(target, with: pane, axis: axis, newFirst: placement == .left || placement == .above))
+        }
+    }
+
     /// The pane across `pane`'s edge in `direction`: the nearest one that
     /// overlaps it sideways, the first in tree order on ties.
     /// The innermost split along `axis` holding `pane`: its path (0 first
@@ -171,6 +187,27 @@ extension SplitNode {
         if first.contains(pane) { (index, child) = (0, first) } else if second.contains(pane) { (index, child) = (1, second) } else { return nil }
         if let inner = child.enclosingSplit(of: pane, axis: axis, prefix: prefix + [index]) { return inner }
         return a == axis ? (prefix, ratio) : nil
+    }
+
+    /// The splits whose ratio differs from an even share, with the ratio that
+    /// gives every pane along a run of same-axis splits equal room (a | b | c
+    /// each a third). A child split the other way counts as one pane.
+    public func balancedRatios() -> [(path: [UInt8], ratio: Float)] {
+        balancedRatios(prefix: [])
+    }
+
+    private func balancedRatios(prefix: [UInt8]) -> [(path: [UInt8], ratio: Float)] {
+        guard case .split(let axis, let ratio, let first, let second) = self else { return [] }
+        let a = Float(first.span(along: axis))
+        let even = a / (a + Float(second.span(along: axis)))
+        let own = abs(ratio - even) > 1e-4 ? [(path: prefix, ratio: even)] : []
+        return own + first.balancedRatios(prefix: prefix + [0]) + second.balancedRatios(prefix: prefix + [1])
+    }
+
+    /// Panes side by side along `axis`: a run of same-axis splits adds up.
+    private func span(along axis: SplitAxis) -> Int {
+        guard case .split(let a, _, let first, let second) = self, a == axis else { return 1 }
+        return first.span(along: axis) + second.span(along: axis)
     }
 
     public func neighbor(of pane: PaneID, toward direction: PaneDirection) -> PaneID? {

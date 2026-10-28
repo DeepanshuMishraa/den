@@ -202,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])))
         main.addItem(menu("Pane", items([
             .splitRight, .splitDown, nil, .zoomPane, .nextPane, .previousPane, nil,
-            .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown, nil,
+            .movePaneLeft, .movePaneRight, .movePaneUp, .movePaneDown, .movePaneToNewTab, nil,
             .focusPaneLeft, .focusPaneDown, .focusPaneUp, .focusPaneRight, nil,
             .resizePaneLeft, .resizePaneDown, .resizePaneUp, .resizePaneRight,
         ])))

@@ -130,7 +130,7 @@ struct PaneCard: View {
                         .fill(Color.black.opacity(0.4))
                         .allowsHitTesting(false)
                 } else {
-                    PaneDropRegions(active: drag.target == pane ? drag.placement : nil, theme: theme, radius: max(radius - 3, 4))
+                    PaneDropRegions(active: dropPlacement(drag), theme: theme, radius: max(radius - 3, 4))
                 }
             }
         }
@@ -144,6 +144,138 @@ struct PaneCard: View {
         }
         .onHover { hovering = $0 }
         .animation(.denFast, value: focused)
+    }
+
+    private func dropPlacement(_ drag: AppModel.PaneDragState) -> PanePlacement? {
+        guard case .pane(let target, let placement)? = drag.drop, target == pane else { return nil }
+        return placement
+    }
+}
+
+/// The tab on screen: its panes laid out flat, each card keyed by its pane,
+/// so a split, move, swap or close springs every card from its old frame to
+/// its new one, as in Rex, instead of rebuilding the cards whose place in
+/// the split tree changed.
+struct PaneDeck: View {
+    let tab: TabLayout
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        GeometryReader { geo in
+            let gap = model.density.gap
+            let layout = DeckLayout(tab.root, in: CGRect(origin: .zero, size: geo.size), gap: gap)
+            ZStack(alignment: .topLeading) {
+                ForEach(layout.panes, id: \.pane) { slot in
+                    PaneCard(pane: slot.pane, tab: tab.id)
+                        .frame(width: slot.rect.width, height: slot.rect.height)
+                        .position(x: slot.rect.midX, y: slot.rect.midY)
+                        .transition(.asymmetric(insertion: .scale(scale: 0.96).combined(with: .opacity), removal: .opacity))
+                }
+                ForEach(layout.splits, id: \.path) { split in
+                    SplitTreeView.Divider(axis: split.axis, gap: gap, firstSize: split.firstSize) { size in
+                        model.setRatio(tab: tab.id, path: split.path, ratio: Float(size / max(split.total - gap, 1)))
+                    }
+                    .frame(width: split.gap.width, height: split.gap.height)
+                    .position(x: split.gap.midX, y: split.gap.midY)
+                }
+            }
+        }
+    }
+}
+
+/// Where each pane and divider of a split tree sits, with `gap` between
+/// siblings: the same arithmetic as `SplitTreeView`, flattened.
+struct DeckLayout {
+    struct Slot {
+        let pane: PaneID
+        let rect: CGRect
+    }
+
+    struct Split {
+        let path: [UInt8]
+        let axis: SplitAxis
+        /// The gap between the two children, where the divider sits.
+        let gap: CGRect
+        let firstSize: CGFloat
+        /// The split's length along its axis, gap included.
+        let total: CGFloat
+    }
+
+    private(set) var panes: [Slot] = []
+    private(set) var splits: [Split] = []
+
+    init(_ root: SplitNode, in rect: CGRect, gap: CGFloat) {
+        place(root, in: rect, path: [], gap: gap)
+    }
+
+    private mutating func place(_ node: SplitNode, in rect: CGRect, path: [UInt8], gap: CGFloat) {
+        switch node {
+        case .pane(let id):
+            panes.append(Slot(pane: id, rect: rect))
+        case .split(let axis, let ratio, let first, let second):
+            let horizontal = axis == .horizontal
+            let total = horizontal ? rect.width : rect.height
+            let a = max(0, (total - gap) * CGFloat(ratio))
+            let b = max(0, total - a - gap)
+            let (firstRect, gapRect, secondRect) = horizontal
+                ? (CGRect(x: rect.minX, y: rect.minY, width: a, height: rect.height),
+                   CGRect(x: rect.minX + a, y: rect.minY, width: gap, height: rect.height),
+                   CGRect(x: rect.minX + a + gap, y: rect.minY, width: b, height: rect.height))
+                : (CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: a),
+                   CGRect(x: rect.minX, y: rect.minY + a, width: rect.width, height: gap),
+                   CGRect(x: rect.minX, y: rect.minY + a + gap, width: rect.width, height: b))
+            place(first, in: firstRect, path: path + [0], gap: gap)
+            splits.append(Split(path: path, axis: axis, gap: gapRect, firstSize: a, total: total))
+            place(second, in: secondRect, path: path + [1], gap: gap)
+        }
+    }
+}
+
+/// The outlined card that grows out of a pane as it splits, toward where
+/// the new pane lands, as in Rex. It fades once the real pane is in place.
+struct SplitGhostCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let ghost = model.splitGhost {
+                Grow(ghost: ghost).id(ghost.id).transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeOut(duration: 0.16), value: model.splitGhost)
+        .allowsHitTesting(false)
+    }
+
+    private struct Grow: View {
+        let ghost: AppModel.SplitGhost
+        @Environment(AppModel.self) private var model
+        @State private var grown = false
+
+        var body: some View {
+            let theme = model.theme
+            let gap = model.density.gap
+            let f = ghost.frame
+            let side = ghost.axis == .horizontal
+            // The new pane's slot: the far half of the split pane.
+            let slot = side
+                ? CGRect(x: f.midX + gap / 2, y: f.minY, width: max(f.width / 2 - gap / 2, 0), height: f.height)
+                : CGRect(x: f.minX, y: f.midY + gap / 2, width: f.width, height: max(f.height / 2 - gap / 2, 0))
+            let radius = max(model.density.cornerRadius, 6)
+            HStack(spacing: 7) {
+                HeaderGlyph(kind: .shell, color: theme.secondaryText)
+                Text(ProgramKind.shell.name).uiFont(size: 13, weight: .semibold).foregroundStyle(theme.secondaryText)
+            }
+            .padding(.leading, 13)
+            .frame(height: 34)
+            .frame(width: side && !grown ? 0 : slot.width, height: !side && !grown ? 0 : slot.height, alignment: .topLeading)
+            .background(model.surfaces.card)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(theme.accent.opacity(0.7), lineWidth: 1))
+            .shadow(color: .black.opacity(theme.isDark ? 0.3 : 0.1), radius: 10, y: 4)
+            .offset(x: slot.minX, y: slot.minY)
+            .onAppear { withAnimation(.denFast) { grown = true } }
+        }
     }
 }
 
@@ -199,7 +331,7 @@ struct SplitTreeView: View {
         }
     }
 
-    private struct Divider: View {
+    struct Divider: View {
         let axis: SplitAxis
         let gap: CGFloat
         let firstSize: CGFloat

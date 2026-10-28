@@ -443,6 +443,9 @@ private struct ToastButton: View {
                     Text(shortcut).font(font.weight(.medium)).opacity(0.6)
                 }
             }
+            .lineLimit(1)
+            // A capsule never wraps its label; the message gives way instead.
+            .fixedSize()
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(Capsule().fill(fill))
@@ -839,5 +842,29 @@ enum Fuzzy {
             out.append(piece)
         }
         return Text(out)
+    }
+}
+
+/// A raised surface, as Rex draws the active tab, selected rows and toggles
+/// that are on: a fill with a faint sheen, a lit top edge fading into the
+/// border, and a tight contact shadow under a soft ambient one. Tuned per
+/// scheme so it lifts just as much on light and dark themes.
+struct Elevated<S: InsettableShape>: View {
+    let shape: S
+    let theme: Theme
+    var fill: Color?
+
+    var body: some View {
+        let dark = theme.isDark
+        // Dark themes lift with light (a brighter face and a lit rim), since
+        // a shadow barely shows on a dark ground; light themes with shadow.
+        shape.fill(fill ?? theme.activeTab)
+            .overlay(shape.fill(LinearGradient(colors: [.white.opacity(dark ? 0.1 : 0.5), .white.opacity(dark ? 0.02 : 0)],
+                                               startPoint: .top, endPoint: .bottom)))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(dark ? 0.3 : 0.95), .white.opacity(dark ? 0.04 : 0)],
+                                                       startPoint: .top, endPoint: .bottom), lineWidth: dark ? 0.75 : 0.5))
+            .overlay(shape.strokeBorder(theme.activeTabBorder, lineWidth: 0.5))
+            .shadow(color: .black.opacity(dark ? 0.7 : 0.09), radius: dark ? 0.8 : 0.6, y: dark ? 1 : 0.6)
+            .shadow(color: .black.opacity(dark ? 0.5 : 0.07), radius: dark ? 7 : 5, y: dark ? 3.5 : 2.5)
     }
 }

@@ -117,11 +117,13 @@ struct ProgramTile: View {
             if case .picture(let asset) = kind.glyph {
                 PictureIcon(asset: asset).frame(width: width, height: height).clipShape(shape)
             }
-            // Glass: a soft sheen on the upper half and a crisp top edge.
-            shape.fill(LinearGradient(colors: [.white.opacity(0.2), .white.opacity(0)], startPoint: .top, endPoint: .center))
+            // Glass: a soft sheen on the upper half, a shade settling at the
+            // bottom, and a crisp lit top edge, so the tile reads as a keycap.
+            shape.fill(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0)], startPoint: .top, endPoint: .center))
+            shape.fill(LinearGradient(colors: [.black.opacity(0), .black.opacity(0.14)], startPoint: .center, endPoint: .bottom))
             shape.strokeBorder(
-                LinearGradient(colors: [.white.opacity(0.32), .white.opacity(0.04)], startPoint: .top, endPoint: .bottom),
-                lineWidth: 0.5
+                LinearGradient(colors: [.white.opacity(dark ? 0.55 : 0.4), .white.opacity(0.04)], startPoint: .top, endPoint: .bottom),
+                lineWidth: dark ? 0.75 : 0.5
             )
             mark
         }
@@ -131,7 +133,9 @@ struct ProgramTile: View {
                 .overlay(shape.strokeBorder(.black.opacity(dark ? 0.3 : 0.1), lineWidth: 0.5))
                 .padding(-1.25)
         )
-        .shadow(color: .black.opacity(dark ? 0.35 : 0.14), radius: 1, y: 0.6)
+        // A tight contact shadow under a soft lift.
+        .shadow(color: .black.opacity(dark ? 0.65 : 0.16), radius: 0.8, y: dark ? 0.9 : 0.6)
+        .shadow(color: .black.opacity(dark ? 0.45 : 0.08), radius: dark ? 3.5 : 2.5, y: dark ? 2 : 1.4)
     }
 
     @ViewBuilder private var mark: some View {

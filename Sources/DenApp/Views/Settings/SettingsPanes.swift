@@ -52,8 +52,17 @@ struct AppearanceSettings: View {
                                isOn: Binding(get: { model.activityMode }, set: { value in
                                    if value != model.activityMode { withAnimation(.den) { model.toggleActivityMode() } }
                                }))
+                SettingsToggle(title: "Fold idle sessions", detail: "In the sidebar, sessions you're not in fold to one line after a few seconds untouched.",
+                               isOn: Binding(get: { model.autoFoldSessions }, set: { value in withAnimation(.den) { model.autoFoldSessions = value } }))
                 SettingsToggle(title: "Zen Mode", detail: "Hide the tab bar or sidebar until the pointer reaches the window's edge.",
                                isOn: Binding(get: { model.zenMode }, set: { value in withAnimation(.den) { model.zenMode = value } }))
+            }
+
+            SettingsSection("Activity") {
+                SettingsToggle(title: "Play sounds", detail: "Chime when a program finishes, fails or needs your input.",
+                               isOn: $model.statusSounds)
+                SettingsToggle(title: "System notifications", detail: "Post the same moments to Notification Center while Den isn't in front.",
+                               isOn: $model.statusNotifications)
             }
 
             SettingsSection("Panes") {
@@ -62,6 +71,8 @@ struct AppearanceSettings: View {
                                                (Density.compact, "Compact", "rectangle.split.2x2")],
                                      selection: Binding(get: { model.density }, set: { value in withAnimation(.den) { model.density = value } }))
                 }
+                SettingsToggle(title: "Balance new splits", detail: "Give every pane in a row or column an equal share when you split.",
+                               isOn: $model.balancePanes)
                 SettingsToggle(title: "Show pane headers", isOn: Binding(
                     get: { model.showPaneHeaders },
                     set: { value in withAnimation(.den) { model.showPaneHeaders = value } }))
@@ -735,7 +746,7 @@ struct ShortcutSettings: View {
                       .peek, .leavePeek, .showAllSessions, .toggleFullScreen]),
             ("Panes", [.splitRight, .splitDown, .zoomPane, .nextPane, .previousPane, .focusPaneLeft, .focusPaneDown, .focusPaneUp,
                        .focusPaneRight, .resizePaneLeft, .resizePaneDown, .resizePaneUp, .resizePaneRight, .movePaneLeft,
-                       .movePaneRight, .movePaneUp, .movePaneDown]),
+                       .movePaneRight, .movePaneUp, .movePaneDown, .movePaneToNewTab]),
             ("Sessions", [.changeSession, .goToSession, .renameSession, .previousSession, .nextSession, .closeSession, .previousHost, .nextHost, .addRemoteHost]),
             ("Tabs", [.renameTab, .tidyTabTitle, .nextTab, .previousTab, .moveTabLeft, .moveTabRight, .goToTab, .lastTab]),
             ("Window", [.minimize]),

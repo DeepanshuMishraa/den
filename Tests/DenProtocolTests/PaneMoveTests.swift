@@ -21,6 +21,40 @@ import Testing
         #expect(SplitNode.pane(a).enclosingSplit(of: a, axis: .horizontal) == nil)
     }
 
+    /// Splitting right twice gives a | (b | c); balanced, each takes a third.
+    @Test func balancingGivesEveryPaneOnAnAxisAnEqualShare() {
+        let row = SplitNode.split(axis: .horizontal, ratio: 0.5, first: .pane(a),
+                                  second: .split(axis: .horizontal, ratio: 0.5, first: .pane(b), second: .pane(c)))
+        let ratios = row.balancedRatios()
+        #expect(ratios.count == 1)
+        #expect(ratios.first?.path == [])
+        #expect(abs((ratios.first?.ratio ?? 0) - 1.0 / 3) < 1e-6)
+        // a | (b / c) is already even: a stack counts as one column.
+        #expect(tree.balancedRatios().isEmpty)
+        #expect(SplitNode.pane(a).balancedRatios().isEmpty)
+    }
+
+    @Test func movingIntoAnotherTabDocksBesideTheTarget() {
+        let d = PaneID()
+        let other = SplitNode.pane(d)
+        // c goes right of d; its old tab closes up around a and b.
+        let moved = SplitNode.moving(c, from: tree, to: d, in: other, placement: .right)
+        #expect(moved?.source == .split(axis: .horizontal, ratio: 0.5, first: .pane(a), second: .pane(b)))
+        #expect(moved?.dest == .split(axis: .horizontal, ratio: 0.5, first: .pane(d), second: .pane(c)))
+        // A tab's only pane leaves it empty.
+        #expect(SplitNode.moving(a, from: .pane(a), to: d, in: other, placement: .below)?.source == nil)
+    }
+
+    @Test func swappingAcrossTabsTradesPlaces() {
+        let d = PaneID()
+        let moved = SplitNode.moving(a, from: tree, to: d, in: .pane(d), placement: .swap)
+        #expect(moved?.source == .split(axis: .horizontal, ratio: 0.5, first: .pane(d), second: .split(axis: .vertical, ratio: 0.5, first: .pane(b), second: .pane(c))))
+        #expect(moved?.dest == .pane(a))
+        // Nothing to do when the target is missing or the pane is already there.
+        #expect(SplitNode.moving(a, from: tree, to: PaneID(), in: .pane(d), placement: .left) == nil)
+        #expect(SplitNode.moving(a, from: tree, to: b, in: tree, placement: .left) == nil)
+    }
+
     @Test func swapKeepsTheShape() {
         #expect(tree.moving(a, to: c, placement: .swap)
             == .split(axis: .horizontal, ratio: 0.5, first: .pane(c), second: .split(axis: .vertical, ratio: 0.5, first: .pane(b), second: .pane(a))))

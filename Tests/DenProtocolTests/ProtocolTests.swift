@@ -22,6 +22,7 @@ import Testing
             .splitPane(target: PaneID(), new: PaneID(), axis: .vertical, size: size),
             .setSplitRatio(tab: TabID(), path: [0, 1, 1], ratio: 0.3),
             .closePane(PaneID()),
+            .movePaneToNewTab(PaneID(), tab: TabID(), index: 2),
             .input(PaneID(), Data("ls -la\r".utf8)),
             .resize(PaneID(), size),
             .listDirectory(request: 7, path: "~/src"),

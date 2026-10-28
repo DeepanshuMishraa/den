@@ -36,10 +36,25 @@ struct Sidebar: View {
                                 SidebarHostHeader(host: host)
                                 if !model.isCollapsed(host) {
                                     ForEach(model.sessions(on: host), id: \.id) { session in
-                                        SessionHeader(session: session)
-                                        ForEach(model.tabs(in: session.id), id: \.id) { tab in
-                                            SidebarRow(tab: tab, selected: session.id == model.currentSession && tab.id == model.activeTab)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            SessionHeader(session: session, controls: true)
+                                            if model.isFolded(session.id) {
+                                                FoldedSessionRow(session: session)
+                                                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                                            } else {
+                                                ForEach(model.tabs(in: session.id), id: \.id) { tab in
+                                                    SidebarRow(tab: tab, selected: session.id == model.currentSession && tab.id == model.activeTab)
+                                                        .transition(.opacity.combined(with: .offset(y: -6)))
+                                                }
+                                            }
+                                            if session.id == model.currentSession, model.paneDrag?.drop == .newTab {
+                                                NewTabDropPill(theme: model.theme)
+                                                    .transition(.scale(scale: 0.85, anchor: .top).combined(with: .opacity))
+                                            }
                                         }
+                                        .onHover { model.hoverSession(session.id, inside: $0) }
+                                        .onAppear { model.sessionWentIdle(session.id) }
+                                        .animation(.den, value: model.isFolded(session.id))
                                     }
                                 }
                             }
@@ -52,8 +67,10 @@ struct Sidebar: View {
                 .animation(.den, value: model.orderedSessions.map(\.id))
                 .animation(.den, value: model.collapsedHosts)
                 .animation(.den, value: model.activityMode)
+                .animation(.denFast, value: model.paneDrag?.drop == .newTab)
             }
             .scrollIndicators(.never)
+            .paneDropTabStrip(model: model)
 
             HStack {
                 IconButton(symbol: "line.3.horizontal.circle", size: 14) { model.palette = .root }
@@ -168,24 +185,94 @@ private struct SidebarHostHeader: View {
 /// A session's name over its tabs; tap to switch to it.
 private struct SessionHeader: View {
     let session: SessionSummary
+    /// Hovering shows a new-tab button and the fold chevron, as in Rex.
+    var controls = false
     @Environment(AppModel.self) private var model
+    @State private var hovering = false
 
     var body: some View {
-        Text(session.name)
-            .uiFont(size: 12, weight: .medium)
-            .foregroundStyle(model.theme.tertiaryText)
-            .overlay(alignment: .trailing) {
-                if session.id != model.currentSession, model.sessionWantsAttention(session.id) {
-                    Circle().fill(model.theme.accent).frame(width: 6, height: 6).offset(x: 10)
+        let theme = model.theme
+        let folded = model.isFolded(session.id)
+        HStack(spacing: 0) {
+            Text(session.name)
+                .uiFont(size: 12, weight: .medium)
+                .foregroundStyle(theme.tertiaryText)
+                .overlay(alignment: .trailing) {
+                    if session.id != model.currentSession, model.sessionWantsAttention(session.id) {
+                        Circle().fill(theme.accent).frame(width: 6, height: 6).offset(x: 10)
+                    }
                 }
+            Spacer(minLength: 4)
+            if controls, hovering {
+                HStack(spacing: 0) {
+                    IconButton(symbol: "plus.circle", size: 12, frame: CGSize(width: 22, height: 20)) {
+                        withAnimation(.den) { model.unfoldForNow(session.id) }
+                        model.newTab(in: session.id)
+                    }
+                    .help("New Tab in \(session.name)")
+                    IconButton(symbol: "chevron.down", size: 10.5, frame: CGSize(width: 22, height: 20)) {
+                        withAnimation(.den) { model.toggleFolded(session.id) }
+                    }
+                    .rotationEffect(.degrees(folded ? -90 : 0))
+                    .help(folded ? "Unfold" : "Fold to One Line")
+                }
+                .transition(.opacity)
             }
-            .padding(.horizontal, 10)
-            // Equal room above and below: the name sits midway between the
-            // previous session's last tab and its own first one.
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture { model.switchSession(session.id) }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 2)
+        // Equal room above and below: the name sits midway between the
+        // previous session's last tab and its own first one.
+        .frame(height: 34)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { model.switchSession(session.id) }
+        .onHover { inside in withAnimation(.denFast) { hovering = inside } }
+        .animation(.den, value: folded)
+    }
+}
+
+/// A folded session: one line with its tabs' icons fanned in a stack and
+/// what's on screen. Clicking opens it for a look; it folds back on its own.
+private struct FoldedSessionRow: View {
+    let session: SessionSummary
+    @Environment(AppModel.self) private var model
+    @State private var hovering = false
+
+    var body: some View {
+        let theme = model.theme
+        let tabs = model.tabs(in: session.id)
+        let current = session.id == model.currentSession
+        let lead = tabs.first { current && $0.id == model.activeTab } ?? tabs.first
+        // The same deck a tab draws for its panes: the lead tab's program in
+        // front, the other tabs' as cards fanned up behind it.
+        let others = tabs.filter { $0.id != lead?.id }
+        let deck = (lead.map { [$0] } ?? []).compactMap { model.deck(for: $0).first }
+            + others.compactMap { model.deck(for: $0).first }
+        HStack(spacing: 9) {
+            DeckIcon(deck: deck, height: 14, badge: tabs.contains(where: model.hasActivity), fan: .up)
+            Text(lead.map(model.tabTitle) ?? session.name)
+                .uiFont(size: 13, weight: .medium)
+                .foregroundStyle(current ? theme.chromeText : theme.secondaryText)
+                .lineLimit(1)
+            Spacer(minLength: 2)
+            if tabs.count > 1 {
+                Text("\(tabs.count)")
+                    .uiFont(size: 11, weight: .semibold)
+                    .foregroundStyle(theme.tertiaryText)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+            if current { Elevated(shape: shape, theme: theme) } else { shape.fill(hovering ? theme.hover : .clear) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.den) { model.unfoldForNow(session.id) } }
+        .onHover { hovering = $0 }
+        .help("\(tabs.count) tabs, folded")
     }
 }
 
@@ -247,8 +334,9 @@ struct ActivityModeToggle: View {
                 .font(.system(size: 14, weight: on ? .semibold : .medium))
                 .foregroundStyle(on ? theme.chromeText : theme.secondaryText)
                 .frame(width: 28, height: 28)
-                .background(Circle().fill(on ? theme.activeTab : (hovering ? theme.hover : .clear)))
-                .overlay(Circle().strokeBorder(on ? theme.activeTabBorder : .clear, lineWidth: 0.5))
+                .background {
+                    if on { Elevated(shape: Circle(), theme: theme) } else { Circle().fill(hovering ? theme.hover : .clear) }
+                }
                 .contentShape(Circle())
         }
         .buttonStyle(.hitArea)
@@ -364,16 +452,17 @@ struct SidebarRow: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
-        )
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+            if selected { Elevated(shape: shape, theme: theme) } else { shape.fill(hovering ? theme.hover : .clear) }
+        }
         .contentShape(Rectangle())
         // Before tabCard: its tap (which hides the card) sits on this view,
         // and a tap attached outside it would never fire.
         .onTapGesture { withAnimation(.denFast) { model.selectTab(tab.id) } }
-        .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading)
+        .paneDropHighlight(model.paneDrag?.drop == .tab(tab.id), theme: theme, radius: 16)
+        .paneDropTab(tab.id, model: model)
+        .tabCard(tab, edge: model.sidebarSide.edge == .leading ? .trailing : .leading, enabled: model.paneDrag == nil)
         .onHover { hovering = $0 }
     }
 }
@@ -444,9 +533,11 @@ struct ActivityRow: View {
         let shape = RoundedRectangle(cornerRadius: style == .menu ? 8 : 12, style: .continuous)
         switch style {
         case .sidebar:
-            shape
-                .fill(selected ? theme.activeTab : (hovering ? theme.hover : .clear))
-                .overlay(shape.strokeBorder(selected ? theme.activeTabBorder : .clear, lineWidth: 0.5))
+            if selected {
+                Elevated(shape: shape, theme: theme)
+            } else {
+                shape.fill(hovering ? theme.hover : .clear)
+            }
         case .menu:
             shape.fill(hovering ? theme.accent : .clear)
         }
